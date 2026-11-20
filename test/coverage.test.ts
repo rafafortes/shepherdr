@@ -96,6 +96,11 @@ describe('reading what the tests ran', () => {
     expect(r.findIndex((x) => x.startsWith('server/d.ts'))).toBeLessThan(r.findIndex((x) => x.startsWith('server/b.ts')))
     expect(r.find((x) => x.startsWith('server/d.ts'))).toContain('no test loads it')
     expect(C.report({ 'server/e.ts': { lines: 0, missed: [], measured: true } })).toContain('100.0%  whole')
+    // a file only a browser test runs, in a run that measured nothing: out of the server's share too, not just the files
+    const mixed = { 'server/a.ts': { lines: 10, missed: [], measured: true }, 'shared/b.ts': { lines: 4, missed: [2], measured: true }, 'src/c.tsx': { lines: 0, missed: [], measured: false } }
+    expect(C.summary(mixed, 'absent', new Set(['shared/b.ts']))).toBe(
+      "Coverage: 100.0% of the server's lines (10 of 10), the screen not compared this run (no browser could start); 1 of 1 files run whole",
+    )
   })
 })
 
@@ -367,6 +372,7 @@ describe('the command', () => {
     expect(C.screenRecorded(w.dir)).toBe(0)
     expect(C.screenState(w.dir, 2)).toBe('incomplete')
     expect(C.screenState(w.dir, 2, true)).toBe('absent')
+    expect(C.screenState(w.dir, null, true)).toBe('absent')
     w.run(
       [
         [1, 1],
@@ -386,6 +392,9 @@ describe('the command', () => {
     )
     expect(C.screenRecorded(w.dir)).toBe(1)
     expect(C.screenState(w.dir, 2)).toBe('incomplete')
+    // the probe could not start a browser but the tests did: what they recorded is measured, whatever the probe said
+    expect(C.screenState(w.dir, 1, true)).toBe('measured')
+    expect(C.screenState(w.dir, 2, true)).toBe('absent')
     expect(C.screenState(w.dir, 1)).toBe('measured')
     expect(C.screenState(w.dir, null)).toBe('measured')
   })

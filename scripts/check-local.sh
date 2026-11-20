@@ -268,6 +268,9 @@ declare -a failed=()
 declare -a notes=()
 declare -a what=()
 
+# the probe's Chromium line is the only thing that sets this, below: never one inherited from the caller's environment
+unset SHEPHERDR_CHECK_SCREEN_ABSENT
+
 say() { printf '%s\n' "$1" | tee -a "$V"; }
 
 # the note a check wrote for its own line: tests say how many ran, coverage its percentage, build its time, the dist

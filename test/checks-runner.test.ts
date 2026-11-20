@@ -136,6 +136,19 @@ describe('the discovered checks', () => {
     }
   })
 
+  test("the variable the probe sets never comes from the caller: this host's Chromium decides alone", () => {
+    const seen = `printf 'absent=%s\\n' "\${SHEPHERDR_CHECK_SCREEN_ABSENT:-}" >> "$HOME/absent.txt"`
+    const f = fixture({ '10-one': check(), '30-coverage': check(seen) })
+    // the caller's environment says no browser can start; this host's probe says Chromium is fine
+    process.env.SHEPHERDR_CHECK_SCREEN_ABSENT = '1'
+    try {
+      expect(f.run().code).toBe(0)
+    } finally {
+      delete process.env.SHEPHERDR_CHECK_SCREEN_ABSENT
+    }
+    expect(readFileSync(join(f.home, 'absent.txt'), 'utf8')).toBe('absent=\n')
+  })
+
   test('only the default branch gets the record and map flags a baseline needs', () => {
     const envBody = `printf 'record=%s map=%s\\n' "$SHEPHERDR_CHECK_RECORD" "$SHEPHERDR_CHECK_MAP" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"`
     for (const [branch, want] of [

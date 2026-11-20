@@ -138,13 +138,13 @@ export const screenWhy = (screen: Screen) => (screen === 'absent' ? 'no browser 
 
 /** the counts in a line: the server's and the screen's share of lines run, and the files run whole */
 export function summary(now: Record<string, FileCount>, screen: Screen = 'measured', browserOnly: Set<string> = new Set()): string {
-  const part = (screen: boolean) => {
-    const fs = Object.entries(now).filter(([f, c]) => c.measured && isScreen(f) === screen)
+  const part = (forScreen: boolean) => {
+    const fs = Object.entries(now).filter(([f, c]) => c.measured && isScreen(f) === forScreen && judged(f, screen, browserOnly))
     const lines = fs.reduce((a, [, c]) => a + c.lines, 0)
     const missed = fs.reduce((a, [, c]) => a + c.missed.length, 0)
     return lines
-      ? `${(((lines - missed) / lines) * 100).toFixed(1)}% of the ${screen ? "screen's" : "server's"} lines (${lines - missed} of ${lines})`
-      : `none of the ${screen ? 'screen' : 'server'} measured`
+      ? `${(((lines - missed) / lines) * 100).toFixed(1)}% of the ${forScreen ? "screen's" : "server's"} lines (${lines - missed} of ${lines})`
+      : `none of the ${forScreen ? 'screen' : 'server'} measured`
   }
   const all = Object.entries(now)
     .filter(([f]) => judged(f, screen, browserOnly))
@@ -219,7 +219,8 @@ export const screenRecorded = (dir: string) => {
 /** what a run did with the screen, from what it left and how many browser tests should have left it: --screen-absent
  *  says the check saw no browser start; fewer files than the map's browser tests is a browser that died mid-run */
 export function screenState(dir: string, expected: number | null, absent = false): Screen {
-  if (absent) return 'absent'
+  // a probe that could not start a browser (or timed out) while the browser tests did record the screen: trust the data
+  if (absent) return expected !== null && screenRecorded(dir) >= expected ? 'measured' : 'absent'
   return expected !== null && screenRecorded(dir) < expected ? 'incomplete' : 'measured'
 }
 
@@ -262,7 +263,7 @@ export function main(args: string[], o: { repo?: string; baseline?: string; map?
     // the run lost its browser partway, not the code its tests: say so instead of blaming the screen's lines
     const missing = (map?.tests ?? 0) - screenRecorded(dir)
     log(
-      `The screen's coverage was not compared: ${missing} browser test file${missing === 1 ? '' : 's'} recorded nothing, so a browser died during the run. Fix the browser (the check's browsers.log names the command) and run the check again.`,
+      `The screen's coverage was not compared: ${missing} browser test file${missing === 1 ? '' : 's'} recorded nothing, so a browser died during the run. Fix the browser (tests.log names the tests that skipped without one) and run the check again.`,
     )
     code = 1
   }
