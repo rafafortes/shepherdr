@@ -16,7 +16,10 @@ describe('the demo usage fixture', () => {
         const st = usage.outOf(PROVIDER, now)
         expect(st.out, `out at ${hour}:${minute}`).toBe(true)
         expect(st.last?.resetAt, `reset ahead of now at ${hour}:${minute}`).toBeGreaterThan(now)
-        expect(usage.runOuts((k) => k === KEY), `two run-outs at ${hour}:${minute}`).toHaveLength(2)
+        expect(
+          usage.runOuts((k) => k === KEY),
+          `two run-outs at ${hour}:${minute}`,
+        ).toHaveLength(2)
       }
     }
   })
