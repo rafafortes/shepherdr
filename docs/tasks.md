@@ -398,6 +398,9 @@
   branch main lacks) is named again in this space's news once a week. Settings → Tasks → Remove kept work after
   (`tasks.keptExpiry`) makes the sweep remove it this long after it was kept, saying so in news; off, the default, only
   reminds. A task written to after its work was kept, or whose work was opened again in herdr, is never removed.
+- An archived task's chat keeps its attachments until Settings → Tasks → Remove chat files after (`tasks.inboxKeep`) is
+  set: when the task archives, files older than that are removed from its chat and a removed picture says so in place of
+  the tile. Off, the default, keeps them until the task is deleted, which still removes its whole inbox.
 - While a task's agent works, it says itself what it is doing and how far along it is, at the start, at each natural
   step and at least every 5 minutes, revising its time left honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
   to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Past

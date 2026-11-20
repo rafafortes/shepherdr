@@ -574,9 +574,10 @@ export const CATALOG: Section[] = [
     ],
   },
   {
-    // Done tasks archive themselves after a set time, and work they kept may expire (engine.autoArchive, keptSweep)
+    // Done tasks archive themselves after a set time, work they kept may expire, and chat files may be trimmed
+    // (engine.autoArchive, keptSweep, pruneTaskInbox)
     name: 'Tasks',
-    about: 'When Done tasks archive themselves and when work they kept may be removed.',
+    about: 'When Done tasks archive themselves, when work they kept may be removed, and how long chat files stay.',
     rows: [
       { label: 'Archive Done after', key: 'tasks.archiveAfter', value: '7 days', num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true } },
       {
@@ -585,6 +586,13 @@ export const CATALOG: Section[] = [
         value: 'off',
         num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true },
         hint: 'A Done task whose worktree or branch holds uncommitted or unmerged work keeps it, and is named in this space’s news once a week. Set this to remove that work this long after it was kept, saying so in news. Off (the default): only the weekly reminder, never a removal. Work a task was written to after it was kept is never removed.',
+      },
+      {
+        label: 'Remove chat files after',
+        key: 'tasks.inboxKeep',
+        value: 'off',
+        num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true },
+        hint: 'When a task archives, attachments older than this are removed from its chat, and a removed picture says so in place of the tile. Off (the default): files stay until the task is deleted, which still removes its whole inbox.',
       },
     ],
   },

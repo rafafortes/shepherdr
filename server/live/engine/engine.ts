@@ -12,6 +12,7 @@ import { dropped, missing, retrying, startDelays } from '../herdr.ts'
 // reports done), shepherdr checks waits for GitHub's checks, and shepherdr merge squash-merges it on GitHub at the
 // commit this machine has, then brings main here up to date. Anywhere else it is squash-merged here.
 import { existsSync, statSync } from '../mfs.ts'
+import { pruneInbox } from '../inbox.ts'
 import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
 import {
@@ -639,6 +640,11 @@ export function archiveAfterMs(v: string) {
 
 /** "7 days", "off": the same span as tasks.archiveAfter, for how long kept work may stay (tasks.keptExpiry) */
 function keptExpiryMs(v: string) {
+  return archiveAfterMs(v)
+}
+
+/** "30 days", "off": the same span, for how long a chat's attachments may stay after a task archives (tasks.inboxKeep) */
+function inboxKeepMs(v: string) {
   return archiveAfterMs(v)
 }
 
@@ -5250,6 +5256,16 @@ export class Engine extends Emitter<Events> {
   /* ---------- archiving ---------- */
 
   /**
+   * Trim a task's chats' attachments when it archives, by its space's tasks.inboxKeep. Off (the default) keeps today's
+   * behaviour: a chat's files stay until the task is deleted outright, which still removes its whole inbox.
+   */
+  private pruneTaskInbox(t: TaskRec, now: number) {
+    const keep = inboxKeepMs(this.settings.get('tasks.inboxKeep', this.nameOf(t)))
+    if (keep === null) return 0
+    return pruneInbox(`${t.id}/Agent`, keep, now) + pruneInbox(`${t.id}/Reviewer`, keep, now)
+  }
+
+  /**
    * Archive a task: it leaves every list and count, keeping its record, chat and summary (search and its place's
    * Archived view find it). A task whose agent runs is stopped first, as with task stop: its work stays.
    */
@@ -5258,6 +5274,7 @@ export class Engine extends Emitter<Events> {
     if (t.archived) return { kept: [], stopped: false }
     this.dropTaskGate(t)
     t.archived = Date.now()
+    this.pruneTaskInbox(t, t.archived)
     t.pinned = undefined
     clearTimeout(this.later.get(t.id))
     this.quiet(t)
@@ -5311,6 +5328,7 @@ export class Engine extends Emitter<Events> {
     })
     for (const t of due) {
       t.archived = now
+      this.pruneTaskInbox(t, now)
       t.pinned = undefined
     }
     if (due.length) this.save()

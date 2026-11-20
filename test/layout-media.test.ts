@@ -96,6 +96,20 @@ describe.skipIf(!browser)("an agent's pictures and videos in its chat", () => {
     await page.close()
   }, 30_000)
 
+  test('a picture whose file was removed says so in place of a broken tile', async () => {
+    // the chat row still names the file, but retention removed the bytes: the route answers 404 as it does then
+    world.chats['p:vm-str:~'].messages.push({ id: 'gone-shot', who: 'agent', file: { name: 'gone.png', path: '~/inbox/home/gone.png' }, at: Date.now() })
+    const page = await open()
+    const tile = page.locator('[data-msg="gone-shot"], [data-msg="gone-shot:0"]').first()
+    await tile.waitFor()
+    const gone = tile.locator('[data-file-gone]')
+    await gone.waitFor()
+    expect(await gone.textContent()).toContain('This file is no longer there')
+    // no broken image, and no link to a download that would fail too
+    expect(await tile.locator('img, a[download]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
   test('two pictures an agent sent together lie side by side, and a tap opens the one tapped', async () => {
     sent('pair')
     const page = await open()

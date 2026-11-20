@@ -752,6 +752,35 @@ export const thumbUrl = (chat: string, path: string) => `${fileUrl(chat, path)}&
 /** a video's still, for its tile: a `poster` of the same file, made once */
 export const posterUrl = (chat: string, path: string) => `${fileUrl(chat, path)}&poster=1`
 
+/** a chat file retention removed: words in place of the picture, never a broken tile */
+const GONE_WORDS = 'This file is no longer there'
+/** the same in a small album tile, where the full words would not fit */
+const GONE_SHORT = 'File gone'
+
+/** whether the chat's file route can no longer serve a file: a removed one answers 404, while a format this browser
+ *  cannot draw (HEIC on most desktops) is still there and answers. Asked only after a picture failed to draw. */
+async function fileGone(chat: string, path: string) {
+  try {
+    return !(await fetch(fileUrl(chat, path), { method: 'HEAD' })).ok
+  } catch {
+    return false
+  }
+}
+
+/** a removed attachment: its words where the picture was, with no link to a file that no longer exists */
+function GoneFile({ name, short, radius }: { name: string; short?: boolean; radius?: string }) {
+  return (
+    <div
+      data-file-gone
+      title={name}
+      style={radius ? { borderRadius: radius } : undefined}
+      className={clsx('grid place-items-center bg-bubble px-2 text-center text-[0.6875rem] text-fg2', short ? 'size-full' : 'min-h-16 max-w-44')}
+    >
+      <span>{short ? GONE_SHORT : GONE_WORDS}</span>
+    </div>
+  )
+}
+
 /** a picture on its own, with no words: it shows as a tile, and the viewer pages through every one in the chat */
 export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && isImage(m.file.name)
 
@@ -869,8 +898,13 @@ export const Album = memoRow(function Album({
 function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; chatKey: string; you: boolean; radius: string; single: boolean; more: number; out?: Outgoing }) {
   const chat = currentChat(chatKey)
   const f = msg.file!
-  // a picture this browser can't show (HEIC on most desktops) is a file tile, or a small one in an album
-  const [broken, setBroken] = useState(false)
+  // a picture this browser can't show (HEIC on most desktops) is a file tile, or a small one in an album; one whose file
+  // retention removed says so instead. The safe tile goes up first, then one request refines it for a file that went.
+  const [broken, setBroken] = useState<false | 'gone' | 'format'>(false)
+  const drawFailed = () => {
+    setBroken('format')
+    void fileGone(chatKey, f.path).then((gone) => gone && setBroken('gone'))
+  }
   // one on its way isn't a message yet: nothing to react to
   const canReact = has('reactions') && !msg.waiting && !out
   const replies = canReply(msg, out)
@@ -891,7 +925,7 @@ function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; 
     return (
       <div data-msg={msg.id} data-chat={chatKey} data-you={you ? '' : undefined} className="group/msg relative flex max-w-full flex-col">
         <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies))}>
-          <FileTile name={f.name} chat={chatKey} path={f.path} />
+          {broken === 'gone' ? <GoneFile name={f.name} /> : <FileTile name={f.name} chat={chatKey} path={f.path} />}
         </div>
         {edge ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null}
         {smiley(true)}
@@ -900,7 +934,9 @@ function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; 
   const frame = 'relative block overflow-hidden bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_var(--line)]'
   return (
     <div data-msg={msg.id} data-chat={chatKey} data-you={you ? '' : undefined} className={clsx('group/msg relative min-w-0', !single && 'h-(--tile) flex-1')}>
-      {broken ? (
+      {broken === 'gone' ? (
+        <GoneFile name={f.name} short radius={radius} />
+      ) : broken ? (
         <a
           data-anchor
           href={fileUrl(chatKey, f.path, true)}
@@ -937,7 +973,7 @@ function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; 
             src={thumbUrl(chatKey, f.path)}
             alt={f.name}
             draggable={false}
-            onError={() => setBroken(true)}
+            onError={drawFailed}
             className={single ? 'block max-h-32 max-w-44 min-h-16 min-w-16 object-cover phone:max-h-36 phone:max-w-48' : 'size-full object-cover'}
           />
           {more ? <span className="absolute inset-0 grid place-items-center bg-black/45 text-[1.25rem] font-semibold text-white tabular-nums">+{more}</span> : null}
