@@ -236,6 +236,21 @@ const ROUTE_REPAIR_CHUNK = 6
  *  starts at 0), so a restart repairs its routes at once instead of waiting this out. */
 const ROUTE_REPAIR_EVERY = 30_000
 
+/** An idle agent's screen is read on the refresh that ends its turn, then on each refresh for the first minute
+ *  (background work is announced as the turn ends and ends soon after), and after that only every 30 s. While a read
+ *  found work still running the fast pace holds, since its end is what the reader waits for. herdr's output event
+ *  makes a pane read at once, whatever its pace would otherwise be. */
+const SCREEN_FAST_FOR = 60_000
+const SCREEN_SLOW_EVERY = 30_000
+/** screen reads are herdr calls on the thread that serves the screen and starts agents: no more than this many at once */
+const SCREEN_READ_CHUNK = 4
+
+/** the events a look at herdr always wants; the panes it wants output from are added per agent (outputSub) */
+const BASE_SUBS = [{ type: 'pane.agent_status_changed' }, { type: 'pane.closed' }, { type: 'pane.created' }]
+/** herdr 0.9.5 offers pane.output_matched, not pane.output_changed: an empty regex matches any line a pane prints. The
+ *  event carries the pane id we need, and one arrives when the subscription opens (the pane's current output). */
+const outputSub = (pane_id: string) => ({ type: 'pane.output_matched', pane_id, source: 'visible', match: { type: 'regex', value: '' } })
+
 type Events = {
   routed: [key: string]
   status: [key: string, status: AgentStatus | 'gone']
@@ -361,8 +376,17 @@ export class Agents extends Emitter<Events> {
     source: systemSource,
     end: (pids) => endProcesses(pids, endDeps),
   }
-  /** what the screen of a Claude Code with no session file says still runs in the background */
+  /** what the screen of a Claude Code with no session file or an agy agent says still runs in the background */
   private screens = new Map<string, Background>()
+  /** each screen-read agent's pane, when its turn ended, and when its screen was last read: the pace of future reads */
+  private screenState = new Map<string, { pane: string; since: number; at: number }>()
+  /** why an agent's screen must be read on this pass: its turn just ended, or herdr says its pane printed */
+  private screenNow = new Map<string, 'turn' | 'output'>()
+  /** a screen pass was asked for while one was in flight: run one more after it, so no trigger is lost */
+  private backgroundAgain = false
+  /** herdr sends an initial output event for every pane when a subscription opens: that is a snapshot of what is
+   *  already on screen, not something that printed. Ignore those events for a moment after each (re)open. */
+  private outputQuietUntil = 0
   /** what its hooks, session file or screen say still runs in the background, since when, and after which turn */
   private seen = new Map<string, { what: Background; since: number; turn?: number }>()
   /** the background work last told, so a change is told once */
@@ -397,7 +421,10 @@ export class Agents extends Emitter<Events> {
     }
     this.sub = new Subscription(
       (e) => this.onEvent(e),
-      () => this.refresh(),
+      () => {
+        this.outputQuietUntil = Date.now() + 1000
+        void this.refresh()
+      },
     )
   }
 
@@ -672,15 +699,8 @@ export class Agents extends Emitter<Events> {
         }
         // Repair running sessions without interrupting them, including ones restored by herdr.
         void this.readRuntime()
-        // Slow pane reads must not hold up transport health checks.
-        if (!this.readingBackground) {
-          this.readingBackground = true
-          void this.readBackground()
-            .catch(() => undefined)
-            .finally(() => {
-              this.readingBackground = false
-            })
-        }
+        // Slow pane reads must not hold up transport health checks. readBackground owns its own in-flight guard.
+        void this.readBackground().catch(() => undefined)
         // what each launch is really doing now, before the repair pass reads it: a pendingLaunch its launch is done with
         // must not keep its route waiting for the next pass
         this.settleLaunches()
@@ -696,7 +716,7 @@ export class Agents extends Emitter<Events> {
         // what waits goes in as soon as its agent can take it
         for (const key of new Set(this.outbox.map((o) => o.key))) if (!this.heldBy(key)) this.deliver(key)
         this.checkStranded()
-        this.sub.set([{ type: 'pane.agent_status_changed' }, { type: 'pane.closed' }, { type: 'pane.created' }, ...[...this.watchedPanes].map((pane_id) => ({ type: 'pane.output_changed', pane_id }))])
+        this.sub.set([...BASE_SUBS, ...[...this.outputPanes()].map(outputSub)])
       })
     } catch {
       if (BOX) this.retryAt = Date.now() + this.recovery.fail()
@@ -946,39 +966,119 @@ export class Agents extends Emitter<Events> {
     return shells.some((argv) => !servesCommand(argv.join(' '))) ? 'shells' : 'servers'
   }
 
+  /** the pane whose screen alone tells what still runs for this agent: an idle or done agy agent, or a Claude Code whose
+   *  hooks and session file say nothing. Only these panes get an output subscription and a screen read. */
+  private needsScreen(key: string): string | undefined {
+    const r = this.records[key]
+    const pane = this.info(key)?.pane_id
+    if (!r || !pane) return undefined
+    const st = this.status(key)
+    if (st !== 'idle' && st !== 'done') return undefined
+    if (r.kind === 'agy') return pane
+    return r.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, this.logCwds(key)) === undefined ? pane : undefined
+  }
+
   /** what the pane's screen says still runs in the background, for an idle or done agent that has no other way to say it:
    *  a Claude Code with no session file, and any agy agent (none while it works) */
   private async screenWork(key: string): Promise<Background | undefined> {
-    const r = this.records[key]
-    const st = this.status(key)
-    const pane = this.info(key)?.pane_id
-    if (!pane || (st !== 'idle' && st !== 'done')) return undefined
-    if (r?.kind === 'agy') return agyScreenBackground(await herdr.visible(pane).catch(() => ''))
-    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, this.logCwds(key)) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
-    return undefined
+    const pane = this.needsScreen(key)
+    if (!pane) return undefined
+    const text = await herdr.visible(pane).catch(() => '')
+    return this.records[key]?.kind === 'agy' ? agyScreenBackground(text) : screenBackground(text)
   }
 
-  /** what still runs in the background, read again: from the screen where there is no session file. A change is told
-   *  as a status change, since the agent may have woken, said a word and stopped again in between herdr's looks. */
-  private async readBackground() {
+  /** the panes whose output herdr tells us about: those on screen in a terminal, and those whose screen is read for
+   *  background work. A closed pane drops out when its agent is no longer live. */
+  private outputPanes(): string[] {
+    return [...new Set([...this.watchedPanes, ...[...this.screenState.values()].map((s) => s.pane)])].sort()
+  }
+
+  /** what still runs in the background, read again: a screen only when its turn just ended, when herdr says its pane
+   *  printed, while work still runs there, or on a pace that slows from the refresh's 2 s to 30 s after a minute. A
+   *  change is told as a status change, since the agent may have woken, said a word and stopped again between looks. */
+  /** `eventOnly` is an output event for one pane: read that pane, not every agent still in its fast window */
+  private async readBackground(eventOnly = false) {
+    if (this.readingBackground) {
+      this.backgroundAgain = true
+      return
+    }
+    this.readingBackground = true
+    try {
+      do {
+        this.backgroundAgain = false
+        await this.backgroundPass(eventOnly)
+      } while (this.backgroundAgain && !this.stopped)
+    } finally {
+      this.readingBackground = false
+    }
+  }
+
+  /** one pass: decide whose screen is due, then walk the agents in order — telling what changed without a read at once,
+   *  and reading a due screen (at most a few at a time) before telling that one. A key whose state comes from its hooks
+   *  or session file is never held up by a pane read that belongs to another agent. */
+  private async backgroundPass(eventOnly = false) {
+    const now = Date.now()
+    const due = new Set<string>()
     for (const key of this.byName.values()) {
       if (this.stopped) return
+      const pane = this.needsScreen(key)
+      if (!pane) {
+        this.screens.delete(key)
+        this.screenState.delete(key)
+        this.screenNow.delete(key)
+        continue
+      }
+      const why = this.screenNow.get(key)
+      if (eventOnly && !why) continue
+      let s = this.screenState.get(key)
+      if (!s || s.pane !== pane) {
+        s = { pane, since: now, at: 0 }
+        this.screenState.set(key, s)
+      }
+      if (why === 'turn') s.since = now
+      // a turn that just ended, an output event, or work that still runs: read now. Otherwise the first minute follows
+      // the refresh's own 2 s pace; after that a screen that has not printed is read only every 30 s.
+      if (why || s.at === 0 || this.screens.get(key) || now - s.since < SCREEN_FAST_FOR || now - s.at >= SCREEN_SLOW_EVERY) due.add(key)
+    }
+    this.screenNow.clear()
+
+    /** what the hooks, session file, process table and screens say now, and whether it changed */
+    const tell = (key: string) => {
+      if (this.stopped) return
       const st = this.status(key)
-      const seen = await this.screenWork(key)
-      if (seen) this.screens.set(key, seen)
-      else this.screens.delete(key)
-      // counted from when it was first seen after its turn ended: a turn that woke and ended again in between herdr's
-      // looks, which its hooks tell, starts the count again
       const what = this.stillRuns(key)
       const turn = this.said(key)?.turnAt
       const was = this.seen.get(key)
       if (!what) this.seen.delete(key)
       else if (was?.what !== what || was.turn !== turn) this.seen.set(key, { what, since: Date.now(), turn })
       const now = this.background(key)
-      if (now === this.bg.get(key)) continue
+      if (now === this.bg.get(key)) return
       this.bg.set(key, now)
       this.emit('status', key, st)
     }
+
+    const read = async (key: string) => {
+      const seen = await this.screenWork(key)
+      if (seen) this.screens.set(key, seen)
+      else this.screens.delete(key)
+      const s = this.screenState.get(key)
+      if (s) s.at = Date.now()
+      tell(key)
+    }
+
+    const running: Promise<void>[] = []
+    for (const key of this.byName.values()) {
+      if (this.stopped) return
+      if (!due.has(key)) {
+        tell(key)
+        continue
+      }
+      running.push(read(key))
+      if (running.length >= SCREEN_READ_CHUNK) await Promise.all(running.splice(0))
+    }
+    await Promise.all(running)
+    // a newly idle agent's pane was not in the subscription at the last look: add it without waiting for the next one
+    this.sub.set([...BASE_SUBS, ...this.outputPanes().map(outputSub)])
   }
 
   /** what a screen sent waits only on a menu or a starting agent: one whose agent is gone (or herdr out of reach) for a
@@ -1012,9 +1112,19 @@ export class Agents extends Emitter<Events> {
 
   private onEvent(e: HerdrEvent) {
     const type = String(e.data?.type ?? e.event)
-    if (type.includes('output_changed')) {
+    if (type.includes('output_changed') || type === 'pane.output_matched' || type === 'pane_output_matched') {
+      // an output_matched subscription sends the pane's current text as soon as it opens: that is not a print
+      if ((type === 'pane.output_matched' || type === 'pane_output_matched') && Date.now() < this.outputQuietUntil) return
       const pane = String(e.data.pane_id ?? '')
       for (const [name, key] of this.byName) if (this.live.get(name)?.pane_id === pane) this.emit('output', key)
+      // a pane whose screen we read printed: read it now, however old its turn is
+      let due = false
+      for (const [key, s] of this.screenState)
+        if (s.pane === pane) {
+          if (!this.screenNow.has(key)) this.screenNow.set(key, 'output')
+          due = true
+        }
+      if (due) void this.readBackground(true).catch(() => undefined)
       return
     }
     // status and pane changes: read the authoritative list again
@@ -1022,6 +1132,8 @@ export class Agents extends Emitter<Events> {
   }
 
   private changed(key: string, status: AgentStatus | 'gone') {
+    // its turn just ended: this is when background work is announced, so read the screen now
+    if (status === 'idle' || status === 'done') this.screenNow.set(key, 'turn')
     this.emit('status', key, status)
     if (status !== 'gone' && status !== 'blocked') this.deliver(key)
     if (status !== 'gone') this.emit('logs', key)
