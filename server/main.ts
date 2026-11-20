@@ -18,9 +18,6 @@ async function makeSource(): Promise<Source> {
 }
 
 const source = await makeSource()
-// the first snapshot reads every chat's log, seconds on a busy machine: read before the server takes connections, so a
-// screen that opens right after a restart gets its first snapshot at once, instead of giving up on it and trying again
-if (kind === 'live') source.snapshot()
 const push = kind === 'live' && !process.env.SHEPHERDR_BOX ? new Push() : undefined
 if (push && 'devices' in source && 'pushWarnings' in source) {
   ;(source as { devices: () => string[] }).devices = () => push.devices.map(deviceName)
@@ -28,7 +25,17 @@ if (push && 'devices' in source && 'pushWarnings' in source) {
 }
 // a worker for another machine (machines.ts) serves only its main machine, which pushes alerts itself
 const worker = !!process.env.SHEPHERDR_BOX
-const server = startApp({ source, dist: join(root, 'dist'), push: worker ? undefined : push, port, hosts: () => source.hosts?.() ?? [], updates: worker ? undefined : join(HOME, 'update.json') })
+// bind the listener before the first snapshot: the start probe (/api/version) and any other caller reach a listening
+// port while the first read of every chat's log is still going, instead of a seconds-long connection-refused window
+const server = startApp({
+  source,
+  dist: join(root, 'dist'),
+  push: worker ? undefined : push,
+  port,
+  hosts: () => source.hosts?.() ?? [],
+  updates: worker ? undefined : join(HOME, 'update.json'),
+  warmup: kind === 'live' ? () => source.snapshot() : undefined,
+})
 // a worker says which code it runs: the main server keeps it across its own restart while that is the same
 if (kind === 'live') writeJson('server.json', { port: server.port, pid: process.pid, code: worker ? (await import('./live/machines.ts')).codeVersion() : undefined })
 let tunnel: { stop(): void } | undefined

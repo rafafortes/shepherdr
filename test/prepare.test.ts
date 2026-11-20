@@ -229,6 +229,49 @@ test('a busy server of this very checkout is left alone', async () => {
   expect(readFileSync(join(w.f.root, 'state/supervisor.pid'), 'utf8')).toBe(String(w.old.pid))
 }, 30_000)
 
+test('a server that never binds still fails within the unchanged start probe budget', async () => {
+  const f = fixture()
+  writeFileSync(join(f.root, 'package.json'), JSON.stringify({ version: 'new' }))
+  mkdirSync(join(f.root, 'dist'))
+  writeFileSync(join(f.root, 'dist/index.html'), 'screen')
+  mkdirSync(join(f.root, 'server'))
+  writeFileSync(join(f.root, 'server/main.ts'), 'export {}\n')
+  mkdirSync(join(f.root, 'scripts'))
+  // a supervisor that never binds: a genuinely failed start, not one that is slow to warm up
+  writeFileSync(join(f.root, 'scripts/supervise.ts'), 'setInterval(() => {}, 1000);\n')
+  // a port nothing holds, so portTaken() sees a free one and the readiness loop really runs
+  const free = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
+  const port = free.port ?? 0
+  free.stop()
+  mkdirSync(join(f.root, 'state'))
+  procs.push(() => {
+    try {
+      process.kill(Number(readFileSync(join(f.root, 'state/supervisor.pid'), 'utf8')))
+    } catch {}
+  })
+  const began = performance.now()
+  const command = Bun.spawn([process.execPath, join(import.meta.dir, '../scripts/plugin.ts'), 'start'], {
+    env: {
+      ...process.env,
+      HOME: f.root,
+      SHEPHERDR_HOME: join(f.root, 'home'),
+      HERDR_PLUGIN_ROOT: f.root,
+      HERDR_PLUGIN_STATE_DIR: join(f.root, 'state'),
+      HERDR_PLUGIN_ID: '',
+      SHEPHERDR_PORT: String(port),
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const [code, out] = await Promise.all([command.exited, new Response(command.stdout).text()])
+  const ms = performance.now() - began
+  expect(code).toBe(1)
+  expect(out).toContain('Shepherdr did not answer yet')
+  // 40 × 250 ms = 10 s: still the whole budget for a real failure, with room for a loaded machine's scheduling
+  expect(ms).toBeGreaterThan(9000)
+  expect(ms).toBeLessThan(15000)
+}, 30_000)
+
 test('an exports-only package with missing files is incomplete', async () => {
   const f = fixture()
   mkdirSync(join(f.root, 'node_modules/example'), { recursive: true })

@@ -25,6 +25,9 @@ const FONT = join(import.meta.dir, '..', 'node_modules', 'inter-ui', 'variable',
 const SNAP_MAX = 2000
 /** how old a snapshot an alert may read: it only asks what waits and whether the place's Notify lets it through */
 const SNAP_FRESH = 1000
+/** how long a screen's first socket waits for the warming first snapshot before it builds one on demand; the warm-up
+ *  never holds a connection open indefinitely (the screen also drops a silent socket and retries) */
+const WARM_CAP = 1000
 
 /**
  * The app's own origin holds the x-shepherdr write capability and all its data, so its pages get their own wall too:
@@ -65,9 +68,13 @@ export interface AppOptions {
   /** the largest file /api/upload accepts, in bytes; a test injects a small one so an over-cap post needs no 100 MB
    *  body. Everything else uses ATTACH_MAX, the same 100 MB the "Up to 100 MB each" help promises. */
   uploadCap?: number
+  /** the first snapshot's slow build, started after the listener binds: /api/version answers while it runs, and the
+   *  snapshot routes either wait a moment or say "building" for the caller to retry. Only the live path warms: the
+   *  demo path (and every test that builds no warm-up) serves snapshots at once, as before. */
+  warmup?: () => unknown
 }
 
-export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts = () => [], updates, uploadCap = ATTACH_MAX }: AppOptions) {
+export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts = () => [], updates, uploadCap = ATTACH_MAX, warmup }: AppOptions) {
   const live = new Set<ServerWebSocket<Sock>>()
   const send = (ws: ServerWebSocket<Sock>, e: ServerEvent) => ws.send(JSON.stringify(e))
 
@@ -188,6 +195,19 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
 
   const json = (v: unknown, status = 200) => Response.json(v, { status })
 
+  // The listener is already bound; the first snapshot is still reading every chat's log. The cheap start probe
+  // (/api/version) needs nothing from it and answers at once; /api/snapshot says "building" for the caller to retry
+  // and a screen's first socket waits at most WARM_CAP. A slow first read costs no closed port and no unbounded wait.
+  let warmed = !warmup
+  const warming = warmup
+    ? Promise.resolve()
+        .then(warmup)
+        .finally(() => {
+          warmed = true
+        })
+    : null
+  const settled = () => Promise.race([warming ?? Promise.resolve(), Bun.sleep(WARM_CAP)]).catch(() => undefined)
+
   const server = Bun.serve<Sock>({
     port,
     hostname: host,
@@ -219,8 +239,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const key = q.get('chat') ?? ''
           return json({ chat: timed('GET /api/chat', () => source.chat(key)) ?? null, status: source.chatStatus?.(key) })
         }
-        // a worker polls this route to mirror this machine: it needs the revision to tell a heartbeat from a change
-        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => revisions.refresh(source.snapshot())))
+        // a worker polls this route to mirror this machine: it needs the revision to tell a heartbeat from a change.
+        // While the first snapshot builds, say so instead of making the caller wait on the slow read (it retries).
+        if (path === '/api/snapshot') return warmed ? json(timed('GET /api/snapshot', () => revisions.refresh(source.snapshot()))) : json({ building: true }, 503)
         // which Shepherdr answers: a start from another plugin folder or version stops it (scripts/plugin.ts)
         if (path === '/api/version') return json(running())
         // the updater restarts the server only once it has stopped new calls and none is on; both at once, so no call
@@ -427,7 +448,14 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       open(ws) {
         if (ws.data.kind === 'live') {
           live.add(ws)
-          send(ws, { type: 'snapshot', snapshot: revisions.refresh(timed('snapshot', () => source.snapshot())) })
+          // a screen that opens during the warm-up gets its first snapshot as soon as it is there (within WARM_CAP),
+          // then builds one on demand if the first read is still going; a screen that left meanwhile is dropped.
+          const first = () => {
+            if (!live.has(ws)) return
+            send(ws, { type: 'snapshot', snapshot: revisions.refresh(timed('snapshot', () => source.snapshot())) })
+          }
+          if (warmed) first()
+          else void settled().then(first)
           // the screen's own proof of executable-setting writes (SEC-04): over this socket, never in the snapshot or
           // a file. It is a second wall for a caller that can POST but cannot read this socket; one that can do both
           // gets no more from this than it already has (the lead's honest threat model).
