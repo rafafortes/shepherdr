@@ -78,6 +78,20 @@ describe("a chat's attachments on archive", () => {
 })
 
 describe('the inbox prune itself', () => {
+  test('a folder that went or was replaced never fails the archive', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'notdir')
+    expect(w.settings.set('tasks.inboxKeep', '1 day', 'all').ok).toBe(true)
+    const dir = dirOf(key)
+    mkdirSync(join(dir, '..'), { recursive: true })
+    writeFileSync(dir, 'the chat folder is a file now')
+
+    await w.engine.archive(t.id)
+
+    expect(t.archived).toBeGreaterThan(0)
+    expect(existsSync(dir)).toBe(true) // cleanup is best effort: it never took the thing that was in its way
+  })
+
   test('a folder with no inbox is nothing to do; folders and links are left, a stale sidecar goes with its file', () => {
     const chat = 'GROUP-1/Agent'
     expect(pruneInbox(chat, DAY, Date.now())).toBe(0)

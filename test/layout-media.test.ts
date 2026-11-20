@@ -110,6 +110,37 @@ describe.skipIf(!browser)("an agent's pictures and videos in its chat", () => {
     await page.close()
   }, 30_000)
 
+  test("a file the browser can't draw keeps its download tile, not the removed-file words", async () => {
+    // the bytes are still there: only this browser can't show them. The file route answers 200, so this is not a
+    // retention removal (HEIC on most desktops), and the old file tile with its download link must stay.
+    world.files['~/inbox/home/undrawable.heic'] = () => new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/heic' })
+    const at = Date.now()
+    world.chats['p:vm-str:~'].messages.push({ id: 'undrawable', who: 'agent', file: { name: 'undrawable.heic', path: '~/inbox/home/undrawable.heic' }, at })
+    const page = await open()
+    const tile = page.locator('[data-msg="undrawable"], [data-msg="undrawable:0"]').first()
+    await tile.waitFor()
+    const download = tile.getByRole('link', { name: 'Download undrawable.heic' })
+    await download.waitFor()
+    expect(await tile.locator('[data-file-gone]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test('two pictures removed together each say so in their album tile', async () => {
+    const at = Date.now()
+    world.chats['p:vm-str:~'].messages.push(
+      { id: 'gone-a', who: 'agent', file: { name: 'a.png', path: '~/inbox/home/gone-a.png' }, at },
+      { id: 'gone-b', who: 'agent', file: { name: 'b.png', path: '~/inbox/home/gone-b.png' }, at },
+    )
+    const page = await open()
+    const album = page.getByRole('group', { name: '2 pictures' }).last()
+    await album.waitFor()
+    await album.locator('[data-file-gone]').first().waitFor()
+    expect(await album.locator('[data-file-gone]').count()).toBe(2)
+    expect(await album.locator('[data-file-gone]').first().textContent()).toBe('File gone')
+    expect(await album.locator('img').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
   test('two pictures an agent sent together lie side by side, and a tap opens the one tapped', async () => {
     sent('pair')
     const page = await open()

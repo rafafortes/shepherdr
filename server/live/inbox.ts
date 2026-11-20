@@ -21,16 +21,22 @@ export function pruneInbox(chat: string, keepMs: number, now: number) {
   if (!existsSync(dir)) return 0
   const before = now - keepMs
   let removed = 0
-  for (const name of readdirSync(dir)) {
-    const at = join(dir, name)
-    // a small copy is deleted with its own file below; one an earlier run left behind goes when that file goes
-    if (/\.(thumb|poster)\.jpg$/.test(name)) continue
-    const st = lstatSync(at)
-    // a folder or a link is never followed: only a file the chat itself wrote is trimmed
-    if (!st.isFile() || st.mtimeMs >= before) continue
-    rmSync(at, { force: true })
-    for (const small of ['.thumb.jpg', '.poster.jpg']) rmSync(`${at}${small}`, { force: true })
-    removed++
+  try {
+    for (const name of readdirSync(dir)) {
+      const at = join(dir, name)
+      // a small copy is deleted with its own file below; one an earlier run left behind goes when that file goes
+      if (/\.(thumb|poster)\.jpg$/.test(name)) continue
+      const st = lstatSync(at)
+      // a folder or a link is never followed: only a file the chat itself wrote is trimmed
+      if (!st.isFile() || st.mtimeMs >= before) continue
+      rmSync(at, { force: true })
+      for (const small of ['.thumb.jpg', '.poster.jpg']) rmSync(`${at}${small}`, { force: true })
+      removed++
+    }
+  } catch {
+    // cleanup is best effort: a file that went between the listing and the stat, or a folder that was replaced while
+    // archiving, must never leave the task half-archived. What is left here can go the next time one archives.
+    return removed
   }
   return removed
 }

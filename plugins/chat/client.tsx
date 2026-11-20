@@ -757,11 +757,13 @@ const GONE_WORDS = 'This file is no longer there'
 /** the same in a small album tile, where the full words would not fit */
 const GONE_SHORT = 'File gone'
 
-/** whether the chat's file route can no longer serve a file: a removed one answers 404, while a format this browser
- *  cannot draw (HEIC on most desktops) is still there and answers. Asked only after a picture failed to draw. */
+/** whether the chat's file route says the file really went: only "no such file" (or a gone one) counts, while a format
+ *  this browser cannot draw answers 200, and a busy proxy or an unreachable machine must not be called a removal.
+ *  Asked only after a picture failed to draw. */
 async function fileGone(chat: string, path: string) {
   try {
-    return !(await fetch(fileUrl(chat, path), { method: 'HEAD' })).ok
+    const r = await fetch(fileUrl(chat, path), { method: 'HEAD' })
+    return r.status === 404 || r.status === 410
   } catch {
     return false
   }
