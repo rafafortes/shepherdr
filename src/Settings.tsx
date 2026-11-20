@@ -609,7 +609,7 @@ export default function Settings() {
     if (r?.ok && !r.waiting) void askWaiting(key, page.targets?.[key] ?? page.level)
   }
   const close = () => setUI({ settings: null })
-  const scroller = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLElement>(null)
   const go = (section: number) => {
     setUI({ settings: { ...s, section } })
     // a new section starts at its top
@@ -760,10 +760,10 @@ export default function Settings() {
             </div>
           ))}
         </nav>
-        <div
+        <section
           ref={scroller}
-          role="region"
           aria-label="Page content"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll region with no focusable content must take focus itself (axe scrollable-region-focusable, WCAG 2.1.1)
           tabIndex={0}
           // a focused scroller keeps the arrow keys: the app's global keys would move the task cursor instead of
           // scrolling them, and the test browser does not scroll a focused div on the arrow keys by itself, so the
@@ -778,7 +778,7 @@ export default function Settings() {
           className="touch-pan-y overflow-y-auto overscroll-contain focus-visible:outline-offset-[-2px]"
         >
           {body}
-        </div>
+        </section>
       </div>
     </section>
   )
