@@ -950,20 +950,52 @@ export function rowClass(sel?: boolean, kb?: boolean, dense?: boolean) {
   )
 }
 
-/** A list row: places, tasks, agents */
-export function Row({ className, sel, kb, two, children, onActivate, ...p }: HTMLAttributes<HTMLLIElement> & { sel?: boolean; kb?: boolean; two?: boolean; onActivate?: () => void }) {
+/** A list row: places, tasks, agents. `asListItem` is for rows inside `List`: the li keeps its listitem role
+ *  (an axe `aria-required-children` `ul` may own only listitems) and a stretched inner button carries the button
+ *  role, look and keyboard behaviour, as a task row's does. Anything passed through (`aria-expanded`, `data-*`)
+ *  stays on the li, so a caller's selectors keep working. */
+export function Row({
+  className,
+  sel,
+  kb,
+  two,
+  children,
+  onActivate,
+  asListItem,
+  ...p
+}: HTMLAttributes<HTMLLIElement> & { sel?: boolean; kb?: boolean; two?: boolean; onActivate?: () => void; asListItem?: boolean }) {
+  const activate = (e: ReactKeyboardEvent<HTMLElement>) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+      e.preventDefault()
+      onActivate?.()
+    }
+  }
+  if (asListItem)
+    return (
+      // the li stays a plain listitem (callers' data-* and aria-expanded selectors keep working); the button
+      // carries the row's whole look and every interactive attribute, so its spacing and announced state match
+      // a plain Row exactly
+      <li {...p}>
+        <button
+          type="button"
+          aria-current={sel || undefined}
+          aria-expanded={p['aria-expanded']}
+          aria-controls={p['aria-controls']}
+          onClick={onActivate}
+          onKeyDown={activate}
+          className={clsx('w-full text-left', rowClass(sel, kb), two && 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1', className)}
+        >
+          {children}
+        </button>
+      </li>
+    )
   return (
     <li
       role="button"
       tabIndex={0}
       aria-current={sel || undefined}
       onClick={onActivate}
-      onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-          e.preventDefault()
-          onActivate?.()
-        }
-      }}
+      onKeyDown={activate}
       className={clsx(rowClass(sel, kb), two && 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1', className)}
       {...p}
     >
