@@ -270,7 +270,7 @@ describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SH
       await page.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor()
       await settled(page)
       // the shared desktop Settings scroller is a named, focusable region (not just a scrollable div)
-      const scroller = page.getByRole('region', { name: 'Settings content' })
+      const scroller = page.getByRole('region', { name: 'Page content' })
       await scroller.waitFor()
       expect(await scroller.getAttribute('tabindex')).toBe('0')
       // the shortcuts list really overflows, so there is something to scroll
@@ -298,7 +298,7 @@ describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SH
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'How tasks work', exact: true }).click()
       await settled(page)
-      const scroller = page.getByRole('region', { name: 'Settings content' })
+      const scroller = page.getByRole('region', { name: 'Page content' })
       const box = settings.getByRole('textbox', { name: 'Review rounds (rounds)', exact: true })
       await box.waitFor()
       const { sh, ch } = await scroller.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }))

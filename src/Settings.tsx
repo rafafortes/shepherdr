@@ -763,7 +763,7 @@ export default function Settings() {
         <div
           ref={scroller}
           role="region"
-          aria-label="Settings content"
+          aria-label="Page content"
           tabIndex={0}
           // a focused scroller keeps the arrow keys: the app's global keys would move the task cursor instead of
           // scrolling them, and the test browser does not scroll a focused div on the arrow keys by itself, so the
