@@ -28,7 +28,11 @@ const subscribe = (l: () => void) => {
 /** The screen's shared clock, read fresh on every draw: a minute tick for "3m ago" and "in 6h", pass 1000 for a label
  *  that shows seconds. Callers with the same step redraw together, only when that unit changes. */
 export function useClock(step = 60_000): number {
-  useSyncExternalStore(subscribe, () => snapshot(step), () => snapshot(step))
+  useSyncExternalStore(
+    subscribe,
+    () => snapshot(step),
+    () => snapshot(step),
+  )
   return now()
 }
 
