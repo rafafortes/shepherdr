@@ -16,10 +16,13 @@ const webkit = browser ? await launchWebkit() : null
 if (webkit) afterAll(() => webkit.close())
 
 /** Violations accepted for now. Each one names the audit finding that owns its fix, so the list can only shrink;
- *  anything a finding does not own stays a failure and is reported as a follow-up, never silently allowed here. */
-const ALLOW: { rule: string; why: string; finding: string }[] = [
+ *  anything a finding does not own stays a failure and is reported as a follow-up, never silently allowed here.
+ *  `frame` ties an entry to one iframe's nodes only, so the same rule still fails on any other screen. */
+type Allow = { rule: string; why: string; finding: string; frame?: RegExp }
+const ALLOW: Allow[] = [
   {
     rule: 'color-contrast',
+    frame: /iframe\[title="This week across machines"\]/,
     why: 'The demo chart labels use --fg3 inside an artifact frame, which still carries the old #a1a1aa; SHE-114 darkened the app token but not the frame token (axe 2.56:1).',
     finding: 'A11Y-03',
   },
@@ -28,22 +31,27 @@ const ALLOW: { rule: string; why: string; finding: string }[] = [
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']
 type Violation = Awaited<ReturnType<AxeBuilder['analyze']>>['violations'][number]
 
-/** the rule id, impact and first few targets: enough for a failure to name what to fix */
-const detail = (v: Violation) =>
-  `${v.id} (${v.impact}) ${v.nodes
-    .slice(0, 3)
-    .map((n) => n.target.join(' '))
-    .join(', ')}`
+/** an entry applies only when the rule and, if it names one, every node's frame match; a new failure anywhere else
+ *  is still reported with its rule id */
+const accepts = (v: Violation) =>
+  ALLOW.some((a) => {
+    if (a.rule !== v.id) return false
+    if (!a.frame) return true
+    return v.nodes.every((n) => n.target.some((t) => typeof t === 'string' && a.frame?.test(t)))
+  })
+
+/** the rule id, impact and the targets: enough for a failure to name what to fix */
+const detail = (v: Violation) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`
 
 /** scan one settled screen, print its pass count, and return the violations this file does not accept */
 async function scan(page: Page, where: string) {
   await settled(page)
   const result = await new AxeBuilder({ page }).withTags(TAGS).analyze()
-  const accepted = result.violations.filter((v) => ALLOW.some((a) => a.rule === v.id))
-  const open = result.violations.filter((v) => !ALLOW.some((a) => a.rule === v.id))
+  const accepted = result.violations.filter(accepts)
+  const open = result.violations.filter((v) => !accepts(v))
   console.log(
     `a11y · ${where}: ${result.passes.length} rules passed, ${result.violations.length} violation(s)${accepted.length ? `, ${accepted.length} accepted` : ''}` +
-      (result.violations.length ? ` — ${result.violations.map((v) => `${v.id}${ALLOW.some((a) => a.rule === v.id) ? ' (accepted)' : ''}`).join(', ')}` : ''),
+      (result.violations.length ? ` — ${result.violations.map((v) => `${v.id}${accepts(v) ? ' (accepted)' : ''}`).join(', ')}` : ''),
   )
   return open
 }
@@ -171,7 +179,7 @@ function run(engine: string, b: Browser, screens: Screen[]) {
       }
     }, 30_000)
 
-  // the check has teeth: a visually hidden div with a button that has no name must fail the same scan
+  // the check has teeth: a visually hidden div with an unlabeled button must fail the same scan
   test(`${engine}: a broken button fails the scan (fixture)`, async () => {
     const { ctx, page } = await open(b, { width: 390, height: 844 }, true)
     try {
@@ -186,8 +194,8 @@ function run(engine: string, b: Browser, screens: Screen[]) {
         div.append(button)
         document.body.append(div)
       })
-      const open = await scan(page, `${engine} · fixture`)
-      expect(open.map((v) => v.id)).toContain('button-name')
+      const found = (await scan(page, `${engine} · fixture`)).map((v) => v.id)
+      expect(found).toContain('button-name')
     } finally {
       await ctx.close()
     }
@@ -212,6 +220,15 @@ test('every accepted rule names its reason and the finding that will remove it',
     expect(a.rule).toMatch(/^[a-z-]+$/)
     expect(a.why.length).toBeGreaterThan(20)
     expect(a.finding).toMatch(/^A11Y-\d+$/)
+    if (a.frame) expect(a.frame.test('iframe[title="This week across machines"]')).toBe(true)
   }
   expect(new Set(ALLOW.map((a) => a.rule)).size).toBe(ALLOW.length)
+})
+
+test('the contrast allowance is confined to the artifact frame', () => {
+  const violation = (target: string[]) => ({ id: 'color-contrast', nodes: [{ target }] }) as Violation
+  expect(accepts(violation(['iframe[title="This week across machines"]', 'span:nth-child(1)']))).toBe(true)
+  expect(accepts(violation(['.inset-0.absolute > iframe[title="This week across machines"]', 'span:nth-child(1)']))).toBe(true)
+  // a new low-contrast line in the app itself, or on any other screen, still fails with its rule id
+  expect(accepts(violation(['[data-msg] span']))).toBe(false)
 })
