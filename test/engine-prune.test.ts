@@ -1,10 +1,12 @@
 // PERFS-12 at the engine level: the live-key set comes from the tasks and spaces the engine actually holds, and a
 // prune runs at startup and again when a task archives. An archived task's record is kept; an orphan's is not.
 import { describe, expect, test } from 'bun:test'
-import { placeId, repo, started, world } from './engine-world.ts'
+import { placeId, repo, started, world, writeJson } from './engine-world.ts'
 
 describe('orphan agent records are pruned by the engine', () => {
   test('startup runs the prune with the tasks the engine holds', () => {
+    // a real store: no tasks.json at all makes the guard skip, and there is nothing to prune anyway
+    writeJson('tasks.json', { next: {}, tasks: [] })
     const w = world()
     // no records at boot: the pass still runs (it is where an earlier cleanup's leftovers would go)
     expect(w.pruned).toEqual([0])
