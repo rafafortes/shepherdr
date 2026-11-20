@@ -113,6 +113,35 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
     }
   }, 60_000)
 
+  test("a fresh chat reveals a batch to the reader's own wheel, with no sentinel tap", async () => {
+    const chat = world.chats[KEY]
+    const old = chat.messages
+    chat.messages = long(350)
+    emit()
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(url())
+      await page.locator('[data-msg="win-349"]').waitFor()
+      expect(await page.locator('[data-msg]').count()).toBe(200)
+      const b = box(page)
+      const c = (await b.boundingBox())!
+      await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2)
+      // wheel up to the top and one step more: the reader's own gesture, never the sentinel
+      for (let i = 0; i < 200; i++) {
+        const top = await b.evaluate((el) => el.scrollTop)
+        if (top === 0) break
+        await page.mouse.wheel(0, -600)
+        await page.waitForTimeout(30)
+      }
+      await page.mouse.wheel(0, -600)
+      await page.locator('[data-msg="win-149"]').waitFor()
+      expect(await page.locator('[data-msg]').count()).toBeGreaterThanOrEqual(300)
+    } finally {
+      chat.messages = old
+      await page.close()
+    }
+  }, 60_000)
+
   test('search in the chat reaches a match outside the window, brought into view and lit', async () => {
     const chat = world.chats[KEY]
     const old = chat.messages
@@ -198,17 +227,20 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
     }
     emit()
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
-    // the light lasts a moment; remember it so a slow glide to the row still finds what was lit
-    await page.addInitScript(() =>
+    // the light lasts a moment; remember it so a slow glide to the row still finds what was lit, and count
+    // flashes so a second jump (a push re-running an address the app should have forgotten) shows up
+    await page.addInitScript(() => {
+      ;(window as unknown as { flashes: number }).flashes = 0
       new MutationObserver((ms) => {
         for (const m of ms) {
           const el = m.target as Element
           if (!el.hasAttribute('data-flash')) continue
+          ;(window as unknown as { flashes: number }).flashes++
           for (const was of document.querySelectorAll('[data-lit]')) was.removeAttribute('data-lit')
           el.setAttribute('data-lit', '')
         }
-      }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-flash'] }),
-    )
+      }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-flash'] })
+    })
     try {
       // the app's own cold-open path for a link: its ?focus address, the card's id
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home&focus=${encodeURIComponent('alert:q')}`)
@@ -221,10 +253,12 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
       // the window widened to the card's row, and it is lit in view
       expect(await flashed.jsonValue()).toEqual({ card: true, msg: 'alert-q', inView: true })
       expect(await page.locator('[data-msg="alert-q"]').count()).toBe(1)
-      // a push in the meantime must not take the card out again: the floor only moves up
+      // a push in the meantime must not take the card out again or jump to it a second time: the address forgot it
       chat.messages = [...chat.messages, { id: 'win-after', who: 'agent', text: 'And on.', at: base + 401_000 }]
       emit()
       await page.locator('[data-msg="win-after"]').waitFor()
+      await page.waitForTimeout(300)
+      expect(await page.evaluate(() => (window as unknown as { flashes: number }).flashes)).toBe(1)
       expect(await page.locator('[data-msg="alert-q"]').count()).toBe(1)
     } finally {
       chat.messages = old

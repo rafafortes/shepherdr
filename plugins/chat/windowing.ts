@@ -26,6 +26,8 @@ interface Window {
   top: number
   /** where each message sits in the rows, built by Messages as it draws them (an album: all of its parts) */
   rowOf: Map<string, number>
+  /** how many rows Messages built, so a jump knows which of them are already on screen */
+  count: number
   subs: Set<() => void>
 }
 
@@ -34,7 +36,7 @@ const windows = new Map<string, Window>()
 function of(chat: string): Window {
   let w = windows.get(chat)
   if (!w) {
-    w = { top: Infinity, rowOf: new Map(), subs: new Set() }
+    w = { top: Infinity, rowOf: new Map(), count: 0, subs: new Set() }
     windows.set(chat, w)
   }
   return w
@@ -55,8 +57,10 @@ export function topOf(chat: string, count: number): number {
 export const floorOf = (chat: string) => windows.get(chat)?.top ?? Infinity
 
 /** Messages calls it as it builds the rows, so a jump can find a message's row before it is drawn */
-export function setRows(chat: string, rowOf: Map<string, number>) {
-  of(chat).rowOf = rowOf
+export function setRows(chat: string, rowOf: Map<string, number>, count: number) {
+  const w = of(chat)
+  w.rowOf = rowOf
+  w.count = count
 }
 
 /** one more batch (top: the first rendered row now): nothing when there is nothing hidden above the window */
@@ -69,11 +73,12 @@ export function revealMore(chat: string, top: number) {
   }
 }
 
-/** a jump to a message: reveal up to its row (itself, or the row its album sits in) so it is in the DOM */
+/** a jump to a message: reveal up to its row (itself, or the row its album sits in) so it is in the DOM. A row
+ *  already in the window is no reveal — pinning the floor there would stop the window following new messages */
 export function revealChat(chat: string, id: string) {
   const w = of(chat)
   const idx = w.rowOf.get(id)
-  if (idx !== undefined && idx < w.top) {
+  if (idx !== undefined && idx < topOf(chat, w.count)) {
     w.top = idx
     emit(chat)
   }
@@ -85,10 +90,12 @@ export function revealChat(chat: string, id: string) {
  *  lands before the layout the reader's step caused) */
 export function watchReveal(list: HTMLElement, by: () => void) {
   const scroller = (list.closest?.('.overflow-y-auto') ?? list) as HTMLElement
+  // the listeners are on the window (a scroller may be replaced); only this chat's own box counts
+  const ours = (e: Event) => e.target instanceof Node && (e.target === scroller || scroller.contains(e.target))
   const near = () => requestAnimationFrame(() => scroller.scrollTop < EDGE && by())
-  const onScroll = near
-  const onWheel = (e: WheelEvent) => e.deltaY < 0 && near()
-  const onKey = (e: KeyboardEvent) => (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') && near()
+  const onScroll = (e: Event) => ours(e) && near()
+  const onWheel = (e: WheelEvent) => ours(e) && e.deltaY < 0 && near()
+  const onKey = (e: KeyboardEvent) => ours(e) && (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') && near()
   addEventListener('scroll', onScroll, { capture: true, passive: true })
   addEventListener('wheel', onWheel, { capture: true, passive: true })
   addEventListener('keydown', onKey, { capture: true, passive: true })

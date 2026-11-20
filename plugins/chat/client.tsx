@@ -725,12 +725,6 @@ function jumps(chat: string, q: ReplyQuote, label: string) {
     reactions and the buttons beside it stay by it) and a long quote reaches past a short reply toward the middle.
     loose: on its own, not tucked (a card answered in the chat quotes the message that answered it) */
 export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
-  return <QuoteInner q={q} chat={chat} from={from} you={you} loose={loose} label={label} />
-}
-
-/** the same quote, without the windowing: every reply quote in a jump's way goes in first (a jump lights one that
- *  only exists because of it) */
-export function QuoteInner({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
   const name = q.who === 'you' ? 'You' : q.who === 'peer' ? (q.from ?? 'Another agent') : q.who === 'agent' ? from : null
   return (
     <div className={clsx('relative flex', loose ? 'min-w-0' : '-mb-2 w-0 min-w-full', you ? 'justify-end' : 'justify-start')}>
@@ -1599,24 +1593,30 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   const list = useRef<HTMLDivElement>(null)
   useArrive(list, chat.key)
   // the window: the last rows by default, higher where the reader has scrolled or a jump has asked (windowing.ts)
-  const floor = useSyncExternalStore(
+  useSyncExternalStore(
     useCallback((l) => subscribeFloor(chat.key)(l), [chat.key]),
     () => floorOf(chat.key),
   )
-  setRows(chat.key, new Map(rows.map((it, i) => ['msg' in it ? it.msg.id : it.album[0].id, i])))
+  // a jump finds a row by any of its parts (one album row holds several pictures)
+  const rowOf = new Map<string, number>()
+  rows.forEach((it, i) => {
+    if ('msg' in it) rowOf.set(it.msg.id, i)
+    else for (const m of it.album) rowOf.set(m.id, i)
+  })
+  setRows(chat.key, rowOf, rows.length)
   const top = topOf(chat.key, rows.length)
   // the sentinel shows only while rows are hidden above the window (top 0: everything is rendered already)
   const hidden = top > 0
   const shown = rows.slice(top)
-  const floorRef = useRef(floor)
-  floorRef.current = floor
-  // the reader's own scroll into the sentinel: one more batch. The sentinel's own pass lands below the edge after
-  // the browser keeps the reader where they were, so a pass can't reveal on its own
+  const topRef = useRef(top)
+  topRef.current = top
+  // the reader's own scroll into the sentinel: one more batch, from the first row now shown (the store's raw floor
+  // is Infinity until something is revealed, so revealing from it would do nothing)
   useEffect(() => {
     if (!hidden) return
     const el = list.current
     if (!el) return
-    return watchReveal(el, () => revealMore(chat.key, floorRef.current))
+    return watchReveal(el, () => revealMore(chat.key, topRef.current))
   }, [hidden, chat.key])
   // a date line goes on the first row of its day, as before: computed over the whole list, drawn where it shows
   let day = ''
@@ -3020,9 +3020,12 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   useEffect(() => {
     const m = jump ? msgs?.find((x) => x.id === jump || x.question?.id === jump) : undefined
     if (!m) return
-    // after the chat has settled at its newest message (jumpTo puts the row in the window first, if it was out)
+    // after the chat has settled at its newest message (jumpTo puts the row in the window first, if it was out).
+    // jumpTo's first call only asks for the row; it returns before React draws it, so its rAF retry does the scroll.
+    // Let the address forget the card now, or a later push would re-run this and pull the reader back to it.
     const t = setTimeout(() => {
-      if (jumpTo(chatKey, m.id, { card: !!m.question && m.question.id === jump })) setUI({ jump: null })
+      jumpTo(chatKey, m.id, { card: !!m.question && m.question.id === jump })
+      setUI({ jump: null })
     }, 120)
     return () => clearTimeout(t)
   }, [jump, msgs])

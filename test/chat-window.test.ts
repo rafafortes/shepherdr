@@ -10,7 +10,7 @@ const rows = (n: number) => new Map(Array.from({ length: n }, (_, i) => [`m${i}`
 describe('the window over the rows', () => {
   test('a short chat renders everything, and there is nothing more to reveal', () => {
     const A = 'chat-a'
-    setRows(A, new Map())
+    setRows(A, new Map(), 0)
     expect(topOf(A, 50)).toBe(0)
     revealMore(A, 0)
     expect(floorOf(A)).toBe(Infinity)
@@ -19,7 +19,7 @@ describe('the window over the rows', () => {
 
   test('a long chat renders its last window, with the rest in batches', () => {
     const B = 'chat-b'
-    setRows(B, rows(500))
+    setRows(B, rows(500), 500)
     expect(topOf(B, 500)).toBe(500 - CHAT_WINDOW)
     // the reader's floor (what the sentinel would reveal from) is its clamped top, not the raw floor
     expect(topOf(B, 500)).toBe(3 * CHAT_BATCH)
@@ -29,7 +29,7 @@ describe('the window over the rows', () => {
     const C = 'chat-c'
     let seen = 0
     const off = subscribeFloor(C)(() => seen++)
-    setRows(C, rows(350))
+    setRows(C, rows(350), 350)
     expect(topOf(C, 350)).toBe(150)
     revealMore(C, topOf(C, 350))
     expect(topOf(C, 350)).toBe(50)
@@ -46,11 +46,13 @@ describe('the window over the rows', () => {
 
   test('a jump puts its row in the window, and only the rows before it go away', () => {
     const D = 'chat-d'
-    setRows(D, rows(400))
+    setRows(D, rows(400), 400)
     expect(topOf(D, 400)).toBe(200)
-    // a jump to a message in the rendered window reveals nothing
+    // a jump to a message in the rendered window reveals nothing — and must not pin the floor there, or the
+    // window would stop following new messages and its DOM would grow by one row on every push
     revealChat(D, 'm399')
     expect(topOf(D, 400)).toBe(200)
+    expect(floorOf(D)).toBe(Infinity)
     // one above the window reveals up to its row
     revealChat(D, 'm199')
     expect(topOf(D, 400)).toBe(199)
@@ -68,7 +70,7 @@ describe('the window over the rows', () => {
     // one album row (two pictures of one send) is one row of the list, known by both of its parts
     e.set('pic-1', 60)
     e.set('pic-2', 60)
-    setRows(E, e)
+    setRows(E, e, 300)
     expect(topOf(E, 300)).toBe(100)
     revealChat(E, 'pic-2')
     expect(topOf(E, 300)).toBe(60)
@@ -77,8 +79,8 @@ describe('the window over the rows', () => {
   test('one chat window does not move another', () => {
     const F = 'chat-f'
     const G = 'chat-g'
-    setRows(F, rows(400))
-    setRows(G, rows(400))
+    setRows(F, rows(400), 400)
+    setRows(G, rows(400), 400)
     revealMore(F, topOf(F, 400))
     expect(topOf(F, 400)).toBe(100)
     expect(topOf(G, 400)).toBe(200)
