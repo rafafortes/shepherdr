@@ -11,8 +11,9 @@
 import { CLI_VERBS } from '../args.ts'
 
 /** CLI verbs deliberately kept behind a card: they write outside Shepherdr, run another program, name a verb that is
- *  gone, or are an old alias. Every other CLI verb is allowed, so adding one to command() cannot silently raise a card.
- *  `secret elevenlabs` writes a secret, so it stays out along with `secret run` and `secret env`. */
+ *  gone, or are an old alias. `secret elevenlabs` writes a secret, so it stays out along with `secret run` and
+ *  `secret env`. This list and the allowed one below are pinned to CLI_VERBS by test/own-verbs.test.ts: adding a verb
+ *  to command() without placing it in one of them fails that test. */
 export const CARDED_VERBS = ['project', 'mode', 'restart', 'attach', 'render', 'preview', 'profile', 'doctor', 'secret'] as const
 
 /** the allowed one-word verbs, in the order the generated hook has always written them (test/own-verbs.test.ts) */

@@ -23,7 +23,7 @@ function dispatchVerbs(): string[] {
   const out: string[] = []
   for (const line of lines.slice(start + 1)) {
     if (line === '    }') break
-    const m = /^\s{6}case '([a-z]+)':/.exec(line)
+    const m = /^\s{6}case '([a-z0-9-]+)':/.exec(line)
     if (m) out.push(m[1])
   }
   return out
@@ -45,6 +45,9 @@ describe('the shepherdr verb lists', () => {
     for (const v of ownWords.slice(1)) expect(dispatch).toContain(v)
     const uncarded = CLI_VERBS.filter((v) => !(CARDED_VERBS as readonly string[]).includes(v))
     expect([...ownWords.slice(1)].sort()).toEqual([...uncarded].sort())
+    for (const v of CARDED_VERBS) expect(CLI_VERBS as readonly string[]).toContain(v)
+    expect(new Set(CARDED_VERBS).size).toBe(CARDED_VERBS.length)
+    expect(new Set(OWN_VERBS).size).toBe(OWN_VERBS.length)
     // the only two-word own commands name the one CLI verb whose other subcommands keep a card
     expect(OWN_VERBS.filter((v) => v.includes(' '))).toEqual(['secret list', 'secret ask'])
     for (const pair of ['secret list', 'secret ask']) {
@@ -61,7 +64,33 @@ describe('the shepherdr verb lists', () => {
     for (const verb of CLI_VERBS.filter((v) => !['project', 'done', 'render', 'preview'].includes(v))) expect(groups).toContain(verb)
   })
 
-  test('claude: the generated hook still embeds the list and allows only those calls', () => {
+  test('claude: the generated hook still embeds the exact list and allows only those calls', () => {
+    // the literal the hook has written since SHE-6, in order: moving a verb changes the generated file
+    expect(OWN_VERBS).toEqual([
+      'help',
+      'show',
+      'models',
+      'set',
+      'unset',
+      'alert',
+      'space',
+      'task',
+      'status',
+      'review',
+      'ask',
+      'plan',
+      'pr',
+      'checks',
+      'ready',
+      'done',
+      'merge',
+      'heartbeat',
+      'automation',
+      'todo',
+      'artifact',
+      'secret list',
+      'secret ask',
+    ])
     expect(deciderScript()).toContain(`const OWN = ${JSON.stringify(OWN_VERBS)}`)
     for (const verb of OWN_VERBS) expect(ownDecision(command, chat, bash(`${command} ${verb}`))).toContain('"permissionDecision":"allow"')
     for (const verb of CARDED_VERBS) expect(ownDecision(command, chat, bash(`${command} ${verb}`))).toBeUndefined()
@@ -71,7 +100,7 @@ describe('the shepherdr verb lists', () => {
 describe('how each CLI reaches the own-verb list', () => {
   const agents = new Agents()
   afterAll(() => agents.stop())
-  const rec = (kind: string) => ({ key: 'own-verbs', name: 'own-verbs', kind, cwd: '/', workspace: 'w', logs: [], started: 0, access: 'full' as const }) as never
+  const rec = (kind: string, access: 'full' | 'ask' = 'full') => ({ key: 'own-verbs', name: 'own-verbs', kind, cwd: '/', workspace: 'w', logs: [], started: 0, access }) as never
 
   test('claude uses a generated hook; codex, agy, opencode and pi do not consult it', () => {
     // claude is the only CLI with a permission card here, and the only one given a PreToolUse decider
@@ -87,5 +116,15 @@ describe('how each CLI reaches the own-verb list', () => {
     expect(agents.args(rec('opencode'), false)).toContain('--auto')
     // pi: no permission flag at all; it never asks
     expect(agents.args(rec('pi'), false)).toEqual([])
+  })
+
+  test('in ask mode those CLIs raise their own card; none of them reads OWN_VERBS', () => {
+    // codex and agy keep their CLI's approvals when asked; opencode's ask rules are on its session, not in ownCall
+    expect(agents.args(rec('codex', 'ask'), false)).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+    expect(agents.args(rec('agy', 'ask'), false)).not.toContain('--dangerously-skip-permissions')
+    expect(agents.args(rec('opencode', 'ask'), false)).not.toContain('--auto')
+    expect(agents.args(rec('pi', 'ask'), false)).toEqual([])
+    // claude keeps its own-command decider in both modes: that hook is the only carrier of OWN_VERBS
+    expect(agents.args(rec('claude', 'ask'), false)[0]).toBe('--settings')
   })
 })
