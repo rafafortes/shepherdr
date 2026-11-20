@@ -7,6 +7,7 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Spec } from '../server/live/agents.ts'
+import { ownShellRules } from '../server/live/readers/own-commands.ts'
 import { agentEnv } from '../server/live/box.ts'
 import { taskTmpDir } from '../server/live/task-tmp.ts'
 import { ROOT } from '../server/root.ts'
@@ -172,9 +173,49 @@ describe('starting an OpenCode agent', () => {
       const [create] = calls()
       const body = JSON.parse(create.argv[4])
       expect(body.model).toBeUndefined()
-      expect(body.permissions).toEqual(['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })))
+      expect(body.permissions).toEqual([
+        ...['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })),
+        ...ownShellRules(join(ROOT, 'bin', 'shepherdr')),
+      ])
       expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1'])
       expect(calls().some(isPut)).toBe(false)
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test('a task launch (full) starts with --auto and no session permission rules', async () => {
+    reset()
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ key: 'EX-2/Agent', access: 'full', first: 'first' }))
+      const body = JSON.parse(calls()[0].argv[4])
+      expect(body.permissions).toBeUndefined()
+      expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1', '--auto'])
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test('a coordinator that asks: the session asks first, then allows this launch’s own verbs', async () => {
+    reset()
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ key: 'shepherdr', access: 'ask', first: 'first' }))
+      const body = JSON.parse(calls()[0].argv[4])
+      expect(body.permissions).toEqual([
+        ...['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })),
+        ...ownShellRules(join(ROOT, 'bin', 'shepherdr')),
+      ])
+      expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1'])
     } finally {
       h.a.stop()
       start.mockRestore()

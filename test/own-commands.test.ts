@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { OWN_VERBS, ownCall } from '../server/live/readers/own-commands.ts'
+import { OWN_VERBS, ownCall, ownCommand } from '../server/live/readers/own-commands.ts'
 import { hookSettings } from '../server/live/readers/hooks.ts'
 import { tmp } from './tmp.ts'
 
@@ -103,6 +103,77 @@ describe("an agent's own shepherdr command", () => {
     expect(own(`${command} ask x`, '/other/bin/shepherdr')).toBe(false)
     expect(own(`SHEPHERDR_CHAT="POL-1/Agent" ${command} ask x`, command, 'SHE-6/Agent')).toBe(false)
     expect(ownCall(undefined, command, chat, OWN_VERBS)).toBe(false)
+  })
+})
+
+describe('a Codex permission request for its own shepherdr command', () => {
+  // Codex is not installed on this host: the decision is tested directly, with the same words the permission hook reads.
+  const ask = (text: unknown, path = command, who = chat, tool: unknown = 'Bash') => ownCommand(path, tool, { command: text }, who, OWN_VERBS)
+
+  test('allows exactly this launch’s own verbs, bare or in the launch prompt’s form', () => {
+    for (const text of [
+      `${command} help`,
+      `${command} status`,
+      `${command} status EX-1 "Half done" --done 50 --left 5m`,
+      `SHEPHERDR_CHAT="${chat}" ${command} ask "Rerun CI?" --choice Yes --choice No`,
+      `SHEPHERDR_CHAT=${chat} ${command} ready EX-1 --summary ok`,
+      `SHEPHERDR_CHAT='${chat}' ${command} secret ask TOKEN --why 'To push'`,
+      `  ${command} show  `,
+    ])
+      expect(ask(text)).toBe(true)
+  })
+
+  test('takes the two-word verbs as pairs, never the ones that run or write anything', () => {
+    for (const pair of ['secret list', 'secret ask']) {
+      expect(OWN_VERBS).toContain(pair)
+      expect(ask(`${command} ${pair}`)).toBe(true)
+    }
+    for (const text of [
+      `${command} secret`,
+      `${command} secret run A -- ls`,
+      `${command} secret env A --file x`,
+      `${command} secret elevenlabs`,
+      `${command} secret listx`,
+      `${command} restart EX-1`,
+      `${command} doctor`,
+      `${command} nonsense`,
+      command,
+    ])
+      expect(ask(text)).toBe(false)
+  })
+
+  test('is allowed with its path quoted, as a shell needs it', () => {
+    const spaced = '/home/me/My Projects/bin/shepherdr'
+    expect(ask(`'${spaced}' status`, spaced)).toBe(true)
+    expect(ask(`"${spaced}" status`, spaced)).toBe(true)
+    expect(ask(`${spaced} status`, spaced)).toBe(false)
+    expect(ask(`SHEPHERDR_CHAT="${chat}" '${spaced}' status`, spaced)).toBe(true)
+  })
+
+  test('keeps its card for a compound line, another tool, another path or another chat', () => {
+    for (const text of [
+      `${command} ask x; rm -rf /`,
+      `${command} ask x && rm y`,
+      `${command} ask x | sh`,
+      `${command} ask x > ~/.bashrc`,
+      `${command} ask "$(rm y)"`,
+      `${command} ask \`rm y\``,
+      `${command} ask $HOME`,
+      `FOO=1 ${command} ask x`,
+      `SHEPHERDR_CHAT="OTHER-2/Agent" ${command} ask x`,
+      `"SHEPHERDR_CHAT=${chat}" ${command} ask x`,
+      `timeout 120 ${command} ask x`,
+      `sh -c '${command} ask x'`,
+      `${command}-evil ask x`,
+      `shepherdr ask x`,
+    ])
+      expect(ask(text), text).toBe(false)
+    expect(ask(`${command} ask x`, '/other/bin/shepherdr')).toBe(false)
+    expect(ask(`SHEPHERDR_CHAT="SHE-6/Agent" ${command} ask x`, command, chat)).toBe(false)
+    expect(ask(`${command} ask x`, command, chat, 'Write')).toBe(false)
+    expect(ownCommand(command, 'Bash', null, chat, OWN_VERBS)).toBe(false)
+    expect(ownCommand(command, 'Bash', {}, chat, OWN_VERBS)).toBe(false)
+    expect(ownCommand('', 'Bash', { command: `${command} status` }, chat, OWN_VERBS)).toBe(false)
   })
 })
 

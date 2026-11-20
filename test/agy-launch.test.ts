@@ -119,6 +119,18 @@ describe('starting an agy agent', () => {
     }
   })
 
+  test('a coordinator’s access is explicit too: full skips approvals, ask keeps them', () => {
+    const h = harness()
+    try {
+      const coord = { ...base({ key: 'shepherdr', access: 'full' }), logs: [], started: 0 } as unknown as AgentRecord
+      const settings = ['--settings', JSON.stringify({ trustedWorkspaces: [cwd] })]
+      expect(h.a.args(coord, false)).toEqual([...settings, '--dangerously-skip-permissions'])
+      expect(h.a.args({ ...coord, access: 'ask' }, false)).toEqual(settings)
+    } finally {
+      h.a.stop()
+    }
+  })
+
   test('the flags of a run: --conversation only when resuming with an id, --model when it has one, never --effort', () => {
     const h = harness()
     try {
