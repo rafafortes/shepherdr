@@ -114,7 +114,8 @@ The report is one markdown file in the repository's own `.git` (`shepherdr-weekl
 next rotation), never in the tree; read it there, in the main checkout's `.git`, not in yours. It says a run is on from
 its first minute, so a run killed by a tool's timeout never leaves last week's report looking current. It carries the gate's
 verdict and time, how far the run is from the base's tip, the browsers, the audit and the packages that could move,
-the probe's repeats, the coverage trend (baseline age, worst files, the `coverage-exempt:` count) and the leftovers:
+the probe's repeats, the coverage trend (the baseline as it stood before the run, its age, the worst files, the
+`coverage-exempt:` count) and the leftovers:
 worktrees of tasks that already landed (by ancestry or by the task id their subject names, since a task lands squashed),
 `/tmp` proof scratch older than two hours whose server is gone, gate log folders older than a week, and the checkout's
 uncommitted files of any of the repository's worktrees. It counts them and deletes nothing. (The report is the operator's: its machine's paths and numbers

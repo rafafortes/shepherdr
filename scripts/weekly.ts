@@ -117,7 +117,7 @@ const listDir = (dir: string): Entry[] => {
   }
 }
 
-const defaults = (): Deps => ({
+const defaults = (o: Partial<Deps> = {}): Deps => ({
   root: repoRoot,
   home: process.env.HOME ?? '/tmp',
   tmpdir: '/tmp',
@@ -138,9 +138,10 @@ const defaults = (): Deps => ({
     writeFileSync(file, text)
   },
   log: (line) => console.log(line),
-  lowPriority: limiter(),
-  lock: join(process.env.HOME ?? '/tmp', '.cache', 'shepherdr', 'check-local.lock'),
-  flock: !!Bun.which('flock'),
+  lowPriority: o.lowPriority ?? limiter(),
+  lock: o.lock ?? join(process.env.HOME ?? '/tmp', '.cache', 'shepherdr', 'check-local.lock'),
+  flock: o.flock ?? !!Bun.which('flock'),
+  ...o,
 })
 
 /* ---------- the gate's verdict, as the runner leaves it ---------- */
@@ -299,12 +300,15 @@ export const REPEATS = 5
 
 /** the test files that open a browser (they import test/web.ts or the layout, native or browser helpers) */
 export function browserTests(d: Deps): string[] {
-  return d
-    .list(join(d.root, 'test'))
-    .filter((e) => !e.dir && /\.test\.tsx?$/.test(e.name))
-    .map((e) => `test/${e.name}`)
-    .filter((f) => /['"]\.\/(web|layout|native|chromium)\.ts['"]/.test(d.read(join(d.root, f)) ?? ''))
-    .sort()
+  return (
+    d
+      .list(join(d.root, 'test'))
+      .filter((e) => !e.dir && /\.test\.tsx?$/.test(e.name))
+      .map((e) => `test/${e.name}`)
+      // a real import of one of the helpers, at a line's start: a mention inside a string is no browser test
+      .filter((f) => /^\s*import\b[^\n]*['"]\.\/(web|layout|native|chromium)\.ts['"]/m.test(d.read(join(d.root, f)) ?? ''))
+      .sort()
+  )
 }
 
 /** the browser test files, the slowest first, from the timings `scripts/test.ts` keeps (unknown ones last, by name) */
@@ -380,9 +384,9 @@ function readState(file: string, read: (f: string) => string | null): State | nu
 
 export type CoverageTrend = { commit: string; at: number | null; ageDays: number | null; summary: string; top: string[]; exempt: number }
 
-/** `measured`: this run reached its coverage step; a report left by an earlier run is not this week's trend */
-export function coverageTrend(d: Deps, common: string, logs: string, measured = true): CoverageTrend {
-  const base = readCoverageBaseline(join(common, 'shepherdr-test', 'coverage.json'))
+/** `measured`: this run reached its coverage step; a report left by an earlier run is not this week's trend. `base` is
+ *  the baseline as it stood before the gate ran (on the default branch the gate records a new one) */
+export function coverageTrend(d: Deps, common: string, logs: string, measured = true, base = readCoverageBaseline(join(common, 'shepherdr-test', 'coverage.json'))): CoverageTrend {
   const lines = measured ? (d.read(join(logs, 'coverage', 'report.txt')) ?? '').split('\n').filter(Boolean) : []
   const files = git(d, 'ls-files').split('\n').filter(counted)
   let exempt = 0
@@ -395,7 +399,8 @@ export function coverageTrend(d: Deps, common: string, logs: string, measured = 
     top: lines
       .slice(1)
       .filter((l) => l.includes('missed'))
-      .slice(0, 5),
+      .slice(0, 5)
+      .map((l) => (l.trim().length > 120 ? `${l.trim().slice(0, 117)}…` : l.trim())),
     exempt,
   }
 }
@@ -479,6 +484,8 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
   const landed = new Set(git(d, 'log', '--format=%s', base).split('\n').map(taskOf).filter(Boolean))
   const done = (w: { path: string; branch: string }) => {
     if (!w.branch || w.branch === branch || w.branch === base) return false
+    // a branch with nothing of its own (a task only just started) has nothing to put away
+    if (Number(git(d, 'rev-list', '--count', `${base}..${w.branch}`)) === 0) return false
     // the subject and the time in one call: a live follow-up on an id that already landed is not a leftover
     const [subject = '', at = '0'] = git(d, 'log', '-1', '--format=%s%x00%ct', w.branch).split('\u0000')
     if (d.clock() - Number(at) * 1000 < DONE_AGE) return false
@@ -493,7 +500,7 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
       .filter((w) => d.exists(w.path))
       .flatMap((w) =>
         d
-          .run(['git', 'status', '--porcelain'], { cwd: w.path })
+          .run(['git', '--no-optional-locks', 'status', '--porcelain'], { cwd: w.path })
           .stdout.trim()
           .split('\n')
           .filter(Boolean)
@@ -501,12 +508,13 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
       ),
     tmpHomes: d
       .list(d.tmpdir)
-      .filter((e) => e.name.toLowerCase().includes('proof') && d.clock() - e.mtime > TMP_AGE && !serverRunning(d, e.name))
+      .filter((e) => e.dir && e.name.toLowerCase().includes('proof') && d.clock() - e.mtime > TMP_AGE && !serverRunning(d, e.name))
       .map((e) => e.name)
       .sort(),
     logFolders: d
       .list(join(d.home, '.cache', 'shepherdr', 'check-local'))
-      .filter((e) => e.dir && e.name !== 'verdicts' && d.clock() - e.mtime > LOG_AGE)
+      .filter((e) => e.dir && e.name !== 'verdicts')
+      .filter((e) => d.clock() - Math.max(e.mtime, mtimeOf(join(d.home, '.cache', 'shepherdr', 'check-local', e.name, 'verdict.txt'))) > LOG_AGE)
       .map((e) => e.name)
       .sort(),
   }
@@ -642,8 +650,9 @@ export function buildReport(run: WeeklyRun, reds: RedTask[] = redTasks(run)): st
     ...(run.outdated.offline ? [] : outdated.map((o) => `  - ${o}`)),
     '',
     '## Flaky probe',
-    probe.skipped ? `Not run: ${probe.skipped}.` : `Repeated ${REPEATS} times each, once more next week:`,
-    ...(probe.skipped ? [] : probe.files.map((f) => `- ${f.file} ${f.ok ? 'ok' : `FAILED${f.detail.length ? `: ${f.detail.join(' · ')}` : ''}`}`)),
+    probe.files.length ? `Repeated ${REPEATS} times each, once more next week:` : `Not run: ${probe.skipped || 'no browser test file found'}.`,
+    ...probe.files.map((f) => `- ${f.file} ${f.ok ? 'ok' : `FAILED${f.detail.length ? `: ${f.detail.join(' · ')}` : ''}`}`),
+    ...(probe.files.length && probe.skipped ? [`The rest of the probe was given up: ${probe.skipped}.`] : []),
     '',
     '## Coverage trend',
     cov.at === null ? '- no baseline recorded on the default branch yet' : `- baseline from \`${cov.commit.slice(0, 7)}\`, ${cov.ageDays} day${cov.ageDays === 1 ? '' : 's'} old`,
@@ -704,7 +713,7 @@ function pickProbe(d: Deps, common: string, sample: number): Probe {
 
 export function main(argv: string[], overrides: Partial<Deps> = {}): number {
   const opts = parseArgs(argv)
-  const d: Deps = { ...defaults(), ...overrides }
+  const d: Deps = defaults(overrides)
   const started = d.clock()
   const root = d.root
   const common = git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir') || join(root, '.git')
@@ -729,6 +738,8 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     d.log(`weekly: the report could not be written (${e instanceof Error ? e.message : String(e)}): nothing was started`)
     return 2
   }
+  // the baseline the trend reports is the one this run started from, before the gate on the default branch records a new one
+  const coverageBase = readCoverageBaseline(join(common, 'shepherdr-test', 'coverage.json'))
   const gate = runGate(d)
   const browsers = gateBrowsers(d, logs, started)
   const audit = auditInfo(d, common)
@@ -756,6 +767,7 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
       common,
       logs,
       gate.parts.some((p) => p.name === 'coverage' && p.status === 'ok'),
+      coverageBase,
     ),
     leftovers: leftovers(d, base, branch),
     took: Math.round((d.clock() - started) / 1000),

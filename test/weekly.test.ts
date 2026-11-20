@@ -402,6 +402,7 @@ describe('the coverage trend and the leftovers', () => {
     const f = repoFixture()
     const gone = join(f.tmpdir, 'gone')
     mkdirSync(join(f.tmpdir, 'follow-up'))
+    mkdirSync(join(f.tmpdir, 'fresh-task'))
     mkdirSync(join(f.tmpdir, 'old-proof'))
     mkdirSync(join(f.tmpdir, 'running-proof-home'), { recursive: true })
     writeFileSync(join(f.tmpdir, 'running-proof-home', 'server.json'), JSON.stringify({ pid: process.pid }))
@@ -411,13 +412,18 @@ describe('the coverage trend and the leftovers', () => {
     const cache = join(f.home, '.cache', 'shepherdr', 'check-local')
     mkdirSync(join(cache, 'merged-task'), { recursive: true })
     mkdirSync(join(cache, 'verdicts'), { recursive: true })
-    const porcelain = `worktree ${f.repo}\nHEAD abc\nbranch refs/heads/work/90\n\nworktree ${gone}\nHEAD def\nbranch refs/heads/work/1\n\nworktree ${join(f.tmpdir, 'follow-up')}\nHEAD 1\nbranch refs/heads/work/77\n\nworktree ${f.tmpdir}\nHEAD 0\nbranch refs/heads/herdr-tui\n`
+    const porcelain = `worktree ${f.repo}\nHEAD abc\nbranch refs/heads/work/90\n\nworktree ${gone}\nHEAD def\nbranch refs/heads/work/1\n\nworktree ${join(f.tmpdir, 'follow-up')}\nHEAD 1\nbranch refs/heads/work/77\n\nworktree ${join(f.tmpdir, 'fresh-task')}\nHEAD 2\nbranch refs/heads/work/2\n\nworktree ${f.tmpdir}\nHEAD 0\nbranch refs/heads/herdr-tui\n`
     const run: Run = (args, o) => {
       const line = args.join(' ')
       if (line.includes('worktree list')) return plain(porcelain)
       if (line.includes('branch --merged')) return plain('* herdr-tui\n+ work/90\n')
       if (line.includes('log --format=%s herdr-tui')) return plain('SHE-90: Run the complete gate weekly\nSHE-77: Something else\n')
+      if (line.includes('rev-list --count herdr-tui..work/1')) return plain('3\n')
+      if (line.includes('rev-list --count herdr-tui..work/77')) return plain('1\n')
+      // a task only just started: nothing of its own, whatever the base's tip says
+      if (line.includes('rev-list --count herdr-tui..work/2')) return plain('0\n')
       if (line.includes('log -1 --format=%s%x00%ct work/1') && line.includes('work/1')) return plain(`SHE-77: Squashed under another id\u0000${Math.round((now - 30 * 86_400_000) / 1000)}\n`)
+      if (line.includes('log -1 --format=%s%x00%ct work/2')) return plain(`SHE-77: Squashed under another id\u0000${Math.round((now - 30 * 86_400_000) / 1000)}\n`)
       if (line.includes('log -1 --format=%s%x00%ct work/90') && line.includes('work/90')) return plain(`SHE-90: Run the complete gate weekly\u0000${Math.round(now / 1000)}\n`)
       // the same task id the base already carries, but a branch still at work: not a leftover
       if (line.includes('log -1 --format=%s%x00%ct work/77')) return plain(`SHE-77: A follow-up still at work\u0000${Math.round(now / 1000)}\n`)
@@ -444,9 +450,9 @@ describe('the coverage trend and the leftovers', () => {
       },
     })
     const left = leftovers(d, 'herdr-tui', 'work/90')
-    expect(left.worktrees).toBe(4)
+    expect(left.worktrees).toBe(5)
     expect(left.dead).toEqual([gone])
-    // work/1 descended from the base, work/77 landed as a squash under a task id its own branch names
+    // work/1 landed and sat: a leftover. work/77's id landed but the branch is at work; work/2 has no commit of its own
     expect(left.done).toEqual(['work/1'])
     expect(left.uncommitted).toEqual(['repo: M scripts/weekly.ts'])
     // the running proof server's home is not a leftover; the young one is not finished; the old one is
@@ -454,7 +460,7 @@ describe('the coverage trend and the leftovers', () => {
     expect(processAlive(process.pid)).toBe(true)
     expect(processAlive(4194305)).toBe(false)
     expect(left.logFolders).toEqual(['merged-task'])
-    expect(parseWorktrees(porcelain)).toHaveLength(4)
+    expect(parseWorktrees(porcelain)).toHaveLength(5)
   })
 })
 
@@ -663,6 +669,8 @@ describe('the run itself', () => {
     expect(text).toContain('test/layout-a.test.ts ok')
     expect(text).toContain('## Red\nNone')
     expect(existsSync(join(f.repo, 'report.md'))).toBe(false)
+    // nothing else of the report landed in the tree either
+    expect(Bun.spawnSync(['git', 'status', '--porcelain'], { cwd: f.repo, stdout: 'pipe' }).stdout.toString().trim()).toBe('')
     // the next week's sample starts after this one's first pick (the rotation)
     const state = JSON.parse(readFileSync(join(f.common, 'shepherdr-weekly', 'state.json'), 'utf8')) as { sample: string[] }
     expect(state.sample).toEqual(['test/layout-a.test.ts'])
