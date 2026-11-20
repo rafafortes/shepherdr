@@ -93,6 +93,47 @@ info file one run replaces under the other only costs a rebuild, never a wrong a
 worktree still report to one `verdict.txt` and one set of step logs, so a worktree runs one full check at a time; the
 overlap to use is a `--quick` run beside a full one.
 
+`bun scripts/weekly.ts` is the weekly full check: the run where nothing may be missed, on the default branch, on a
+schedule. The space's coordinator adds it as one Shepherdr automation ("Weekly full check", Tuesday 9:00, after
+Monday's upstream pass) once this script is on `herdr-tui`; its added task runs the script and, on red, files one task
+per red area through the coordinator. Nobody adds the automation from a task's worktree.
+
+It runs `bash scripts/check-local.sh` whole, with the whole tree's language scan (`SHEPHERDR_LANGUAGE_SCOPE=tree`); the
+runner opens both browsers itself, right after the step that installs their dependencies, and the script reads the
+probe's log rather than opening them a second time, and only when this run wrote it. Then it weighs the advisory audit and `bun outdated`, repeats
+browser test files five times each, and measures the coverage trend and the leftovers. A week is red when the gate
+failed a step, when it ran without a pass it can name a step for (gave up waiting for the lock, stopped, killed), when a
+step did not run at all (a part the host lacks leaves the tree unchecked), when a browser could not start or the probe
+left no line (its tests then skip silently), when the runner named something else that did not happen, when the audit
+found a new advisory, and when the probe saw a file fail or saw every test of a file skip (a browser that could not
+start proves nothing about flakiness). A green week prints one line; a red one prints one line per red
+area, and the named task for each — title and brief, with the failing tests the gate printed — is in the report. It prints nothing until the end, so run it in
+the background as you would the full check, and read the report.
+
+The report is one markdown file in the repository's own `.git` (`shepherdr-weekly/report.md`, beside `state.json` for the
+next rotation), never in the tree; read it there, in the main checkout's `.git`, not in yours. It says a run is on from
+its first minute, so a run killed by a tool's timeout never leaves last week's report looking current. It carries the gate's
+verdict and time, how far the run is from the base's tip, the browsers, the audit and the packages that could move,
+the probe's repeats, the coverage trend (the baseline as it stood before the run, its age, the worst files, the
+`coverage-exempt:` count) and the leftovers:
+worktrees of tasks that already landed (by ancestry or by the task id their subject names, since a task lands squashed),
+`/tmp` proof scratch older than two hours whose server is gone, gate log folders older than a week, and the checkout's
+uncommitted files of any of the repository's worktrees. It counts them and deletes nothing. (The report is the operator's: its machine's paths and numbers
+stay in that `.git`, which is why it is never written into the tree.)
+
+A dependency that could move is only reported, never bumped: each update is weighed and pinned by hand, and an
+unreachable registry is said, not read as "nothing to move". The probe takes five browser test files from the
+slowest-first list (`node_modules/.cache/shepherdr-test/timings.json`), never one it already probed in this turn of the
+list, so every file is reached over the weeks and a re-sorted timing file cannot make it jump; it repeats each five
+times, at most five files a week, is skipped when the gate did not pass (no point piling load on a machine whose suite
+is already red), and holds the full checks' lock — a quarter of an hour at most, then the probe is given up for the
+week rather than queue for hours — and runs in the same low-priority `systemd-run` scope, with `bun test
+--parallel=1` and the identity the runner gives its tests, so it never runs beside another worktree's gate and
+`test/preload.ts` does not send it through `scripts/test.ts` to rewrite the timings that order it.
+`--no-probe` and `--sample <n>` (at most five) are for a trial run, and neither replaces the gate: nothing merges over a
+red check. Exit codes: 0 green, 1 a red part, 2 it could not run (not a git checkout, or the report could not be
+written).
+
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
 numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,
