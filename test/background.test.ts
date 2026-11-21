@@ -1,6 +1,7 @@
 // Background work that outlives an agent's turn (readers/background.ts): Claude Code's session file and its screen, on
 // samples captured from real panes and session files (Claude Code 2.1.310).
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import * as fs from 'node:fs'
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -10,12 +11,15 @@ import { tmp } from './tmp.ts'
 process.env.SHEPHERDR_HOME = tmp('bg')
 process.env.CLAUDE_CONFIG_DIR = tmp('bg-claude')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
-const { agyScreenBackground, ClaudeSessions, Procs, headless, screenBackground, servesCommand, sessionBackground, shellCommand } = await import('../server/live/readers/background.ts')
+const { agyScreenBackground, ClaudeSessions, opencodeScreenBackground, Procs, headless, screenBackground, servesCommand, sessionBackground, shellCommand } = await import(
+  '../server/live/readers/background.ts'
+)
 const { headlessJob } = await import('../server/live/activity.ts')
 const { claudeProjectDir, piSessionDir } = await import('../server/live/readers/find.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { writeJson } = await import('../server/store.ts')
 const { record } = await import('../server/live/readers/hooks.ts')
+const { closeOpencodeDbs } = await import('../server/live/opencode.ts')
 
 const BOX = '─'.repeat(130)
 
@@ -122,6 +126,18 @@ describe("Claude Code's screen", () => {
     expect(screenBackground('')).toBeUndefined()
     // "← 4 agents" is the footer's way to the agent list, not agents at work
     expect(screenBackground(screen(['✻ Done'], '  ⏵⏵ bypass permissions on · ← 4 agents'))).toBeUndefined()
+  })
+})
+
+describe("OpenCode's footer", () => {
+  test('a subagent count says agents, shells alone say shells, nothing says nothing', () => {
+    expect(opencodeScreenBackground('↓ 1 subagent · 233.5K (22%)')).toBe('agents')
+    expect(opencodeScreenBackground('↓ 1 subagent · 2 shells')).toBe('agents')
+    expect(opencodeScreenBackground('↓ 2 subagents')).toBe('agents')
+    expect(opencodeScreenBackground('↓ 2 shells')).toBe('shells')
+    expect(opencodeScreenBackground('↓ 0 subagent · ↓ 1 shell')).toBe('shells')
+    expect(opencodeScreenBackground('233.5K (22%)')).toBeUndefined()
+    expect(opencodeScreenBackground('')).toBeUndefined()
   })
 })
 
@@ -325,6 +341,86 @@ describe('an agent whose turn ended', () => {
     await until(() => told.includes('T-4/Agent'))
     expect(a.background('T-4/Agent')).toBeUndefined()
     a.stop()
+  })
+
+  // SHE-181: it starts a review with OpenCode's task tool, writes "I'll continue when it reports" and ends its turn.
+  // The subagent session is a busy child of its own session in the database; that is work, not a question for the human.
+  const subDir = tmp('bg-opencode-subagent')
+  const subDb = join(subDir, 'opencode.db')
+  const savedDb = process.env.SHEPHERDR_OPENCODE_DB
+  const child = (idle: boolean) => {
+    const d = new Database(subDb, { create: true })
+    if (!d.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_v2'").get()) {
+      d.run('CREATE TABLE session_v2 (id text primary key, parent_id text, time_busy integer, time_idle integer, time_archived integer)')
+      d.run("INSERT INTO session_v2 VALUES ('ses_4', NULL, 10, 20, NULL)")
+      d.run("INSERT INTO session_v2 VALUES ('ses_child', 'ses_4', 30, NULL, NULL)")
+    }
+    d.run('UPDATE session_v2 SET time_idle = ? WHERE id = ?', [idle ? 40 : null, 'ses_child'])
+    d.close()
+    process.env.SHEPHERDR_OPENCODE_DB = subDb
+  }
+
+  test('OpenCode: a running subagent keeps it at work with or without a shell; once it reports, it needs you', async () => {
+    child(false)
+    process_(95, ['/bin/bash', '-c', 'tools/changed-check.sh --fast'], ['HOME=/h', 'SHEPHERDR_CHAT=T-4/Agent'])
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    const told: string[] = []
+    a.on('status', (key) => told.push(key))
+    await a.refresh()
+    await until(() => a.background('T-4/Agent') === 'agents')
+    expect(told).toContain('T-4/Agent')
+    // a subagent, unlike shells alone, keeps it at work however long it runs
+    expect(a.background('T-4/Agent', Date.now() + a.shellsFor + 1)).toBe('agents')
+    // it reports and ends: the shell it also started is now the only work left, and then nothing
+    child(true)
+    await a.refresh()
+    await until(() => a.background('T-4/Agent') === 'shells')
+    rmSync(join(proc, '95'), { recursive: true })
+    a.procs = new Procs(proc)
+    told.length = 0
+    await a.refresh()
+    await until(() => told.includes('T-4/Agent'))
+    expect(a.background('T-4/Agent')).toBeUndefined()
+    a.stop()
+  })
+
+  test('OpenCode: where the database cannot tell, the footer of an idle pane names the running subagent', async () => {
+    const old = join(tmp('bg-opencode-old'), 'opencode.db')
+    const d = new Database(old, { create: true })
+    d.run('CREATE TABLE session_v2 (id text primary key, parent_id text)')
+    d.close()
+    process.env.SHEPHERDR_OPENCODE_DB = old
+    const was = screens.p4
+    screens.p4 = screen(['✻ done 10:04 PM'], '  ↓ 1 subagent · 233.5K (22%)')
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    try {
+      await a.refresh()
+      await until(() => a.background('T-4/Agent') === 'agents')
+      // it reports: no footer count, no shell, no database answer -> it needs you
+      screens.p4 = screen(['✻ done 10:05 PM'], '  233.5K (22%)')
+      await a.refresh()
+      await until(() => a.background('T-4/Agent') === undefined)
+    } finally {
+      screens.p4 = was
+      a.stop()
+    }
+  })
+
+  test('OpenCode: with no child and no shell it needs you, as before', async () => {
+    child(true)
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    await a.refresh()
+    expect(a.background('T-4/Agent')).toBeUndefined()
+    a.stop()
+  })
+
+  afterAll(() => {
+    if (savedDb === undefined) delete process.env.SHEPHERDR_OPENCODE_DB
+    else process.env.SHEPHERDR_OPENCODE_DB = savedDb
+    closeOpencodeDbs()
   })
 
   test('Codex: it keeps a command running past its turn but is never woken by it, so that turn waits on you', async () => {
@@ -718,6 +814,25 @@ describe("OpenCode's background shells", () => {
     expect(p.shells('T-1/Agent', Date.now() + 7500)).toEqual([])
   })
 
+  // POL-495: OpenCode starts `sh -c "bash run_benchmark.sh"`, which execs into `bash run_benchmark.sh`. That command
+  // line has no -c, but it is still the chat's background shell: its parent is the pty daemon and its environment says
+  // whose it is. A python script (and any other direct child of that daemon carrying the chat) counts the same way.
+  test('a script a shell execd into under the daemon is still its background shell, with no -c in its argv', () => {
+    const proc = tmp('proc-oc-exec')
+    daemon(proc)
+    put(proc, 11, ['/bin/bash', 'run_benchmark.sh'], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'], 10)
+    put(proc, 12, ['/usr/bin/python3', 'worker.py'], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'], 10)
+    // under another parent, or without the chat: not this agent's background shell
+    put(proc, 13, ['/bin/bash', 'x.sh'], ['SHEPHERDR_CHAT=T-1/Agent'], 5)
+    put(proc, 14, ['/bin/bash', 'x.sh'], ['HOME=/h'], 10)
+    const p = new Procs(proc)
+    expect(p.shells('T-1/Agent')).toEqual([
+      ['/bin/bash', 'run_benchmark.sh'],
+      ['/usr/bin/python3', 'worker.py'],
+    ])
+    expect(p.shells('T-2/Agent')).toEqual([])
+  })
+
   test('with no /proc (macOS) a shell carrying the chat is one of them, since its parent cannot be read there', () => {
     const ps = [
       '/bin/bash -c tools/changed-check.sh --fast SHEPHERDR_CHAT=T-1/Agent HOME=/Users/e',
@@ -787,8 +902,9 @@ describe('the cost of a /proc pass', () => {
     })
     // only the shell and the headless CLI need their environ; the 100 builders and the daemon do not
     expect(count.env).toBe(2)
-    // argv: the 100 builders, the daemon, the shell, the reviewer, and the daemon again as the shell's parent
-    expect(count.argv).toBe(104)
+    // argv: the 100 builders, the daemon, the shell, the reviewer, the daemon again as the shell's parent, and the
+    // daemon's own parent (pid 5, absent here) read once to tell that it is not itself a daemon child
+    expect(count.argv).toBe(105)
   })
 
   // a process can end between its argv and its environ being read: the catch in chatOf is a normal pass on a busy

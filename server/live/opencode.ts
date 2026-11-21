@@ -166,6 +166,8 @@ interface Open {
   db: Database
   ino: number
   version: Statement<{ data_version: number }, []>
+  /** prepared on first use: an old database without time_busy has no such query, and must not break the mirror */
+  subagent?: Statement<{ id: string }, [string]>
 }
 const opened = new Map<string, Open>()
 
@@ -184,6 +186,28 @@ function handleOf(file: string): Open {
 export function closeOpencodeDbs() {
   for (const o of opened.values()) o.db.close()
   opened.clear()
+}
+
+/** the child sessions of `parent_id` that are busy now: time_busy is when it last started, time_idle when it last
+ *  stopped. OpenCode does not clear the old idle when a session is resumed, so a busy one has either no idle or an idle
+ *  older than its busy (SHE-181, verified on 2.3.0's own database). Such an unarchived child will report back and wake
+ *  its parent. */
+const SUBAGENT_SQL = 'SELECT id FROM session_v2 WHERE parent_id = ? AND time_busy IS NOT NULL AND (time_idle IS NULL OR time_idle < time_busy) AND time_archived IS NULL LIMIT 1'
+
+/**
+ * Is a subagent of this OpenCode session still running? Read from the same read-only handle the mirror uses, so a pass
+ * that asks every idle agent costs one stat and one indexed lookup. `undefined` means the database cannot tell (no file,
+ * an OpenCode old enough not to write time_busy/time_idle, or any read error): the caller can fall back to the footer.
+ */
+export function opencodeSubagentRunning(sessionId: string, db: string = opencodeDb()): boolean | undefined {
+  if (!existsSync(db)) return undefined
+  try {
+    const o = handleOf(db)
+    o.subagent ??= o.db.query<{ id: string }, [string]>(SUBAGENT_SQL)
+    return !!o.subagent.get(sessionId)
+  } catch {
+    return undefined
+  }
 }
 
 /** what a mirror last did for one log file: where it left off (the seq of its last line, the size and inode that file

@@ -82,8 +82,9 @@
   is still Working (shells alone for up to an hour, since a server it started for you never wakes it and is let go
   after 10 minutes; a shell running a headless reviewer of another CLI, `codex exec` or `claude -p`, counts as a
   subagent), unless its last words ask you something. Each CLI's own shape counts: Claude Code's hooks, session file
-  and screen, Antigravity's screen rows, and OpenCode's background shells, the commands its pty daemon still runs for
-  it after the turn. A card or question it asked before this turn began does not hold a working task on Needs you;
+  and screen, Antigravity's screen rows, and OpenCode's running subagents (a busy child session in its database, its
+  footer where that cannot tell) and background shells, any command its pty daemon still runs for it after the turn.
+  A card or question it asked before this turn began does not hold a working task on Needs you;
   one asked in the turn running now does. A task that needs you says why in at most 40 characters, never by pasting
   the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit

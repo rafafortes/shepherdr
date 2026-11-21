@@ -76,7 +76,9 @@ build, check and review the work is your own judgment.
    its line comes from that CLI's documented flags; a figure that could not be verified is marked unverified. The line
    already carries the round's model and effort: replace `<prompt>` with your short prompt file and `<out>` with the file
    to stream into. It streams the reviewer's output there as it is written; after a timeout, read the file first and use
-   any findings there instead of starting over. Never in the background, and never end your turn while a review runs.
+   any findings there instead of starting over. Wait here for it: never in the background, never end your turn while a
+   review runs, and if it times out, wait for the fallback subagent in this same turn too; do not end the turn and expect
+   to be woken when it reports.
    Timed out or failed with nothing usable: one subagent review instead, the same round. pi has no enforced read-only
    mode: its reviewer needs `bash` to run git, and the prompt forbids changes. Give the reviewer the authoritative
    command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), never your

@@ -9,7 +9,11 @@
 // OpenCode (2.3) keeps its background shells under a pty daemon of its own (opencode-pty, a child of its server): each is
 // a `/bin/sh -c <command>` whose environment carries the agent's SHEPHERDR_CHAT, and its footer counts them ("↓ 1 shell",
 // "↓ 1 subagent · 2 shells"). It wakes the agent when one ends ("↳ Shell finished · cd … && tools/changed-check.sh"), so
-// a shell still running is a pause as well (Procs.shells).
+// a shell still running is a pause as well (Procs.shells). A shell it starts with `sh -c "bash x.sh"` can exec into the
+// script and lose its -c, so any direct child of the pty daemon carrying the chat counts, whatever its command line.
+// Its subagents outlive the turn the same way and wake it when they report. A busy child session in its database
+// (session_v2: time_busy newer than time_idle, or no idle yet — a resumed child keeps its old idle) says one runs; the
+// footer's "↓ N subagent" is read only where that database cannot tell, and only on an idle or done pane.
 // Codex keeps a command running past its turn (a process with a session id in its output, its code mode's cell), but is
 // never woken by it, and pi 1.5.2 has no background shell at all (its bash tool is one command it waits on; only a herdr
 // child it spawned wakes it, through pi-herdr's delivery, which is not read here): their turn's end waits on you.
@@ -49,6 +53,21 @@ export function screenBackground(screen: string): Background | undefined {
   if (/Waiting for \d+ background agents? to finish/.test(above) || rows.some((r) => /^\s*[◯○●◉]\s+(?!main\s*$)\S/.test(r))) return 'agents'
   if (/·.*\bstill running\s*$/.test(above) || /(^|·)\s*\d+ (shells?|monitors?)\b/.test(footer)) return 'shells'
   return undefined
+}
+
+/** OpenCode's footer counts what still runs: "↓ 1 subagent · 2 shells", "↓ 1 subagent · 233.5K (22%)". Its database is
+ *  the source; this is the fallback where that cannot tell (an older OpenCode without time_busy/time_idle, no file) */
+export function opencodeScreenBackground(screen: string): Background | undefined {
+  const footer =
+    screen
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim())
+      .at(-1) ?? ''
+  const sub = /↓\s*(\d+)\s+subagents?\b/.exec(footer)
+  if (sub && Number(sub[1]) >= 1) return 'agents'
+  const shells = /↓\s*(\d+)\s+shells?\b/.exec(footer)
+  return shells && Number(shells[1]) >= 1 ? 'shells' : undefined
 }
 
 /** a row of agy's background commands below its input box: "● [06:57:43] <command> running" */
@@ -225,6 +244,8 @@ export class Procs {
   private tracked = new Map<string, { chat: string; argv: string[] }>()
   /** the pids of OpenCode's pty daemons: their children are those shells (they live as long as the agent) */
   private daemons = new Set<string>()
+  /** parents checked this pass and found not to be daemons: a parent with many young children is read once */
+  private notDaemon = new Set<string>()
   /** when each was first seen, where nothing says when it started (ps) */
   private first = new Map<string, number>()
 
@@ -298,8 +319,12 @@ export class Procs {
     }
     if (!ppid || ppid === '0' || ppid === '1') return false
     if (this.daemons.has(ppid)) return true
+    if (this.notDaemon.has(ppid)) return false
     const parent = this.argv(ppid)
-    if (!parent.some((w) => /(^|\/)opencode-pty$/.test(w)) || !parent.includes('daemon')) return false
+    if (!parent.some((w) => /(^|\/)opencode-pty$/.test(w)) || !parent.includes('daemon')) {
+      this.notDaemon.add(ppid)
+      return false
+    }
     this.daemons.add(ppid)
     return true
   }
@@ -323,6 +348,7 @@ export class Procs {
     const live = new Set(pids)
     for (const pid of [...this.tracked.keys()]) if (!live.has(pid)) this.tracked.delete(pid)
     for (const pid of [...this.daemons]) if (!live.has(pid)) this.daemons.delete(pid)
+    this.notDaemon.clear()
     // the shells known from before, read again: one still running keeps its command line
     for (const [pid, known] of [...this.tracked]) {
       const argv = this.argv(pid)
@@ -346,8 +372,13 @@ export class Procs {
       // only a headless CLI or an OpenCode shell needs the chat: every other young process (a shell, compiler
       // wrapper or tool subprocess a build spawns by the hundred) would have its environ read and then discarded
       const head = headless(argv)
-      const shell = shellCommand(argv)
-      if (!head && !shell) {
+      // OpenCode starts a background shell as `sh -c "bash x.sh"`, which execs into `bash x.sh`: that command line
+      // has no -c, so shellCommand cannot tell it. Any direct child of its pty daemon is one of its shells, whatever
+      // its argv; the daemon's own command and its environment naming the chat are what tell whose it is. Check the
+      // parent (one stat, then the parent's argv only where it is not a known daemon) before the environ, so a busy
+      // /proc pays no environ read for the thousands of processes that are not daemon children.
+      const daemonChild = !head && this.underDaemon(pid)
+      if (!head && !daemonChild) {
         plain.set(pid, since ?? now)
         continue
       }
@@ -358,8 +389,10 @@ export class Procs {
         if (chat && st) this.add(chats, chat, { argv, pid: Number(pid), at: st.ctimeMs })
         continue
       }
-      // an OpenCode background shell: a command its own pty daemon still runs for this chat
-      if (chat && this.underDaemon(pid)) {
+      // an OpenCode background shell: a command its own pty daemon still runs for this chat. Any direct child of that
+      // daemon counts, whatever its argv: it was started as a shell and wakes the agent when it ends. servesCommand
+      // still tells the ones that never end (a dev server it left for you) apart from the ones that do.
+      if (chat && daemonChild) {
         this.tracked.set(pid, { chat, argv })
         this.add(running, chat, argv)
         continue
@@ -393,7 +426,7 @@ export class Procs {
       const argv = env > 0 ? words.slice(0, env) : words
       const who = chat.slice(CHAT.length)
       // with no /proc to read a process's parent from, any shell carrying the chat is taken as one of its background
-      // shells: the daemon it hangs under cannot be told there
+      // shells: the daemon it hangs under cannot be told there, nor a script one of those shells exec'd into
       if (shellCommand(argv)) {
         this.add(running, who, argv)
         continue
