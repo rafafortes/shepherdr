@@ -46,8 +46,8 @@ snapshot gives back is what Shepherdr itself knows.
 
 ## Retention
 
-The newest 14 days, then one snapshot for each of the 4 weeks before them (the day a week stands for is its newest one,
-so a week is kept by its last night). A store whose bytes did not change is a hard link to the night before rather than
+The 14 newest snapshots, then one for each of the 4 weeks before them (the day a week stands for is its newest one, so a
+week is kept by its last night; a night the timer missed leaves the 14 covering more than 14 days). A store whose bytes did not change is a hard link to the night before rather than
 a second copy, so a store that does not change costs no new space. The three big ones — `tasks.json`, `agents.json` and
 the usage ledger — change every few minutes on a busy home, so plan for close to the stores' own size a night: a home of
 20 MB keeps 18 snapshots in under 400 MB. The size each run prints is what the snapshot holds, not what the night added
@@ -97,8 +97,11 @@ first:
   [Service]
   Type=oneshot
   WorkingDirectory=%h/path/to/shepherdr
-  ExecStart=/bin/sh -c 'exec nice -n 19 ionice -c 3 bun scripts/snapshot.ts'
+  ExecStart=/bin/sh -c 'exec nice -n 19 ionice -c 3 %h/.bun/bin/bun scripts/snapshot.ts'
   ```
+
+  A user unit's `PATH` is not your shell's, so the line names the `bun` Shepherdr runs on by its path (`~/.bun/bin/bun`
+  is where the installer puts it; `command -v bun` says yours).
 
   ```ini
   # ~/.config/systemd/user/shepherdr-snapshot.timer

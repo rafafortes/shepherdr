@@ -202,9 +202,10 @@ export function snapshot(dir: string, at = new Date()): Snapshot {
       skipped.push(name)
     }
   }
-  // a store it could not copy is a night not saved at all: a folder that looks like a backup and is missing a store is
+  // a store it could not copy, or a home with no store at all (a SHEPHERDR_HOME pointing at the wrong folder, a store
+  // that is briefly missing), is a night not saved at all: a folder that looks like a backup and is missing a store is
   // worse than none, and replacing a complete one an earlier run today made with it would lose that too
-  if (skipped.length) {
+  if (skipped.length || !files.length) {
     rmSync(made, { recursive: true, force: true })
     return { day, dir: '', files, bytes, shared, skipped, removed: [], saved: false }
   }
@@ -234,10 +235,14 @@ export function prune(root: string): string[] {
   }
   const removed: string[] = []
   for (const day of days)
-    if (!keep.has(day)) {
-      rmSync(join(root, day), { recursive: true, force: true })
-      removed.push(day)
-    }
+    if (!keep.has(day))
+      try {
+        rmSync(join(root, day), { recursive: true, force: true })
+        removed.push(day)
+      } catch {
+        // coverage-exempt: a folder that will not go (a mode, a mount) is left for the next night rather than failing a
+        // night that has already saved its snapshot
+      }
   return removed
 }
 
@@ -352,7 +357,11 @@ export function main(argv: string[] = process.argv.slice(2), dir = home(), at = 
   }
   const made = snapshot(dir, at)
   if (!made.saved) {
-    console.error(`snapshot: nothing was saved for ${made.day}: could not copy ${made.skipped.join(', ')}`)
+    console.error(
+      made.files.length
+        ? `snapshot: nothing was saved for ${made.day}: could not copy ${made.skipped.join(', ')}`
+        : `snapshot: nothing was saved for ${made.day}: no store was found in ${dir} (is SHEPHERDR_HOME the right folder?)`,
+    )
     return 1
   }
   console.log(

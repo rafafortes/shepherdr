@@ -334,6 +334,11 @@ describe('the command', () => {
       // a home that is not there is said, not a stack trace in a nightly log
       expect(main([], join(dir, 'not-a-home'))).toBe(1)
       expect(said(page)).toContain('no Shepherdr home in')
+      // and a home with no store in it saves nothing: an empty folder must never stand in for a night's backup
+      const none = tmp('snapshot-no-stores')
+      expect(main([], none, new Date(2026, 10, 18))).toBe(1)
+      expect(said(page)).toContain('no store was found in')
+      expect(existsSync(join(none, FOLDER, '2026-11-18'))).toBe(false)
     } finally {
       log.mockRestore()
       page.mockRestore()
