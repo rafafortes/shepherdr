@@ -177,9 +177,10 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.retryReviews()
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ key: toBe(t) })
-    expect(sent[0]!.text).toContain('A reviewer is free now. Round 1 of 3 counted for ' + t.id + '. Review with a headless pi or a pi subagent (its default model and effort) this round')
-    expect(sent[0]!.text).toContain(`Run \`shepherdr review ${t.id} --run <prompt-file>\``)
-    expect(sent[0]!.text).toContain(`\`shepherdr review ${t.id} --done\``)
+    const text = sent[0]!.text
+    expect(text).toContain('A reviewer is free now. Round 1 of 3 counted for ' + t.id + '. Review with a headless pi or a pi subagent (its default model and effort) this round')
+    expect(text).toContain(`Run \`shepherdr review ${t.id} --run <prompt-file>\``)
+    expect(text).toContain(`\`shepherdr review ${t.id} --done\``)
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'pi/unknown' })])
