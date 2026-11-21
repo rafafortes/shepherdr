@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const calls: { opts?: Record<string, unknown>; steps: string[] } = { steps: [] }
-let next: { findings: string; cutShort?: boolean; failed?: string; pane?: string } = { findings: 'major: the pane works' }
+let next: { findings: string; cutShort?: boolean; failed?: string; error?: string; pane?: string } = { findings: 'major: the pane works' }
 mock.module('../server/live/review-pane.ts', () => ({
   reviewerPrompt: (base: string) => base,
   readPromptFile: (path: string) => {
@@ -106,6 +106,19 @@ describe('shepherdr review --run', () => {
     expect(t.reviews).toBe(1)
   })
 
+  test('a reviewer error keeps partial findings, marks them cut short and posts an error card', async () => {
+    const t = task()
+    next = { findings: 'Let me read the diff', error: '402 Insufficient funds', cutShort: true }
+    const r = await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    expect(r.out).toContain('The reviewer gave an error (402 Insufficient funds)')
+    expect(r.out).toContain('these are its partial findings')
+    expect(r.out).toContain('Let me read the diff')
+    const cards = src.chats.log(`${t.id}/Agent`).posted.filter((p) => p.card?.id === `review-pane:${t.id}:1`)
+    expect(cards[0]?.card?.text).toContain('ended early: its reviewer gave an error')
+    // an error still frees the reviewer, so the round does not hold a slot
+    expect(src.engine.runs().filter((x) => x.role === 'reviewer')).toHaveLength(0)
+  })
+
   test('the setup callback gives codex its tool environment and does not pass agy a conflicting effort', async () => {
     const t = task()
     await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
@@ -115,6 +128,9 @@ describe('shepherdr review --run', () => {
     const policy = (codex.extra as string[])[1]
     expect(codex.extra).toMatchObject(['-c', expect.stringContaining('shell_environment_policy.set=')])
     expect(String(policy)).toContain('SHEPHERDR_CHAT')
+    // claude and pi fall through to the plain session id
+    const claude = await prepare('claude', `${t.id}/Reviewer`, { kind: 'claude' })
+    expect(typeof claude.sessionId).toBe('string')
     const agy = await prepare('agy', `${t.id}/Reviewer`, { kind: 'agy' })
     expect(agy.modelId).toBeUndefined()
     expect(typeof agy.sessionId).toBe('string')
