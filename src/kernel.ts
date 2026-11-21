@@ -252,6 +252,8 @@ export interface UI {
   shut: string[]
   /** the lists (by their key) whose tasks column shows their Archived tasks instead */
   archived: string | null
+  /** tasks picked for a bulk action in the Tasks list (null: not selecting); cleared when the list is left */
+  selected: Set<string> | null
   /** what each list is filtered by, while typed: "place|tasks", "place|artifacts" (*pinned for the pinned chips) */
   filter: Record<string, string>
   /** message id with the reaction bar open */
@@ -423,6 +425,8 @@ let state: State = {
     find: null,
     offline: null,
     ...keptUI,
+    // a session-kept UI never brings a selection back: leaving the list is what clears it
+    selected: null,
   },
 }
 
@@ -475,6 +479,16 @@ export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   if (p.place !== undefined && p.split === undefined && p.place !== state.ui.place) p = { ...placeInPane(state.ui, p.place), ...p }
   // the open task on the right had the focus and closes: the first pane takes it
   else if (p.task === null && p.split === undefined && state.ui.task && state.ui.split.pane < 0 && state.ui.split.panes.length) p = { ...splitTo({ ...state.ui.split, pane: 0 }), ...p }
+  // a selection belongs to the Tasks list: another place, tab, task or the Archived view leaves it, so it goes
+  if (
+    p.selected === undefined &&
+    state.ui.selected &&
+    ((p.task !== undefined && p.task !== state.ui.task) ||
+      (p.place !== undefined && p.place !== state.ui.place) ||
+      (p.tab !== undefined && p.tab !== state.ui.tab) ||
+      (p.archived !== undefined && p.archived !== state.ui.archived))
+  )
+    p = { ...p, selected: null }
   // nothing changes: nothing redraws
   if ((Object.keys(p) as (keyof UI)[]).every((k) => Object.is(p[k], state.ui[k]))) return
   state = { ...state, ui: { ...state.ui, ...p } }
@@ -1180,6 +1194,21 @@ export function pinTask(t: Task, on: boolean) {
 /** stop a task: its agent and space close, it is To do and its work stays, until it is written to again */
 export function stopTask(t: Task) {
   return act({ type: 'stop', chat: t.agent?.chat ?? `${t.id}/Agent` })
+}
+
+/** the Tasks list's selection mode: a Set (even empty) is on, null is off. Leaving the list clears it (setUI). */
+export function clearSelection() {
+  setUI({ selected: null })
+}
+
+/** tick one row, entering selection mode if it was off; a second tick unticks it */
+export function toggleSelected(id: string) {
+  setUI((ui) => {
+    const next = new Set(ui.selected ?? [])
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return { selected: next }
+  })
 }
 
 /** mark a task done with nothing merged: refused (held: what it holds) while it holds unmerged work, unless force */

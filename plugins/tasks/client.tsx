@@ -12,6 +12,7 @@ import {
   act,
   archivedIn,
   archiveTask,
+  clearSelection,
   definePlugin,
   closeTask,
   deleteTask,
@@ -34,6 +35,7 @@ import {
   setGroup,
   stopTask,
   setUI,
+  toggleSelected,
   toggleAllDone,
   toggleShut,
   shownGroups,
@@ -57,6 +59,7 @@ import {
   DownIcon,
   Empty,
   FilterBox,
+  Ghost,
   ic,
   IconButton,
   LinkButton,
@@ -104,22 +107,42 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // archived: a quiet ring, or a done task's check; the status it was put away with stays in its chat
   const dot = t.archived ? (t.status === 'done' ? 'done' : 'idle') : t.status
   const menu = useRowMenu()
+  // selection mode: a ring in place of the dot's lead, a tick on the picked rows; a tap ticks instead of opening
+  const selected = useUI((u) => u.selected)
+  const selecting = selected !== null
+  const isSel = !!selected?.has(t.id)
   // while its ⋯ shows, the age gives it its place
   const shy = menu.open ? 'invisible' : '[@media(hover:hover)]:group-hover:invisible [@media(hover:hover)]:group-has-focus-visible:invisible'
   return (
-    <li data-flip={t.id} className={clsx(rowClass(sel, kb), 'group p-0! select-none [-webkit-touch-callout:none]', menu.open && !sel && 'bg-hover')} {...menu.press}>
+    <li
+      data-flip={t.id}
+      data-selected={isSel || undefined}
+      className={clsx(rowClass(sel, kb), 'group p-0! select-none [-webkit-touch-callout:none]', menu.open && !sel && 'bg-hover', isSel && 'bg-sel')}
+      {...menu.press}
+    >
       {/* the whole row is one button (it opens the task); its ⋯ sits over its end, a button of its own */}
       <button
         type="button"
         aria-current={sel || undefined}
-        // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
-        onClick={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
+        aria-pressed={selecting ? isSel : undefined}
+        // a tap while selecting ticks the row; otherwise it opens the task, beside the focused pane with ⌘ (Ctrl off a Mac)
+        onClick={(e) => {
+          if (menu.held()) return
+          if (selecting) toggleSelected(t.id)
+          else if (splitClick(e)) openSplit({ kind: 'task', id: t.id })
+          else openTask(t.id)
+        }}
         className={clsx(
           // where nothing hovers its ⋯ always shows, so the words keep clear of it, past the age
           'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [@media(hover:none)]:pr-9!',
           sub || run ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
         )}
       >
+        {selecting ? (
+          <span aria-hidden className={clsx('grid size-[18px] shrink-0 place-items-center self-center rounded-full border border-fg3 text-bg', isSel && 'border-focus bg-focus')}>
+            {isSel ? <CheckIcon className="size-3" /> : null}
+          </span>
+        ) : null}
         <TaskDot s={dot} w={t.archived ? undefined : t.report} under={!!run} />
         <RowText sub={sub} more={run}>
           <span className="text-fg3">{t.id}</span> {t.name}
@@ -217,7 +240,25 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
 
 /* ---------- stopping a task, archiving a working one and deleting any, ask first ---------- */
 
-type Confirming = { t: Task; kind: 'stop' | 'archive' | 'delete' } | { t: Task; kind: 'close'; held: string[]; error?: string }
+type BulkOp = 'stop' | 'archive' | 'unarchive' | 'pin'
+type Refusal = { id: string; error: string }
+type Confirming =
+  | { t: Task; kind: 'stop' | 'archive' | 'delete' }
+  | { t: Task; kind: 'close'; held: string[]; error?: string }
+  | { kind: 'bulk'; op: BulkOp; tasks: Task[]; risky: string[] }
+  | { kind: 'bulk-result'; op: BulkOp; done: number; failed: Refusal[] }
+
+// one call per task, never a new server verb: the engine's own news and clean-up stay per task
+const BULK_ACT: Record<BulkOp, (t: Task) => Promise<unknown>> = {
+  stop: (t) => stopTask(t),
+  archive: (t) => archiveTask(t, true),
+  unarchive: (t) => archiveTask(t, false),
+  pin: (t) => pinTask(t, true),
+}
+const BULK_WORD: Record<BulkOp, string> = { stop: 'Stop', archive: 'Archive', unarchive: 'Unarchive', pin: 'Pin' }
+const BULK_BUSY: Record<BulkOp, string> = { stop: 'Stopping', archive: 'Archiving', unarchive: 'Unarchiving', pin: 'Pinning' }
+const BULK_DONE: Record<BulkOp, string> = { stop: 'stopped', archive: 'archived', unarchive: 'unarchived', pin: 'pinned' }
+
 let confirming: Confirming | null = null
 const confirmListeners = new Set<() => void>()
 function setConfirm(c: Confirming | null) {
@@ -234,14 +275,72 @@ function ConfirmTask() {
     return () => void confirmListeners.delete(f)
   }, [])
   const snap = useSnap()
-  // the task as it is now: it may have stopped working while this was up
   const c = confirming
-  const t = c && snap ? (snap.tasks.find((x) => x.id === c.t.id) ?? c.t) : c?.t
-  if (!c || !t) return null
+  if (!c) return null
+  if (c.kind === 'bulk') return <ConfirmBulk key={`b:${c.op}:${c.tasks.length}`} c={c} />
+  if (c.kind === 'bulk-result') return <ConfirmBulkResult key="bulk-result" c={c} />
+  // the task as it is now: it may have stopped working while this was up
+  const t = snap ? (snap.tasks.find((x) => x.id === c.t.id) ?? c.t) : c.t
+  if (!t) return null
   // a new question each time, its own state fresh
   if (c.kind === 'close') return <ConfirmClose key={`c:${t.id}`} t={t} held={c.held} failed={c.error} />
   if (c.kind === 'stop') return <ConfirmStop key={`s:${t.id}`} t={t} />
   return c.kind === 'delete' ? <ConfirmDelete key={`d:${t.id}`} t={t} /> : <ConfirmBox key={`a:${t.id}`} t={t} />
+}
+
+/** One confirm for the whole selection, naming the working tasks a Stop or Archive would interrupt. Each task is then
+ *  acted on in turn; a refusal is kept for the one sheet at the end instead of stopping the loop. */
+function ConfirmBulk({ c }: { c: Extract<Confirming, { kind: 'bulk' }> }) {
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    const failed: Refusal[] = []
+    for (const t of c.tasks) {
+      try {
+        const r = (await BULK_ACT[c.op](t)) as { ok?: boolean; error?: string } | undefined
+        if (r?.ok === false) failed.push({ id: t.id, error: r.error || 'Refused.' })
+      } catch (e) {
+        failed.push({ id: t.id, error: (e as Error).message || 'Refused.' })
+      }
+    }
+    setBusy(false)
+    clearSelection()
+    setConfirm(failed.length ? { kind: 'bulk-result', op: c.op, done: c.tasks.length - failed.length, failed } : null)
+  }
+  return (
+    <Dialog
+      onCancel={cancel}
+      title={`${BULK_WORD[c.op]} ${c.tasks.length} ${c.tasks.length === 1 ? 'task' : 'tasks'}?`}
+      buttons={
+        <Primary autoFocus disabled={busy} onClick={go}>
+          {busy ? `${BULK_BUSY[c.op]}…` : BULK_WORD[c.op]}
+        </Primary>
+      }
+    >
+      <p>
+        {c.risky.length ? `${c.risky.join(', ')} ${c.risky.length === 1 ? 'is' : 'are'} at work; ${c.risky.length === 1 ? 'its agent is' : 'their agents are'} stopped first. ` : ''}
+        Each task gets its own line; nothing else is touched.
+      </p>
+    </Dialog>
+  )
+}
+
+/** The refusals from a bulk action, in one sheet: the others went through. */
+function ConfirmBulkResult({ c }: { c: Extract<Confirming, { kind: 'bulk-result' }> }) {
+  return (
+    <Dialog onCancel={cancel} safe cancel="OK" buttons={null} title={`${c.failed.length} ${c.failed.length === 1 ? 'task' : 'tasks'} could not be ${BULK_DONE[c.op]}`}>
+      <p>
+        {c.done} {BULK_DONE[c.op]}. The rest refused:
+      </p>
+      <ul className="mt-1.5 list-disc pl-5">
+        {c.failed.map((f) => (
+          <li key={f.id}>
+            {f.id}: {f.error}
+          </li>
+        ))}
+      </ul>
+    </Dialog>
+  )
 }
 
 const cancel = () => setConfirm(null)
@@ -377,6 +476,48 @@ function ConfirmDelete({ t }: { t: Task }) {
   )
 }
 
+/* ---------- the floating bar over a selection ---------- */
+
+/** Over the Tasks list while rows are picked: one confirm for the group, then the row's own verbs, one call each.
+ *  The Archived view offers Unarchive in Archive's place; Delete stays on a single row's menu. */
+function SelectionBar({ archived }: { archived: boolean }) {
+  const ids = useUI((u) => u.selected)
+  const tasks = useSnap()?.tasks.filter((t) => ids?.has(t.id)) ?? []
+  if (!tasks.length) return null
+  // only Stop and Archive interrupt a working agent; Pin and Unarchive never do
+  const ask = (op: BulkOp) => setConfirm({ kind: 'bulk', op, tasks, risky: op === 'stop' || op === 'archive' ? tasks.filter((t) => t.status === 'work').map((t) => t.id) : [] })
+  const button = 'h-8 px-2.5 text-[0.8125rem] phone:h-11 phone:px-3 phone:text-[0.875rem]'
+  return (
+    <div
+      role="toolbar"
+      aria-label="Bulk actions"
+      className="sticky top-0 z-10 mb-1 flex flex-wrap items-center gap-1 rounded-row bg-bg/95 px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--line2)] backdrop-blur-sm phone:gap-1.5 phone:px-2"
+    >
+      <span className="mr-auto text-[0.8125rem] font-medium tabular-nums text-fg2">{tasks.length} selected</span>
+      {archived ? (
+        <Ghost className={button} onClick={() => ask('unarchive')}>
+          <UnarchiveIcon className={ic} /> Unarchive
+        </Ghost>
+      ) : (
+        <>
+          <Ghost className={button} onClick={() => ask('stop')}>
+            <StopIcon className={ic} /> Stop
+          </Ghost>
+          <Ghost className={button} onClick={() => ask('archive')}>
+            <ArchiveIcon className={ic} /> Archive
+          </Ghost>
+          <Ghost className={button} onClick={() => ask('pin')}>
+            <PinTaskIcon className={ic} /> Pin
+          </Ghost>
+        </>
+      )}
+      <Ghost className={button} onClick={clearSelection}>
+        Clear selection
+      </Ghost>
+    </div>
+  )
+}
+
 /** where a task is, as its row says it: its machine and space, each only where neither the view nor its group's
  *  heading says it ("vm-str · gtm") */
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
@@ -409,7 +550,14 @@ function TaskList(_: { placeId: string }) {
   // (PERFC-04); a real change gives a new one, which still glides.
   const list = useRef<HTMLDivElement>(null)
   useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`, snap.tasks)
-  if (archived) return <ArchivedList list={view} />
+  const bar = <SelectionBar archived={archived} />
+  if (archived)
+    return (
+      <>
+        {bar}
+        <ArchivedList list={view} />
+      </>
+    )
   // filtering, Done and archived tasks are in it too, each group whole and open, folded shut or not
   const groups = q
     ? filteredGroups(snap, view, q, { groups: chosen }).map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
@@ -420,6 +568,7 @@ function TaskList(_: { placeId: string }) {
   if (!groups.length && !q && !archivedIn(snap, view).length)
     return (
       <>
+        {bar}
         <ListChips alone />
         <Empty>{noTasks(snap, view)}</Empty>
         {footer}
@@ -429,6 +578,7 @@ function TaskList(_: { placeId: string }) {
   const machineShut = (id: string) => !q && shut.includes(`${key}|m:${id}`)
   return (
     <>
+      {bar}
       <TaskFilter listKey={view.search} order={order} />
       {/* one flat run of keyed parts: a group showing or going never makes the ones after it start over; only the
           rows and what sits between them glide (data-flip), never what holds them, so no move adds to another */}
@@ -648,10 +798,10 @@ function TasksMenu(_: { place: Place }) {
   const level = view.level
   const chosen = useUI((u) => u.groups)
   const by = groupFor(chosen, level)
+  const selecting = useUI((u) => u.selected !== null)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   const choices = groupChoices(level)
-  if (choices.length < 2) return null
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
@@ -660,23 +810,38 @@ function TasksMenu(_: { place: Place }) {
       </B>
       {open ? (
         <Menu label="Group tasks" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
-          <div role="group" aria-label="Group by">
-            <MenuLabel>Group by</MenuLabel>
-            {choices.map((c) => (
-              <MenuItem
-                key={c}
-                role="menuitemradio"
-                aria-checked={by === c}
-                icon={by === c ? <CheckIcon className={ic} /> : null}
-                onClick={() => {
-                  setOpen(false)
-                  setGroup(level, c)
-                }}
-              >
-                {GROUP_WORDS[c]}
-              </MenuItem>
-            ))}
-          </div>
+          <MenuItem
+            icon={<CheckIcon className={ic} />}
+            onClick={() => {
+              setOpen(false)
+              if (selecting) clearSelection()
+              else setUI({ selected: new Set() })
+            }}
+          >
+            {selecting ? 'Done selecting' : 'Select tasks'}
+          </MenuItem>
+          {choices.length >= 2 ? (
+            <>
+              <MenuSeparator />
+              <div role="group" aria-label="Group by">
+                <MenuLabel>Group by</MenuLabel>
+                {choices.map((c) => (
+                  <MenuItem
+                    key={c}
+                    role="menuitemradio"
+                    aria-checked={by === c}
+                    icon={by === c ? <CheckIcon className={ic} /> : null}
+                    onClick={() => {
+                      setOpen(false)
+                      setGroup(level, c)
+                    }}
+                  >
+                    {GROUP_WORDS[c]}
+                  </MenuItem>
+                ))}
+              </div>
+            </>
+          ) : null}
         </Menu>
       ) : null}
     </div>
