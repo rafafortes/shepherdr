@@ -848,7 +848,8 @@ shells). No upstream commit or issue addresses an OpenCode in-app subagent that 
 ended, so there is nothing to port as code.
 
 Ours: `server/live/opencode.ts` reads the existing read-only database handle and treats a child session of the agent's
-`session_v2` row with `time_busy` set, `time_idle` null and no archive as a running subagent; `server/live/agents.ts`
+`session_v2` row with `time_busy` newer than `time_idle` (or no `time_idle` yet — a resumed session keeps its old idle)
+and no archive as a running subagent; `server/live/agents.ts`
 `opencodeWork` counts it as `agents` (over shells, which it still counts), and reads the footer's "↓ N subagent" only
 when that database cannot tell, on idle or done panes. The same pass also fixes a shell OpenCode starts with
 `sh -c "bash x.sh"` that execs into the script and loses its `-c`: `Procs.scan` now counts any direct child of an

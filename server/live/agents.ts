@@ -973,7 +973,10 @@ export class Agents extends Emitter<Events> {
     const shells = this.procs.shells(key)
     const shellWork = shells.length ? (shells.some((argv) => !servesCommand(argv.join(' '))) ? 'shells' : 'servers') : undefined
     if (sub === false) return shellWork
-    return this.screens.get(key) ?? shellWork
+    // the database cannot tell: a subagent the footer names still wins, but the process table says better than the
+    // footer whether a shell is a job that ends or a server that does not
+    const fromScreen = this.screens.get(key)
+    return fromScreen === 'agents' ? 'agents' : (shellWork ?? fromScreen)
   }
 
   /** the pane whose screen alone tells what still runs for this agent: an idle or done agy agent, or a Claude Code whose

@@ -253,27 +253,37 @@ describe('running subagents (OpenCode 2.3 session_v2)', () => {
     ins.run('ses_idle', 'ses_parent', 10, 40, null) // done subagent
     ins.run('ses_old', 'ses_parent', null, null, null) // a row from before those columns existed
     ins.run('ses_arch', 'ses_arch_parent', 30, null, 50) // archived busy child
+    ins.run('ses_resumed', 'ses_resumed_parent', 60, 50, null) // resumed: OpenCode keeps the old idle, older than the new busy
     ins.run('ses_other', 'ses_other_parent', 30, null, null) // another agent's busy child
     d.close()
   })
 
-  test('a busy child of the session is a running subagent', () => {
+  test('a busy child of the session is a running subagent, and so is one resumed with a stale idle', () => {
     expect(opencodeSubagentRunning('ses_parent', sub)).toBe(true)
+    // OpenCode 2.3 does not clear time_idle when a session goes busy again (verified on its own database)
+    expect(opencodeSubagentRunning('ses_resumed_parent', sub)).toBe(true)
   })
 
-  test('a done child, an old row, an archived child and no child at all are not running', () => {
+  test('a done child, an archived child and no child at all are not running', () => {
     // none of these parents has a busy, unarchived child with these columns
     expect(opencodeSubagentRunning('ses_idle', sub)).toBe(false)
     expect(opencodeSubagentRunning('ses_arch_parent', sub)).toBe(false)
     expect(opencodeSubagentRunning('ses_no_such', sub)).toBe(false)
-    // a child of another agent's session is that agent's work, never this one's
-    expect(opencodeSubagentRunning('ses_other_parent', sub)).toBe(true)
   })
 
-  test('a child that goes idle is no longer running; one that goes busy again is', () => {
+  test("another agent's busy child is found under its own session only", () => {
+    expect(opencodeSubagentRunning('ses_other_parent', sub)).toBe(true)
+    expect(opencodeSubagentRunning('ses_idle', sub)).toBe(false)
+    expect(opencodeSubagentRunning('ses_no_such', sub)).toBe(false)
+  })
+
+  test('a child that finishes is no longer running; one that is resumed keeps its stale idle but runs again', () => {
     const d = new Database(sub)
     d.run('UPDATE session_v2 SET time_idle = ? WHERE id = ?', [60, 'ses_busy'])
     expect(opencodeSubagentRunning('ses_parent', sub)).toBe(false)
+    // resumed: a new busy later than the old idle, which OpenCode leaves behind
+    d.run('UPDATE session_v2 SET time_busy = ?, time_idle = ? WHERE id = ?', [70, 60, 'ses_busy'])
+    expect(opencodeSubagentRunning('ses_parent', sub)).toBe(true)
     d.run('UPDATE session_v2 SET time_idle = NULL WHERE id = ?', ['ses_busy'])
     expect(opencodeSubagentRunning('ses_parent', sub)).toBe(true)
     d.close()

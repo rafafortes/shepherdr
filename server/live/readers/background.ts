@@ -12,8 +12,8 @@
 // a shell still running is a pause as well (Procs.shells). A shell it starts with `sh -c "bash x.sh"` can exec into the
 // script and lose its -c, so any direct child of the pty daemon carrying the chat counts, whatever its command line.
 // Its subagents outlive the turn the same way and wake it when they report. A busy child session in its database
-// (session_v2: time_busy set, time_idle not) says one runs; the footer's "↓ N subagent" is read only where that database
-// cannot tell, and only on an idle or done pane.
+// (session_v2: time_busy newer than time_idle, or no idle yet — a resumed child keeps its old idle) says one runs; the
+// footer's "↓ N subagent" is read only where that database cannot tell, and only on an idle or done pane.
 // Codex keeps a command running past its turn (a process with a session id in its output, its code mode's cell), but is
 // never woken by it, and pi 1.5.2 has no background shell at all (its bash tool is one command it waits on; only a herdr
 // child it spawned wakes it, through pi-herdr's delivery, which is not read here): their turn's end waits on you.
@@ -244,6 +244,8 @@ export class Procs {
   private tracked = new Map<string, { chat: string; argv: string[] }>()
   /** the pids of OpenCode's pty daemons: their children are those shells (they live as long as the agent) */
   private daemons = new Set<string>()
+  /** parents checked this pass and found not to be daemons: a parent with many young children is read once */
+  private notDaemon = new Set<string>()
   /** when each was first seen, where nothing says when it started (ps) */
   private first = new Map<string, number>()
 
@@ -317,8 +319,12 @@ export class Procs {
     }
     if (!ppid || ppid === '0' || ppid === '1') return false
     if (this.daemons.has(ppid)) return true
+    if (this.notDaemon.has(ppid)) return false
     const parent = this.argv(ppid)
-    if (!parent.some((w) => /(^|\/)opencode-pty$/.test(w)) || !parent.includes('daemon')) return false
+    if (!parent.some((w) => /(^|\/)opencode-pty$/.test(w)) || !parent.includes('daemon')) {
+      this.notDaemon.add(ppid)
+      return false
+    }
     this.daemons.add(ppid)
     return true
   }
@@ -342,6 +348,7 @@ export class Procs {
     const live = new Set(pids)
     for (const pid of [...this.tracked.keys()]) if (!live.has(pid)) this.tracked.delete(pid)
     for (const pid of [...this.daemons]) if (!live.has(pid)) this.daemons.delete(pid)
+    this.notDaemon.clear()
     // the shells known from before, read again: one still running keeps its command line
     for (const [pid, known] of [...this.tracked]) {
       const argv = this.argv(pid)

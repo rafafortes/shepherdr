@@ -188,9 +188,11 @@ export function closeOpencodeDbs() {
   opened.clear()
 }
 
-/** the child sessions of `parent_id` that are busy now: time_busy is when it started, time_idle when it stopped, and a
- *  busy child with no idle (not archived) is a subagent that will report back and wake its parent (OpenCode 2.3) */
-const SUBAGENT_SQL = 'SELECT id FROM session_v2 WHERE parent_id = ? AND time_busy IS NOT NULL AND time_idle IS NULL AND time_archived IS NULL LIMIT 1'
+/** the child sessions of `parent_id` that are busy now: time_busy is when it last started, time_idle when it last
+ *  stopped. OpenCode does not clear the old idle when a session is resumed, so a busy one has either no idle or an idle
+ *  older than its busy (SHE-181, verified on 2.3.0's own database). Such an unarchived child will report back and wake
+ *  its parent. */
+const SUBAGENT_SQL = 'SELECT id FROM session_v2 WHERE parent_id = ? AND time_busy IS NOT NULL AND (time_idle IS NULL OR time_idle < time_busy) AND time_archived IS NULL LIMIT 1'
 
 /**
  * Is a subagent of this OpenCode session still running? Read from the same read-only handle the mirror uses, so a pass
