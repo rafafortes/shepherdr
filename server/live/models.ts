@@ -11,7 +11,7 @@
 // with the effort in each id (gemini-3.8-flash-low): they are grouped into their base model, whose efforts those are.
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { readJson, writeJson } from '../store.ts'
+import { home, readJson, writeJson } from '../store.ts'
 import { swallow } from './debug.ts'
 import { codexHome, piHome } from './readers/find.ts'
 import { agyHome } from './agy.ts'
@@ -53,7 +53,8 @@ const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const claude = (id: string, label: string, effort: string): Model => ({ id, label, efforts: CLAUDE_LEVELS, effort })
 const codex = (id: string, label: string, effort: string, ultra = true): Model => ({ id, label, efforts: [...CLAUDE_LEVELS, ...(ultra ? ['ultra'] : [])], effort })
 
-/** what each CLI takes when it can't be asked (kept up to date by hand; the CLI's own answer wins) */
+/** what each CLI takes when it can't be asked (kept up to date by hand; the CLI's own answer wins). `shepherdr models
+ *  --check` warns when these ids drift from the last real CLI read persisted in cli-models.json. */
 export const TABLE: Record<string, CliModels> = {
   claude: {
     models: [
@@ -83,6 +84,41 @@ export const TABLE: Record<string, CliModels> = {
   opencode: { models: [], efforts: [] },
   // agy's models too: `agy models` lists them (with their efforts in their ids)
   agy: { models: [], efforts: [] },
+}
+
+/**
+ * Diff the hand-kept fallback table against what the CLIs last really reported (the cli-models.json store). One line
+ * per CLI that drifted: table ids the CLI no longer lists (a stale fallback still being suggested), and ids the CLI
+ * now lists that the table has never heard of. A warning, never a failure: a CLI with no stored read (offline that day,
+ * fresh install) produces no diff and no line, and pi/opencode/agy have no table rows at all - their lists come only
+ * from the CLI's own answer, so there is nothing to compare. `reads` is the persisted record; checkModelTable reads it.
+ */
+export function tableDiff(reads: Record<string, CliModels>): string[] {
+  const lines: string[] = []
+  for (const [kind, table] of Object.entries(TABLE)) {
+    if (!table.models.length) continue // pi, opencode, agy: only the CLI lists them
+    const read = reads[kind]
+    if (!read?.models.length) continue // no stored read: no diff, no warning
+    // a model in `others` is retired from the menus but the CLI still takes it by id: it is not gone
+    const known = new Set([...read.models, ...(read.others ?? [])].map((m) => m.id))
+    const ids = table.models.map((m) => m.id)
+    const gone = ids.filter((id) => !known.has(id))
+    const unlisted = read.models.map((m) => m.id).filter((id) => !ids.includes(id))
+    if (!gone.length && !unlisted.length) continue
+    const parts: string[] = []
+    if (gone.length) parts.push(`the table still suggests ${gone.join(', ')}, but ${kind} no longer lists them`)
+    if (unlisted.length) parts.push(`${kind} now lists ${unlisted.join(', ')}, which the table doesn't`)
+    lines.push(`${kind}: ${parts.join('; ')}`)
+  }
+  return lines
+}
+
+/** the same check, reading cli-models.json from a Shepherdr home (the store the server persists real CLI reads into).
+ *  `compared` names the CLIs that had a read, so the verb can tell a clean pass from nothing having been compared. */
+export function checkModelTable(dir = home()): { warnings: string[]; compared: string[] } {
+  const reads = readJson<Record<string, CliModels>>('cli-models.json', {}, dir)
+  const compared = Object.keys(TABLE).filter((kind) => TABLE[kind].models.length && reads[kind]?.models.length)
+  return { warnings: tableDiff(reads), compared }
 }
 
 /** the effort levels agy puts at the end of a model id (gemini-3.8-flash-low), lowest first */

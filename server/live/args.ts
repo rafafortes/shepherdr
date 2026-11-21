@@ -26,6 +26,7 @@ const FLAGS = new Set([
   'priority',
   'apply-waiting',
   'limits',
+  'check',
 ])
 
 export function parseArgs(args: string[]): Parsed {
@@ -305,7 +306,10 @@ export const TOPIC = {
                                                  limits and numbers now, alerts,
                                                  voice) as they are where it runs (its space, else this machine),
                                                  each with where it comes from, and the lines every brief ends with
-  shepherdr models [CLI] [--json]                each CLI's models and the effort levels each takes, as the CLI says
+  shepherdr models [CLI] [--json] [--check]       each CLI's models and the effort levels each takes, as the CLI says;
+                                                  --check on its own warns where the hand-kept fallback table drifts
+                                                  from the last stored CLI read (a warning only; nothing for pi,
+                                                  opencode or agy)
   shepherdr profile list [--json]                the saved profiles (named settings of this machine, see Models), which one is in
                                                  force, and the undo point
   shepherdr profile save <name> [--limits] [--force]
