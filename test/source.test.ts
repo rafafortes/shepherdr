@@ -1153,3 +1153,24 @@ describe('pausing a space from the command', () => {
     }
   })
 })
+
+describe('the extracted CLI verbs (SHE-160)', () => {
+  // The verb switch and its helpers moved from source.ts to cli-commands.ts. These pin the exact words of one verb
+  // from each moved family, so a byte or a line lost in the move fails here just as it would in the old file.
+  test('profile verbs answer with the same usage, character for character', async () => {
+    const usage =
+      'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name> | schedule <name> "<rule>" [--waiting] | schedules | schedule-on|schedule-off <name> [<n>] | unschedule <name> [<n>]\n'
+    expect(await src.cli(['profile', 'nope'], {})).toEqual({ code: 1, out: usage })
+    expect(await src.cli(['profile', 'show'], {})).toEqual({ code: 1, out: usage })
+  })
+
+  test('task verbs answer with the same words for a title and a task that is not there', async () => {
+    expect(await src.cli(['task', 'add'], {})).toEqual({ code: 1, out: 'shepherdr task add "<title>" --desc "<the whole brief>"\n' })
+    expect(await src.cli(['task', 'show', 'NOPE-1'], {})).toEqual({ code: 1, out: 'No task NOPE-1\n' })
+  })
+
+  test('secret verbs answer with the same words for a missing name', async () => {
+    expect(await src.cli(['secret', 'rm'], {})).toEqual({ code: 1, out: 'shepherdr secret rm NAME [--machine | --space NAME]\n' })
+    expect(await src.cli(['secret', 'set', 'bad-name'], {})).toEqual({ code: 1, out: 'shepherdr secret set NAME [--machine | --space NAME] < file (the value on stdin; none: Everywhere)\n' })
+  })
+})
