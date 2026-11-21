@@ -1,4 +1,4 @@
-// The shepherdr verb lists must move together: command()'s switch in source.ts decides what the CLI does, CLI_VERBS in
+// The shepherdr verb lists must move together: command()'s switch in cli-commands.ts decides what the CLI does, CLI_VERBS in
 // args.ts is the list the help page and docs check use, and OWN_VERBS decides which calls an agent runs without a
 // permission card. Here they are pinned to one another, along with how that answer reaches every CLI Shepherdr starts.
 import { afterAll, describe, expect, test } from 'bun:test'
@@ -17,7 +17,7 @@ const { helpVerbs } = await import('../scripts/checks/docs.ts')
 
 /** the case labels of the command() switch, in source order: the behaviour that owns the verb set */
 function dispatchVerbs(): string[] {
-  const lines = readFileSync(join(import.meta.dir, '..', 'server', 'live', 'source.ts'), 'utf8').split('\n')
+  const lines = readFileSync(join(import.meta.dir, '..', 'server', 'live', 'cli-commands.ts'), 'utf8').split('\n')
   const start = lines.indexOf('    switch (a0) {')
   expect(start).toBeGreaterThan(-1)
   const out: string[] = []
@@ -33,7 +33,7 @@ describe('the shepherdr verb lists', () => {
   test('command() and CLI_VERBS handle exactly the same verbs', () => {
     expect(dispatchVerbs()).toEqual([...CLI_VERBS])
     // help is the one own verb handled before the switch rather than as a case in it
-    expect(readFileSync(join(import.meta.dir, '..', 'server', 'live', 'source.ts'), 'utf8')).toContain("if (a0 === 'help') return helpTopic(a1)")
+    expect(readFileSync(join(import.meta.dir, '..', 'server', 'live', 'cli-commands.ts'), 'utf8')).toContain("if (a0 === 'help') return helpTopic(a1)")
   })
 
   test('every own verb is handled by command(), and every non-carded CLI verb is own', () => {
