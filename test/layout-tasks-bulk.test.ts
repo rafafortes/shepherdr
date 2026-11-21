@@ -68,11 +68,13 @@ describe.skipIf(!browser)('selecting rows for a bulk action', () => {
       await bar(page).waitFor({ state: 'detached' })
       expect(await row(page, 'GTM-12').getAttribute('data-selected')).toBe(null)
       // Esc does the same, ahead of the list's other back steps
+      await select(page)
       await tick(page, 'GTM-15')
+      await bar(page).waitFor()
       await page.keyboard.press('Escape')
       await bar(page).waitFor({ state: 'detached' })
+      expect(await row(page, 'GTM-15').getAttribute('data-selected')).toBe(null)
       // navigating goes back to the plain list too
-      await bar(page).waitFor({ state: 'detached' })
       await select(page)
       await tick(page, 'GTM-15')
       await page.keyboard.press('[')
