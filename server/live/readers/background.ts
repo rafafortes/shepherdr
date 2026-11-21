@@ -9,7 +9,9 @@
 // OpenCode (2.3) keeps its background shells under a pty daemon of its own (opencode-pty, a child of its server): each is
 // a `/bin/sh -c <command>` whose environment carries the agent's SHEPHERDR_CHAT, and its footer counts them ("↓ 1 shell",
 // "↓ 1 subagent · 2 shells"). It wakes the agent when one ends ("↳ Shell finished · cd … && tools/changed-check.sh"), so
-// a shell still running is a pause as well (Procs.shells).
+// a shell still running is a pause as well (Procs.shells). Its subagents outlive the turn the same way and wake it when
+// they report. A busy child session in its database (session_v2: time_busy set, time_idle not) says one runs; the footer's
+// "↓ N subagent" is read only where that database cannot tell, and only on an idle or done pane.
 // Codex keeps a command running past its turn (a process with a session id in its output, its code mode's cell), but is
 // never woken by it, and pi 1.5.2 has no background shell at all (its bash tool is one command it waits on; only a herdr
 // child it spawned wakes it, through pi-herdr's delivery, which is not read here): their turn's end waits on you.
@@ -49,6 +51,21 @@ export function screenBackground(screen: string): Background | undefined {
   if (/Waiting for \d+ background agents? to finish/.test(above) || rows.some((r) => /^\s*[◯○●◉]\s+(?!main\s*$)\S/.test(r))) return 'agents'
   if (/·.*\bstill running\s*$/.test(above) || /(^|·)\s*\d+ (shells?|monitors?)\b/.test(footer)) return 'shells'
   return undefined
+}
+
+/** OpenCode's footer counts what still runs: "↓ 1 subagent · 2 shells", "↓ 1 subagent · 233.5K (22%)". Its database is
+ *  the source; this is the fallback where that cannot tell (an older OpenCode without time_busy/time_idle, no file) */
+export function opencodeScreenBackground(screen: string): Background | undefined {
+  const footer =
+    screen
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim())
+      .at(-1) ?? ''
+  const sub = /↓\s*(\d+)\s+subagents?\b/.exec(footer)
+  if (sub && Number(sub[1]) >= 1) return 'agents'
+  const shells = /↓\s*(\d+)\s+shells?\b/.exec(footer)
+  return shells && Number(shells[1]) >= 1 ? 'shells' : undefined
 }
 
 /** a row of agy's background commands below its input box: "● [06:57:43] <command> running" */

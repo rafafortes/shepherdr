@@ -12,9 +12,9 @@ import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { stripControl } from '../../shared/keys.ts'
 import { dropped, herdr, isPassing, missing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
-import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
+import { agyScreenBackground, ClaudeSessions, opencodeScreenBackground, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
-import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
+import { createSession, mirrorSession, opencodeLogPath, opencodeSubagentRunning, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
 import { agyIds, effortFor, modelArg } from './models.ts'
 import { tag } from './chatlines.ts'
@@ -961,13 +961,19 @@ export class Agents extends Emitter<Events> {
     return file === undefined ? this.screens.get(key) : sessionBackground(file)
   }
 
-  /** what an OpenCode agent's turn left running: the shells its pty daemon still runs for it, each of which wakes it when
-   *  it ends ("↳ Shell finished"), and 'servers' when every one of them serves or watches (a dev server it left for you
-   *  to look at never does) */
+  /** what an OpenCode agent's turn left running: a subagent its session started (a busy child in its database, which
+   *  reports back and wakes it however long it takes), else the shells its pty daemon still runs for it, each of which
+   *  wakes it when it ends ("↳ Shell finished"), and 'servers' when every one of them serves or watches (a dev server it
+   *  left for you to look at never does). A subagent wins over shells: both may run at once ("↓ 1 subagent · 2 shells").
+   *  Where the database cannot tell, the footer read on the idle pane is the answer. */
   private opencodeWork(key: string): Background | undefined {
+    const sessionId = this.records[key]?.sessionId
+    const sub = sessionId ? opencodeSubagentRunning(sessionId) : undefined
+    if (sub === true) return 'agents'
     const shells = this.procs.shells(key)
-    if (!shells.length) return undefined
-    return shells.some((argv) => !servesCommand(argv.join(' '))) ? 'shells' : 'servers'
+    const shellWork = shells.length ? (shells.some((argv) => !servesCommand(argv.join(' '))) ? 'shells' : 'servers') : undefined
+    if (sub === false) return shellWork
+    return this.screens.get(key) ?? shellWork
   }
 
   /** the pane whose screen alone tells what still runs for this agent: an idle or done agy agent, or a Claude Code whose
@@ -979,16 +985,20 @@ export class Agents extends Emitter<Events> {
     const st = this.status(key)
     if (st !== 'idle' && st !== 'done') return undefined
     if (r.kind === 'agy') return pane
+    // OpenCode has no hooks or session file: its database tells of a running subagent, and only when that cannot tell
+    // is its footer read (as agy's always is)
+    if (r.kind === 'opencode') return r.sessionId && opencodeSubagentRunning(r.sessionId) === undefined ? pane : undefined
     return r.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, this.logCwds(key)) === undefined ? pane : undefined
   }
 
   /** what the pane's screen says still runs in the background, for an idle or done agent that has no other way to say it:
-   *  a Claude Code with no session file, and any agy agent (none while it works) */
+   *  a Claude Code with no session file, any agy agent (none while it works), or an OpenCode whose database cannot tell */
   private async screenWork(key: string): Promise<Background | undefined> {
     const pane = this.needsScreen(key)
     if (!pane) return undefined
     const text = await herdr.visible(pane).catch(() => '')
-    return this.records[key]?.kind === 'agy' ? agyScreenBackground(text) : screenBackground(text)
+    const kind = this.records[key]?.kind
+    return kind === 'agy' ? agyScreenBackground(text) : kind === 'opencode' ? opencodeScreenBackground(text) : screenBackground(text)
   }
 
   /** the panes whose output herdr tells us about: those on screen in a terminal, and those whose screen is read for

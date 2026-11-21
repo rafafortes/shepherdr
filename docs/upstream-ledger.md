@@ -834,3 +834,21 @@ block is shared with Settings and is a topic on its own). `server/live/source.ts
 `<verb> --help` from a total verb-to-topic map; an unknown topic lists the topics and the page, and an unknown verb
 keeps its old refusal. `skill/shepherdr/SKILL.md` names the new forms. The five CLIs call the same command, so this
 is one change for all of them, with the CLI's own tests.
+
+## Not from upstream: an OpenCode subagent outliving its turn (SHE-181)
+
+Checked 2026-11-21 (SHE-181) on `upstream/main` (`6ec2f29a`) and `upstream/v2.0` (`ebb17d58`), their code, history and
+the public issues and pull requests (read only). Neither line has an OpenCode log or session reader at all (`git grep -i
+opencode` finds only a kind in settings and a name in the 3.x client), and searches for `time_busy`, `time_idle`,
+`parent_id` and `session_v2` find nothing. The nearest upstream ideas are SHEP-53 (`2fa1fc16`, #694: waiting on one's own
+background job is Working, not Needs you), SHEP-267 (`0d115974`, #1232: identify a child session, never take it for the
+parent's own) and SHEP-284 (`150e5389`, #1253: an open subagent row stays open) — all Claude Code or Codex, and the first
+is already in our 2.0 line through PR #2 and our own SHE-53 port (`44c3c01b`, which counted only OpenCode's pty-daemon
+shells). No upstream commit or issue addresses an OpenCode in-app subagent that keeps running after its parent's turn
+ended, so there is nothing to port as code.
+
+Ours: `server/live/opencode.ts` reads the existing read-only database handle and treats a child session of the agent's
+`session_v2` row with `time_busy` set, `time_idle` null and no archive as a running subagent; `server/live/agents.ts`
+`opencodeWork` counts it as `agents` (over shells, which it still counts), and reads the footer's "↓ N subagent" only
+when that database cannot tell, on idle or done panes. The agent skill's review step also says to wait for a fallback
+subagent in the same turn.

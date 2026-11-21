@@ -15,6 +15,7 @@ import {
   mirrorSession,
   opencodeDb,
   opencodeLogPath,
+  opencodeSubagentRunning,
   parseModel,
   putInstructions,
   switchModel,
@@ -230,6 +231,61 @@ describe('session mirror', () => {
 
   test('opencodeLogPath is <home>/opencode/<session>.jsonl', () => {
     expect(opencodeLogPath('/h/.shepherdr', 'ses_1')).toBe(join('/h/.shepherdr', 'opencode', 'ses_1.jsonl'))
+  })
+})
+
+describe('running subagents (OpenCode 2.3 session_v2)', () => {
+  // SHE-181: a child of the agent's session that went busy (time_busy) but has not gone idle (time_idle) is a running
+  // subagent that will wake the parent. The fixture keeps the real columns, plus older rows without them.
+  let sub = ''
+  const session = (file: string, schema: string) => {
+    const d = new Database(file, { create: true })
+    d.run(schema)
+    return d
+  }
+  const SCHEMA = 'CREATE TABLE session_v2 (id text primary key, parent_id text, time_busy integer, time_idle integer, time_archived integer)'
+  beforeAll(() => {
+    sub = join(dir, 'subagents.db')
+    const d = session(sub, SCHEMA)
+    const ins = d.prepare('INSERT INTO session_v2 (id, parent_id, time_busy, time_idle, time_archived) VALUES (?, ?, ?, ?, ?)')
+    ins.run('ses_parent', null, 10, 20, null) // the agent's own session: its turn ended
+    ins.run('ses_busy', 'ses_parent', 30, null, null) // running subagent
+    ins.run('ses_idle', 'ses_parent', 10, 40, null) // done subagent
+    ins.run('ses_old', 'ses_parent', null, null, null) // a row from before those columns existed
+    ins.run('ses_arch', 'ses_arch_parent', 30, null, 50) // archived busy child
+    ins.run('ses_other', 'ses_other_parent', 30, null, null) // another agent's busy child
+    d.close()
+  })
+
+  test('a busy child of the session is a running subagent', () => {
+    expect(opencodeSubagentRunning('ses_parent', sub)).toBe(true)
+  })
+
+  test('a done child, an old row, an archived child and no child at all are not running', () => {
+    // none of these parents has a busy, unarchived child with these columns
+    expect(opencodeSubagentRunning('ses_idle', sub)).toBe(false)
+    expect(opencodeSubagentRunning('ses_arch_parent', sub)).toBe(false)
+    expect(opencodeSubagentRunning('ses_no_such', sub)).toBe(false)
+    // a child of another agent's session is that agent's work, never this one's
+    expect(opencodeSubagentRunning('ses_other_parent', sub)).toBe(true)
+  })
+
+  test('a child that goes idle is no longer running; one that goes busy again is', () => {
+    const d = new Database(sub)
+    d.run('UPDATE session_v2 SET time_idle = ? WHERE id = ?', [60, 'ses_busy'])
+    expect(opencodeSubagentRunning('ses_parent', sub)).toBe(false)
+    d.run('UPDATE session_v2 SET time_idle = NULL WHERE id = ?', ['ses_busy'])
+    expect(opencodeSubagentRunning('ses_parent', sub)).toBe(true)
+    d.close()
+  })
+
+  test('no database, or one without the columns, cannot tell', () => {
+    expect(opencodeSubagentRunning('ses_parent', join(dir, 'missing.db'))).toBeUndefined()
+    const old = join(dir, 'old.db')
+    const d = session(old, 'CREATE TABLE session_v2 (id text primary key, parent_id text)')
+    d.run("INSERT INTO session_v2 VALUES ('ses_busy', 'ses_parent')")
+    d.close()
+    expect(opencodeSubagentRunning('ses_parent', old)).toBeUndefined()
   })
 })
 
