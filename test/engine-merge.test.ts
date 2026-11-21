@@ -54,6 +54,71 @@ describe('shepherdr merge', () => {
     expect(w.cards.filter((c) => c.status === 'done')).toEqual([{ task: t.id, status: 'done', sub: 'Merged' }])
   })
 
+  test('a caller that waits past its deadline hears that the merge goes on', async () => {
+    const w = world()
+    const origin = repo()
+    const dir = tmp('clone')
+    sh(`git clone -q ${origin} . && git config user.email t@t && git config user.name T`, dir)
+    const { t, key } = await started(w, dir, 'deadline')
+    if (!t.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(t.worktree, 'slow.txt'), 'slow\n')
+    w.agentIs(key, 'idle')
+    // a remote that takes the connection and never answers: the merge waits on it well past the caller's deadline
+    const sockets = new Set<Socket>()
+    const dead = createServer((s) => {
+      sockets.add(s)
+      s.on('close', () => sockets.delete(s))
+    })
+    await new Promise<void>((resolve) => dead.listen(0, '127.0.0.1', resolve))
+    const port = (dead.address() as AddressInfo).port
+    try {
+      sh(`git remote set-url origin git://127.0.0.1:${port}/repo.git`, dir)
+      w.engine.mergeFetchMs = 2_000
+      w.engine.mergeDeadline = 200
+      const began = Date.now()
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(Date.now() - began).toBeLessThan(5_000)
+      // its caller hears that it goes on, and the merge itself is not cut: it goes in from main as it is here
+      expect(r.ok).toBe(false)
+      // its own deadline's words (a 200 ms one, rounded to 0 s), not a wait for the fetch to time out
+      expect(r.error).toContain("isn't through after 0 s")
+      const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
+      await until(() => !merging.has(dir), 20_000)
+      expect(t.merged).toBe(true)
+      expect(sh('git log --format=%s -n 1', dir)).toBe(`${t.id}: Say hello`)
+    } finally {
+      for (const s of sockets) s.destroy()
+      dead.close()
+    }
+  })
+
+  test('a merge waiting in line behind a slow one says so when its caller waits past the deadline', async () => {
+    const w = world()
+    const dir = repo()
+    const { p, t, key } = await started(w, dir, 'inline')
+    // the next merge into this repo, ready before the first is asked for
+    const b = w.engine.add({ project: p.name, title: 'Second', desc: 'Second change', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
+    if (!t.worktree || !b.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(t.worktree, 'one.txt'), 'one\n')
+    writeFileSync(join(b.worktree, 'two.txt'), 'two\n')
+    w.agentIs(key, 'idle')
+    w.agentIs(`${b.id}/Agent`, 'idle')
+    // a gate that takes its time: the second merge waits in line while the first runs it
+    expect(w.settings.set('merge.gate', 'sleep 1', { space: p.name }).ok).toBe(true)
+    const first = w.engine.merge(t.id, { self: true })
+    await until(() => t.landing?.step === 'gate', 10_000)
+    w.engine.mergeDeadline = 200
+    const second = await w.engine.merge(b.id, { self: true })
+    // its caller hears whose merge it waits behind, and goes on by itself
+    expect(second.ok).toBe(false)
+    expect(second.error).toContain(`waits in line behind ${t.id}'s`)
+    expect((await first).ok).toBe(true)
+    const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
+    await until(() => !merging.has(dir) && !!b.merged, 20_000)
+    expect(sh('git log --format=%s -n 2', dir).split('\n')).toEqual([`${b.id}: Second`, `${t.id}: Say hello`])
+  })
+
   test('merged by you while its agent waits: cleaned up at once', async () => {
     const w = world()
     const dir = repo()
@@ -257,7 +322,7 @@ describe('shepherdr merge', () => {
       expect(r.ok).toBe(true)
       expect(r.note).toContain('origin did not answer')
       expect(sh('git log --format=%s -n 1', dir)).toBe(`${t.id}: Say hello`)
-      const merging = (w.engine as unknown as { merging: Map<string, unknown> }).merging
+      const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
       await until(() => !merging.has(dir))
       // the next merge into this repo goes in on its own: it is not stuck behind the one that hung
       const second = Date.now()
@@ -397,6 +462,20 @@ describe('closed with nothing to merge', () => {
     const { kept } = await w.engine.close(t.id)
     expect(kept[0]).toEndWith('(uncommitted changes)')
     expect(w.engine.view(t).said).toBe('Drafted it; not wanted after all.')
+  })
+
+  test('the engine hands the merge to its own module and still says the task is gone', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'delegate')
+    writeFileSync(join(t.worktree as string, 'gone.txt'), 'gone\n')
+    // the event a merge made in engine.ts always emitted, and the news with it: the delegate changes neither (SHE-159)
+    const gone: { id: string; forget: boolean }[] = []
+    w.engine.on('gone', (x, forget) => gone.push({ id: x.id, forget }))
+    w.agentIs(key, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    expect(gone).toEqual([{ id: t.id, forget: true }])
+    expect(w.news).toContain(`${t.id} was merged`)
+    expect(w.engine.statusOf(t)).toBe('done')
   })
 
   test('a stopped task stuck in To do, its worktree already gone, closes', async () => {

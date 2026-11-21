@@ -146,7 +146,7 @@ describe('starting up', () => {
       expect(await src.drain()).toBe(false)
     } finally {
       // it would refuse every merge after it, as a server about to stop does
-      ;(src.engine as unknown as { closing: boolean }).closing = false
+      ;(src.engine as unknown as { runner: { closing: boolean } }).runner.closing = false
     }
   })
   test('the Everywhere defaults are what Settings keep for every machine', () => {
