@@ -257,7 +257,7 @@ describe('shepherdr merge', () => {
       expect(r.ok).toBe(true)
       expect(r.note).toContain('origin did not answer')
       expect(sh('git log --format=%s -n 1', dir)).toBe(`${t.id}: Say hello`)
-      const merging = (w.engine as unknown as { merging: Map<string, unknown> }).merging
+      const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
       await until(() => !merging.has(dir))
       // the next merge into this repo goes in on its own: it is not stuck behind the one that hung
       const second = Date.now()
@@ -397,6 +397,20 @@ describe('closed with nothing to merge', () => {
     const { kept } = await w.engine.close(t.id)
     expect(kept[0]).toEndWith('(uncommitted changes)')
     expect(w.engine.view(t).said).toBe('Drafted it; not wanted after all.')
+  })
+
+  test('the engine hands the merge to its own module and still says the task is gone', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'delegate')
+    writeFileSync(join(t.worktree as string, 'gone.txt'), 'gone\n')
+    // the event a merge made in engine.ts always emitted, and the news with it: the delegate changes neither (SHE-159)
+    const gone: { id: string; forget: boolean }[] = []
+    w.engine.on('gone', (x, forget) => gone.push({ id: x.id, forget }))
+    w.agentIs(key, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    expect(gone).toEqual([{ id: t.id, forget: true }])
+    expect(w.news).toContain(`${t.id} was merged`)
+    expect(w.engine.statusOf(t)).toBe('done')
   })
 
   test('a stopped task stuck in To do, its worktree already gone, closes', async () => {
