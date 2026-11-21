@@ -63,10 +63,14 @@ describe.skipIf(!browser)('the ⋯ menu is one design', () => {
       const more = page.getByRole('button', { name: 'Menu', exact: true })
       const menus = page.getByRole('menu')
       const gone = () => menus.waitFor({ state: 'detached' })
-      // a tap or click on the chat, well away from it (under the ⋯ menu, which comes down a third of a phone's height)
+      // a tap or click on the chat just below the ⋯ menu, which grew a row with pause (and is taller on a phone):
+      // a fixed centre of the screen would now land on a menu item and pick it instead of closing the menu
       const outside = async () => {
-        if (name === 'phone') await page.touchscreen.tap(viewport.width / 2, viewport.height / 2)
-        else await page.mouse.click(viewport.width / 2, viewport.height / 2)
+        const box = await menus.boundingBox()
+        if (!box) throw new Error('no menu to click outside of')
+        const y = Math.min(viewport.height - 90, box.y + box.height + 30)
+        if (name === 'phone') await page.touchscreen.tap(viewport.width / 2, y)
+        else await page.mouse.click(viewport.width / 2, y)
       }
       await plus.click()
       await menus.waitFor()

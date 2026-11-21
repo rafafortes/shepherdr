@@ -1198,6 +1198,28 @@ export function removeSpace(placeId: string): Promise<{ ok?: boolean; error?: st
   return act({ type: 'space-remove', place: placeId })
 }
 
+/** A space held from starting new tasks: its own space.maxTasks reads 0 in the settings the snapshot already carries.
+ *  No new field: the engine honours the setting, this only shows it. */
+export function pausedPlace(snap: Snapshot | null, placeId: string): boolean {
+  return (snap?.settings ?? []).some((s) => s.level === placeId && s.rows.some((r) => r.key === 'space.maxTasks' && r.value === '0'))
+}
+
+/** Hold or release a space's new tasks through the setting the engine already re-decides on change: 0 pauses, unset
+ *  resumes. Nothing already running is touched. */
+export function pausePlace(placeId: string, on: boolean) {
+  return act({ type: 'setting', key: 'space.maxTasks', value: on ? '0' : null, place: placeId })
+}
+
+/** The same for a whole machine (every space on it): its own machine.maxTasks reads 0 in the snapshot. */
+export function pausedMachine(snap: Snapshot | null, machine: string): boolean {
+  const level = `m:${machine}`
+  return (snap?.settings ?? []).some((s) => s.level === level && s.rows.some((r) => r.key === 'machine.maxTasks' && r.value === '0'))
+}
+
+export function pauseMachine(machine: string, on: boolean) {
+  return act({ type: 'setting', key: 'machine.maxTasks', value: on ? '0' : null, place: `m:${machine}` })
+}
+
 /** What waits on you at a place: red counts its whole subtree, own only the place itself (its own coordinator's chat: the sidebar's count). */
 export function counts(snap: Snapshot, placeId: string) {
   const sub = subtree(snap, placeId)

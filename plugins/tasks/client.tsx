@@ -25,6 +25,7 @@ import {
   openTask,
   openSplit,
   panesHere,
+  pausedPlace,
   splitClick,
   pinTask,
   placeOf,
@@ -765,6 +766,9 @@ function SpaceAutomations({ place, note }: { place: Place; note?: string }) {
  *  name */
 function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Automation }) {
   const [error, setError] = useState('')
+  // a paused space still gets the task its automation adds: it is held at once, no agent starts. Say so in the run's
+  // row with the same wording a held task's own line uses, no new automation rule.
+  const paused = pausedPlace(useSnap(), place.id)
   const run = async (op: 'run' | 'pause' | 'resume' | 'remove') => {
     const r = (await act({ type: 'automation', place: place.id, op, name: a.name })) as { ok?: boolean; error?: string } | undefined
     setError(r?.ok === false ? (r.error ?? 'Refused.') : '')
@@ -794,7 +798,7 @@ function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Autom
         <dt className="font-medium text-fg">Last runs</dt>
         <dd className="text-fg2">
           {a.runs.length
-            ? a.runs.slice(0, 3).map((r) => (
+            ? a.runs.slice(0, 3).map((r, i) => (
                 <div key={r.at}>
                   {ranAt(r.at)} ·{' '}
                   {r.task ? (
@@ -804,6 +808,8 @@ function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Autom
                   ) : (
                     <span className="text-need">failed: {r.error}</span>
                   )}
+                  {/* runs are newest first: only the one a paused space just added reads as held, not older finished ones */}
+                  {paused && i === 0 && r.task ? <span className="text-need"> · held: its space is set to 0 tasks</span> : null}
                 </div>
               ))
             : 'Not run yet'}

@@ -94,6 +94,9 @@ export const TOPIC = {
                                                  leave room. shepherdr unset clears it; shepherdr show lists it
   shepherdr space rename <name> <new-name>       only the name that shows changes (its folder, herdr space and task
                                                  ids stay)
+  shepherdr space pause <name>                   hold its new tasks (space.maxTasks 0): they wait, held, no agent
+                                                 starts; tasks already running keep going; its row says Paused
+  shepherdr space resume <name>                  unset space.maxTasks: its held tasks start by themselves again
   shepherdr space remove <name>                  Shepherdr forgets it (its folder stays); not while its tasks work,
                                                  never the home space
   shepherdr mode <space> regular|autopilot       Autopilot off (regular) or on for a space's coordinator

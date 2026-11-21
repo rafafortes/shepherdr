@@ -1106,3 +1106,50 @@ describe('--json on the list and show commands', () => {
     expect(r.out).toContain('nothing was compared')
   })
 })
+
+describe('pausing a space from the command', () => {
+  test('space pause/resume are the setting action at that space, held tasks keep the existing wording, and status says paused', async () => {
+    const dir = tmp('src-pause')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'pause-space')
+    const place = placeId.space(p.name)
+    const engine = src.engine as unknown as { machine?: () => { herdr: boolean } }
+    const was = engine.machine
+    engine.machine = () => ({ herdr: true })
+    try {
+      expect((await src.cli(['space', 'pause', p.name], {})).out).toContain('is paused: its new tasks wait, held; tasks already running keep going')
+      expect(src.settings.get('space.maxTasks', p.name)).toBe('0')
+      // the same write a browser switch makes, at this space's level
+      expect(await src.act({ type: 'setting', key: 'space.maxTasks', value: '0', place })).toEqual({ ok: true })
+      const held = (await src.cli(['task', 'add', 'Held', '--desc', 'x'], { chat: place })).out
+      expect(held).toContain('held: pause-space is set to 0 tasks')
+      const found = held.match(/([A-Z]+-\d+)/)
+      if (!found) throw new Error('no task id in the add reply')
+      const id = found[1]
+      const task = () => {
+        const t = src.engine.task(id)
+        if (!t) throw new Error(`no task ${id}`)
+        return t
+      }
+      expect(task().held?.why).toBe('spaceZero')
+      // both forms of status name it
+      expect((await src.cli(['status'], {})).out).toContain(`paused: ${p.name}`)
+      const json = JSON.parse((await src.cli(['status', '--json'], {})).out)
+      expect(json.paused).toContain(p.name)
+      // resume unsets the space's own value, and the task is no longer held for the space
+      expect((await src.cli(['space', 'resume', p.name], {})).out).toContain('is not paused: its held tasks start by themselves again')
+      expect(src.settings.get('space.maxTasks', p.name)).toBe('off')
+      expect(JSON.parse((await src.cli(['status', '--json'], {})).out).paused).not.toContain(p.name)
+      expect(src.engine.room(task()).why).not.toBe('spaceZero')
+      // no extra refusals beyond the setting action: an unknown name is refused, --space works as well
+      expect((await src.cli(['space', 'pause', 'no-such-space'], {})).code).toBe(1)
+      expect((await src.cli(['space', 'pause', '--space', p.name], {})).out).toContain('is paused')
+      expect(src.settings.get('space.maxTasks', p.name)).toBe('0')
+      expect(HELP).toContain('shepherdr space pause <name>')
+      expect(HELP).toContain('shepherdr space resume <name>')
+    } finally {
+      engine.machine = was
+      src.settings.set('space.maxTasks', null, { space: p.name })
+    }
+  })
+})

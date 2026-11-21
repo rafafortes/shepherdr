@@ -4,8 +4,10 @@
 // red pill at the header's right, beside that menu (on a phone after the subtitle, under the name), says so, and a tap
 // on it opens the menu; with it off the header says nothing of it. Beside the pill is Run now: one wake of its
 // coordinator at once, one per tap, refused (and shown as Queued or Waking) while a wake already waits or runs.
-import { act, definePlugin, has, setUI, useUI } from '@client/kernel.ts'
-import { ic, MenuSwitch, ModeIcon, PlayIcon } from '@client/ui.tsx'
+// A space paused (space.maxTasks 0) adds a quiet Paused pill beside Autopilot, and a Pause switch in the same ⋯ menu:
+// new tasks wait, held; tasks already running keep going.
+import { act, definePlugin, has, pausePlace, pausedPlace, setUI, useSnap, useUI } from '@client/kernel.ts'
+import { ic, MenuSwitch, ModeIcon, PauseIcon, PlayIcon } from '@client/ui.tsx'
 import { useEffect, useState } from 'react'
 import type { Place } from '@shared/types.ts'
 
@@ -25,6 +27,17 @@ function AutopilotPill({ place }: { place: Place }) {
     >
       <span>Autopilot</span>
     </button>
+  ) : null
+}
+
+/** Paused (space.maxTasks 0), as a quiet pill beside Autopilot: its new tasks wait, held. Nothing when not paused.
+ *  A tag, not a control: the ⋯ menu's Pause switch is what changes it */
+function PausedPill({ place }: { place: Place }) {
+  const snap = useSnap()
+  return pausedPlace(snap, place.id) ? (
+    <span data-mode="paused" title="New tasks wait, held; tasks already running keep going" className="mode-pill paused-pill">
+      <span>Paused</span>
+    </span>
   ) : null
 }
 
@@ -97,11 +110,31 @@ function AutopilotSwitch({ place }: { place: Place }) {
   )
 }
 
+/** Pause a space from the same ⋯ menu as Autopilot: 0 tasks while on (new tasks wait, held), unset while off. The
+ *  note is the confirm line: nothing already running stops, and held tasks start by themselves on Resume */
+function PauseSwitch({ place }: { place: Place }) {
+  const snap = useSnap()
+  // the home space holds no tasks of its own: a switch here would do nothing
+  if (place.home) return null
+  const on = pausedPlace(snap, place.id)
+  return (
+    <MenuSwitch
+      name="Pause space"
+      icon={<PauseIcon className={ic} />}
+      on={on}
+      note={on ? 'New tasks wait, held; running ones keep going' : 'New tasks start as usual'}
+      onClick={() => void pausePlace(place.id, !on)}
+    />
+  )
+}
+
 export default definePlugin({
   name: 'coordinators',
   setup(reg) {
+    reg.placeMark.push({ order: 9, View: PausedPill })
     reg.placeMark.push({ order: 10, View: AutopilotPill })
     reg.placeMark.push({ order: 11, View: AutopilotRunNow })
     reg.placeMenu.push({ order: 10, View: AutopilotSwitch })
+    reg.placeMenu.push({ order: 11, View: PauseSwitch })
   },
 })
