@@ -16,8 +16,7 @@ import { prNewsLine, splitBrief } from '../prompts.ts'
 import { placeId, type Places, type Space } from '../places.ts'
 import { CLI_NAME, type Settings } from '../settings.ts'
 import type { Chats } from '../chats.ts'
-import type { Engine } from './engine.ts'
-import { ended, type Landing, type TaskRec } from './engine.ts'
+import { ended, type Engine, type Landing, type TaskRec } from './engine.ts'
 import * as G from './git.ts'
 
 /** one line of the server's log about a merge train's decision: what it decided and why, never a file's contents */

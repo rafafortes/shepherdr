@@ -80,7 +80,8 @@ describe('shepherdr merge', () => {
       expect(Date.now() - began).toBeLessThan(5_000)
       // its caller hears that it goes on, and the merge itself is not cut: it goes in from main as it is here
       expect(r.ok).toBe(false)
-      expect(r.error).toContain("isn't through after")
+      // its own deadline's words (a 200 ms one, rounded to 0 s), not a wait for the fetch to time out
+      expect(r.error).toContain("isn't through after 0 s")
       const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
       await until(() => !merging.has(dir), 20_000)
       expect(t.merged).toBe(true)

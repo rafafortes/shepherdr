@@ -28,7 +28,7 @@ const stdin = (secret === 'set' || secret === 'elevenlabs' || (args[0] === 'hear
 
 // Every call must end with words when Shepherdr gives no answer: a stalled server (1452 event-loop stalls of 1 s or
 // more on 2026-11-18, worst 20.1 s) otherwise hangs an agent's turn for ever. The long verbs have their own deadlines
-// on the server (engine.ts, git.ts): checks waits up to 9 minutes for GitHub plus one last gh call (120 s), pr may
+// on the server (engine.ts, merge.ts, git.ts): checks waits up to 9 minutes for GitHub plus one last gh call (120 s), pr may
 // push and open a pull request with gh calls of 120 s, review up to 90 s for a reviewer slot, merge up to 90 s
 // (110 s here); the rest get the default. Every call gets a bound, and says so instead of waiting on and on.
 const envWait = (name: string, fallback: number) => {

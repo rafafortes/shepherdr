@@ -961,8 +961,13 @@ export class Engine extends Emitter<Events> {
       key: (t) => engine.key(t),
       req: (id) => engine.req(id),
       red: (path) => engine.data.red?.[path],
-      setRed: (path, sha) => void ((engine.data.red ??= {})[path] = sha),
-      clearRed: (path) => void delete engine.data.red?.[path],
+      setRed: (path, sha) => {
+        engine.data.red ??= {}
+        engine.data.red[path] = sha
+      },
+      clearRed: (path) => {
+        if (engine.data.red) delete engine.data.red[path]
+      },
       starter: (t) => engine.starter(t),
       sendBack: (t, text) => engine.sendBack(t, text),
       cleanup: (t) => engine.cleanup(t),
