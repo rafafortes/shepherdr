@@ -489,6 +489,20 @@ describe('automations', () => {
     expect(readJson<unknown[]>('automations.json', []).some((x) => 'schedule' in (x as object))).toBe(false)
     writeJson('automations.json', [])
   })
+  test('a set-less old record upgrades as it was; a saved set survives a reload and an edit', () => {
+    writeJson('automations.json', [
+      { id: 'a', place: 'p:x:old', name: 'Daily', schedule: 'daily 9:00', task: { title: 'Daily' }, on: true },
+      { id: 'b', place: 'p:x:old', name: 'Weekly', trigger: { time: T.timeRule('FREQ=DAILY') }, task: { title: 'Weekly', set: { 'brief.review': 'off' } }, on: true },
+    ])
+    const a = new Automations()
+    expect(a.list.map((x) => [x.name, x.task.set])).toEqual([
+      ['Daily', undefined],
+      ['Weekly', { 'brief.review': 'off' }],
+    ])
+    expect(a.edit('p:x:old', 'Weekly', { set: { 'review.rounds': '1 round' } }).task.set).toEqual({ 'review.rounds': '1 round' })
+    expect(new Automations().find('p:x:old', 'Weekly')?.task.set).toEqual({ 'review.rounds': '1 round' })
+    writeJson('automations.json', [])
+  })
 })
 
 describe('heartbeat', () => {
