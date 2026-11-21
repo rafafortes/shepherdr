@@ -4,20 +4,22 @@
 //   bun scripts/snapshot.ts list                the snapshots kept, newest first, with each one's size
 //   bun scripts/snapshot.ts restore <YYYY-MM-DD>  copy one back over the live stores (Shepherdr stopped)
 //
-// Tasks, spaces, settings, automations, the agents' chats and the usage read from their logs are whole-file JSON
+// Tasks, spaces, settings, automations, the agents' records and the usage read from their logs are whole-file JSON
 // stores: atomic writes keep a torn file out of a crash, and REL-01 copies one aside when it cannot be read, but nothing
-// keeps a bad write that reads back fine (a `shepherdr set` type, a delete confirmed in a hurry, a release that writes
+// keeps a bad write that reads back fine (a `shepherdr set` typo, a delete confirmed in a hurry, a release that writes
 // wrong state for days) from replacing hours of work. This is that net: a copy per day, kept for a fortnight and four
 // weeks, and a way to put one back.
 //
 // What it copies: the JSON files in the home's own folder — the stores of record (tasks, spaces, settings, automations)
-// and the caches that are hours of work too (agents, usage, the outbox, the returns…) — and the task-id store with its
-// write-ahead log and its index, copied together because a database means nothing without them.
+// and the caches that are hours of work too (the agents' records, usage, the returns…) — and the task-id store with its
+// write-ahead log and its index, copied together because a database means nothing without them, and copied last (see
+// order() below).
 //
-// What it never copies: the secrets files (secrets.json, vapid.json, push.json, the vault the keys are kept in), a
-// runtime file, or a copy an earlier run or the operator left beside a store — and nothing outside the home's own
-// folder at all: no inbox attachment, no chat log, no artifact, no other machine's payload. A snapshot must never
-// duplicate a secret or a chat, and none of those is a store that nothing re-derives.
+// What it never copies: the secrets files (secrets.json, vapid.json, push.json, the vault the keys are kept in), the two
+// that are the text of messages rather than a record of anything (the outbox and the typed drafts), a runtime file, or a
+// copy an earlier run or the operator left beside a store — and nothing outside the home's own folder at all: no inbox
+// attachment, no chat log, no artifact, no other machine's payload. A snapshot must never duplicate a secret or a chat,
+// and none of those is a store that nothing re-derives.
 //
 // No schedule is installed by this script (the operator picks it, docs/backups.md): it does one snapshot and says what
 // it cost, so a timer, a cron line or a Shepherdr automation can run it.
@@ -36,9 +38,14 @@ export const WEEKLY = 4
  *  (server/live/secrets.ts) */
 export const NEVER = new Set(['secrets.json', 'vault.json', 'vapid.json', 'push.json'])
 
-/** a store whose name says it is a secret stays out even when it is new, so a later one does not need this list changed
- *  to be left out of a backup */
-const SECRET_WORDS = /(^|[-_.])(secrets?|vault|credentials?|passwords?|tokens?|keys?|push|vapid)([-_.]|$)/i
+/** a store whose name says it is a secret stays out even when it is new, so a later release's auth, cookie or session
+ *  file does not need this list changed to be left out of a backup: what a name says it holds, it is not copied */
+const SECRET_WORDS = /(^|[-_.])(secrets?|vault|credentials?|passwords?|passwd|tokens?|keys?|apikeys?|auth|logins?|cookies?|sessions?|oauth\d?|otp|totp|push|vapid)([-_.]|$)/i
+
+/** and the two that are the text of messages, not a record of anything: what waits in the outbox to go in to an agent,
+ *  and what was typed and not sent yet. A snapshot never duplicates a chat, and neither of them means anything after a
+ *  restore — the agent it was meant for went with the day */
+const TEXT = new Set(['outbox.json', 'typed.json'])
 
 /** what is not a store to take: the server's own address of the moment (its folder is stopped for a restore anyway),
  *  and a copy kept beside a store (store.ts's `.corrupt-…` and `.before-empty-…`, an operator's `.bak-…`), which is a
@@ -71,7 +78,7 @@ export function weekOf(day: string): string {
 
 /** whether a file stays out of a snapshot, whatever its size or age: a secret, a runtime file or a copy of a store */
 function keptOut(name: string): boolean {
-  return NEVER.has(name) || SECRET_WORDS.test(name) || RUNTIME.has(name) || COPY.test(name)
+  return NEVER.has(name) || TEXT.has(name) || SECRET_WORDS.test(name) || RUNTIME.has(name) || COPY.test(name)
 }
 
 /** the files a snapshot takes from `dir`, in a stable order: the home's own JSON stores and the ID store with the two
@@ -140,7 +147,15 @@ function clear(root: string) {
   }
 }
 
-export type Snapshot = { day: string; dir: string; files: string[]; bytes: number; shared: number; skipped: string[]; removed: string[] }
+export type Snapshot = { day: string; dir: string; files: string[]; bytes: number; shared: number; skipped: string[]; removed: string[]; saved: boolean }
+
+/** the order the files are copied in: the JSON stores first, the ID store's three files last. A task's number is
+ *  reserved before its task is written, so a copy of the ID store older than tasks.json beside it could hand that number
+ *  out again after a restore: copied last, the ID store is never older than the stores it belongs to, and at worst a
+ *  number is skipped. */
+function copyOrder(names: string[]): string[] {
+  return [...names.filter((n) => !IDS.test(n)), ...names.filter((n) => IDS.test(n))]
+}
 
 /** tonight's snapshot of the stores in `dir`: the day's folder lands whole, so a run killed halfway leaves last night's
  *  snapshot and never a half one, and a file whose bytes are the newest snapshot's is a hard link to it rather than a
@@ -160,7 +175,7 @@ export function snapshot(dir: string, at = new Date()): Snapshot {
   const skipped: string[] = []
   let bytes = 0
   let shared = 0
-  for (const name of stores(dir)) {
+  for (const name of copyOrder(stores(dir))) {
     const from = join(dir, name)
     const to = join(made, name)
     const before = previous ? join(root, previous, name) : ''
@@ -175,13 +190,20 @@ export function snapshot(dir: string, at = new Date()): Snapshot {
       skipped.push(name)
     }
   }
-  // the folder takes the day's place in one rename; a folder an earlier run today made moves aside and goes
-  const aside = `${target}.old-${process.pid}`
+  // a store it could not copy is a night not saved at all: a folder that looks like a backup and is missing a store is
+  // worse than none, and replacing a complete one an earlier run today made with it would lose that too
+  if (skipped.length) {
+    rmSync(made, { recursive: true, force: true })
+    return { day, dir: '', files, bytes, shared, skipped, removed: [], saved: false }
+  }
+  // the folder takes the day's place in one rename; a folder an earlier run today made moves aside (a dot folder, so a
+  // run killed between the two renames leaves one the next run's clear() takes) and goes
+  const aside = join(root, `.old-${process.pid}`)
   rmSync(aside, { recursive: true, force: true })
   if (existsSync(target)) renameSync(target, aside)
   renameSync(made, target)
   rmSync(aside, { recursive: true, force: true })
-  return { day, dir: target, files, bytes, shared, skipped, removed: prune(root) }
+  return { day, dir: target, files, bytes, shared, skipped, removed: prune(root), saved: true }
 }
 
 /** keep the newest DAILY days and one day for each of the WEEKLY weeks before them, and remove the other folders. The
@@ -209,13 +231,18 @@ export function prune(root: string): string[] {
 
 export type Restored = { day: string; from: string; files: string[] }
 
-/** the pid the server in this home runs on, or nothing: the file it leaves while it serves */
-function serverOf(dir: string): { pid?: number } {
+/** what the server in this home says of itself, or nothing when it left no file. A file that is there and cannot be
+ *  read or parsed is never taken for a home that nothing serves: it could be a server's own, and a restore must not
+ *  write over the stores under one it could not rule out, so it is refused with what to do about it. */
+function serverOf(dir: string): { pid?: number } | undefined {
+  const file = join(dir, 'server.json')
+  if (!existsSync(file)) return undefined
   try {
-    const v = JSON.parse(readFileSync(join(dir, 'server.json'), 'utf8')) as { pid?: number }
+    const v = JSON.parse(readFileSync(file, 'utf8')) as { pid?: number }
     return v && typeof v === 'object' ? v : {}
-  } catch {
-    return {} // no server.json, or one a crash left unreadable: nothing is serving this home
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e)
+    throw new Error(`${file} cannot be read (${why}), so a server could be running in this home: delete the file if none is, then run this again`)
   }
 }
 
@@ -227,7 +254,7 @@ export function restore(dir: string, day: string, alive: (pid: number) => boolea
   const from = join(root, day)
   if (!DAY.test(day) || !existsSync(from)) throw new Error(`no snapshot ${day} in ${root}: \`bun scripts/snapshot.ts list\` names the ones kept`)
   const server = serverOf(dir)
-  if (server.pid && alive(server.pid))
+  if (server?.pid && alive(server.pid))
     throw new Error(
       `Shepherdr is running in this home (pid ${server.pid}) and would write over what a restore puts back: stop it first \`herdr plugin action invoke herdr-projects.stop\`, then run this again`,
     )
@@ -238,7 +265,14 @@ export function restore(dir: string, day: string, alive: (pid: number) => boolea
   // the ID store's log and index belong to the database they were copied with: a live one left beside a restored
   // database would be replayed against the wrong file, so both come from the snapshot or neither stays
   if (files.includes('task-ids.sqlite')) for (const ext of ['-wal', '-shm']) if (!files.includes(`task-ids.sqlite${ext}`)) rmSync(join(dir, `task-ids.sqlite${ext}`), { force: true })
-  for (const name of files) copyFileSync(join(from, name), join(dir, name))
+  // each file lands whole in one rename, as a store's own write does: a restore killed halfway leaves some stores of
+  // the day and some of the day before, never a torn one
+  for (const name of files) {
+    const to = join(dir, name)
+    const tmp = `${to}.restore-tmp`
+    copyFileSync(join(from, name), tmp)
+    renameSync(tmp, to)
+  }
   return { day, from, files }
 }
 
@@ -301,16 +335,16 @@ export function main(argv: string[] = process.argv.slice(2), dir = home(), at = 
     return 1
   }
   const made = snapshot(dir, at)
+  if (!made.saved) {
+    console.error(`snapshot: nothing was saved for ${made.day}: could not copy ${made.skipped.join(', ')}`)
+    return 1
+  }
   console.log(
     `snapshot ${made.day}: ${size(made.bytes)} in ${names(made.files.length, 'file', 'files')}` +
       (made.shared ? `, ${made.shared} shared with the last one` : '') +
       `, ${names(dated(root).length, 'snapshot', 'snapshots')} kept in ${root}`,
   )
   if (made.removed.length) console.log(`snapshot: removed ${made.removed.join(', ')}, past the ${DAILY} days and ${WEEKLY} weeks kept`)
-  if (made.skipped.length) {
-    console.error(`snapshot: could not copy ${made.skipped.join(', ')}: this snapshot is missing them`)
-    return 1
-  }
   return 0
 }
 

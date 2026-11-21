@@ -3,7 +3,7 @@
 // prints, and the restore that refuses while a server runs in the home it would write over. Every home here is a folder
 // in /tmp: no test touches the Shepherdr of the machine it runs on.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DAILY, dated, dayOf, FOLDER, linked, main, pidAlive, prune, restore, same, size, snapshot, stores, WEEKLY, weekOf } from '../scripts/snapshot.ts'
 import { tmp } from './tmp.ts'
@@ -37,7 +37,9 @@ async function gonePid(): Promise<number> {
 
 /** everything a fake home holds, as the live stores of a working Shepherdr and the things a snapshot must not bring */
 function working(dir: string) {
-  for (const name of ['tasks.json', 'spaces.json', 'settings.json', 'automations.json', 'agents.json', 'usage.json', 'outbox.json', 'returns.json']) put(dir, name, `{"store":"${name}"}`)
+  for (const name of ['tasks.json', 'spaces.json', 'settings.json', 'automations.json', 'agents.json', 'usage.json', 'returns.json']) put(dir, name, `{"store":"${name}"}`)
+  // the text of messages, waiting or typed: chat content, so never in a snapshot
+  for (const name of ['outbox.json', 'typed.json']) put(dir, name, `{"text":"${name}"}`)
   put(dir, 'task-ids.sqlite', 'db')
   put(dir, 'task-ids.sqlite-wal', 'wal')
   put(dir, 'task-ids.sqlite-shm', 'shm')
@@ -61,7 +63,6 @@ describe('what a snapshot takes', () => {
     expect(stores(dir)).toEqual([
       'agents.json',
       'automations.json',
-      'outbox.json',
       'returns.json',
       'settings.json',
       'spaces.json',
@@ -73,10 +74,15 @@ describe('what a snapshot takes', () => {
     ])
     const made = snapshot(dir, new Date(2026, 10, 18))
     expect(made.day).toBe('2026-11-18')
-    expect(made.files).toEqual(stores(dir))
-    // the whole point: no secret file, no chat, no attachment, no other machine's payload, not even under its own name
-    for (const name of made.files) expect(name).not.toMatch(/secret|vapid|push|vault|chatlog|inbox|machines|artifacts/)
-    expect(readdirSync(made.dir).sort()).toEqual(made.files)
+    expect([...made.files].sort()).toEqual(stores(dir))
+    // the whole point: no secret file, no message text, no chat, no attachment, no other machine's payload, not even
+    // under its own name
+    for (const name of made.files) expect(name).not.toMatch(/secret|vapid|push|vault|outbox|typed|chatlog|inbox|machines|artifacts/)
+    expect(made.files).not.toContain('outbox.json')
+    expect(made.files).not.toContain('typed.json')
+    // the ID store is copied last: a number reserved before its task is never older than tasks.json beside it
+    expect(made.files.slice(-3)).toEqual(['task-ids.sqlite', 'task-ids.sqlite-shm', 'task-ids.sqlite-wal'])
+    expect(readdirSync(made.dir).sort()).toEqual([...made.files].sort())
     expect(readFileSync(join(made.dir, 'tasks.json'), 'utf8')).toBe('{"store":"tasks.json"}')
     // the three files of the ID store are copied together: a database restored without its log means nothing
     for (const name of ['task-ids.sqlite', 'task-ids.sqlite-wal', 'task-ids.sqlite-shm']) expect(existsSync(join(made.dir, name))).toBe(true)
@@ -95,9 +101,15 @@ describe('what a snapshot takes', () => {
       const made = snapshot(dir, new Date(2026, 10, 18))
       expect(made.files).toEqual(['tasks.json'])
       expect(made.skipped).toEqual(['usage.json'])
+      // a folder missing a store is not a backup: the day is not saved at all
+      expect(made.saved).toBe(false)
+      expect(made.dir).toBe('')
+      expect(existsSync(join(dir, FOLDER, '2026-11-18'))).toBe(false)
+      expect(readdirSync(join(dir, FOLDER))).toEqual([])
       // a snapshot missing a store is a failed run, never a quiet one
       expect(main([], dir, new Date(2026, 10, 18))).toBe(1)
-      expect(said(log)).toContain('snapshot 2026-11-18')
+      expect(said(log)).not.toContain('snapshot 2026-11-18')
+      expect(said(page)).toContain('nothing was saved for 2026-11-18')
       expect(said(page)).toContain('could not copy usage.json')
     } finally {
       chmodSync(bad, 0o644)
@@ -168,7 +180,7 @@ describe('the retention', () => {
       '2026-09-27',
     ]
     for (const day of days) fabricate(dir, day)
-    // tonight's run is the twentieth folder: unit the day it was made, a re-run replaces it rather than adding one
+    // tonight's run is the twentieth folder: until the day is done, a re-run replaces it rather than adding one
     const log = spyOn(console, 'log').mockImplementation(() => {})
     try {
       put(dir, 'tasks.json', '{"tasks":[]}')
@@ -241,11 +253,18 @@ describe('a restore', () => {
       expect(restore(dir, '2026-11-18').files).toContain('tasks.json')
       expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe('{"tasks":["nightly"]}')
       put(dir, 'tasks.json', '{"tasks":[]}')
+      // a server.json that is there and unreadable could be a server's: a restore must not guess, and changes nothing
       put(dir, 'server.json', 'not json at all')
+      expect(() => restore(dir, '2026-11-18')).toThrow(/cannot be read .*, so a server could be running in this home/)
+      expect(main(['restore', '2026-11-18'], dir)).toBe(1)
+      expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe('{"tasks":[]}')
       expect(pidAlive(0)).toBe(false)
       expect(pidAlive(process.pid)).toBe(true)
+      // no server.json at all: nothing serves this home, and the day comes back whole, one store at a time
+      rmSync(join(dir, 'server.json'))
       expect(main(['restore', '2026-11-18'], dir)).toBe(0)
       expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe('{"tasks":["nightly"]}')
+      expect(existsSync(join(dir, 'tasks.json.restore-tmp'))).toBe(false)
       // a day that is not there is refused, and says how to find the one that is
       expect(main(['restore', '2020-01-01'], dir)).toBe(1)
       expect(said(page)).toContain('no snapshot 2020-01-01')
