@@ -4,8 +4,8 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmp } from './tmp.ts'
 import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
+import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
@@ -1036,7 +1036,7 @@ describe('--json on the list and show commands', () => {
       const r = await src.cli(['doctor'], {})
       expect(r.code).toBe(0)
       expect(r.out).toContain('Performance:')
-      expect(r.out).toContain('max 1.5 s')
+      expect(r.out).toContain('worst by day today 1.5 s')
       expect(r.out).toContain('stalls in the last day: 2')
       expect(r.out).toContain('now 320 MB')
       expect(r.out).toContain('snapshot 800 ms')

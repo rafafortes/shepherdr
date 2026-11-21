@@ -1,8 +1,8 @@
 // The performance history (server/live/health.ts): a bounded ring of what this server's own numbers were, kept in
 // health.json with the machine watch, and the block `shepherdr doctor` prints from it.
 import { describe, expect, test } from 'bun:test'
-import { tmp } from './tmp.ts'
 import type { HealthKept, PerfSample } from '../server/live/health.ts'
+import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('perf-history')
 const H = await import('../server/live/health.ts')
@@ -125,7 +125,13 @@ describe('kept in health.json', () => {
 })
 
 describe("doctor's block", () => {
-  test("the loop's lag by day, the server's memory now and a day and a week ago, and the slowest passes of the last day", () => {
+  /** a day as doctor labels it, in this machine's own time */
+  const label = (t: number) => {
+    const d = new Date(t)
+    return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  test("each day's worst lag, the last hour's p95, the server's memory now and a day and a week ago, and the slowest passes", () => {
     const now = Date.UTC(2026, 10, 18, 12)
     const ring = [
       line(now - 7 * DAY - 60_000, { rss: 200 * MB, lag: 10 }),
@@ -136,16 +142,55 @@ describe("doctor's block", () => {
     const text = H.perfReport(ring, now).join('\n')
     expect(text).toContain('Performance:')
     expect(text).toContain('4 samples')
-    expect(text).toContain('today p95 40 ms / max 40 ms')
-    expect(text).toContain('11-17 p95 2.4 s / max 2.4 s')
+    // the day's worst, not a p95 of entries of different resolutions, and the last hour's p95 as it was taken
+    expect(text).toContain(`worst by day ${label(now - 7 * DAY)} 10 ms, ${label(now - DAY)} 2.4 s and today 40 ms; last hour p95 40 ms`)
     expect(text).toContain('stalls in the last day: 3')
     expect(text).toContain('memory in use by the server: now 410 MB · 24 h ago 300 MB · 7 d ago 200 MB')
     expect(text).toContain('slowest passes in the last day: snapshot 900 ms, pollChats 150 ms')
     // nothing kept is nothing said, and a ring of one sample says only what it can
     expect(H.perfReport([], now)).toEqual([])
     const one = H.perfReport([line(now - 1_000, { rss: 512 * MB })], now).join('\n')
+    expect(one).toContain('1 sample, back to')
     expect(one).toContain('memory in use by the server: now 512 MB')
     expect(one).not.toContain('24 h ago')
     expect(one).not.toContain('slowest passes')
+    // a sample 30 hours old is not called "24 h ago": nothing within a couple of hours of that age, nothing said
+    const gap = H.perfReport([line(now - 30 * 3_600_000, { rss: 256 * MB }), line(now - 30_000, { rss: 512 * MB })], now).join('\n')
+    expect(gap).not.toContain('24 h ago')
+  })
+})
+
+describe('through health.json on disk', () => {
+  test('the ring is written compact with the watch, capped on the way in, and read back by the next server', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { readJson, writeJson } = await import('../server/store.ts')
+    const dir = tmp('perf-json')
+    const store = { read: () => readJson<HealthKept>('health.json', {}, dir), write: (k: HealthKept) => writeJson('health.json', k, dir, true) }
+    const monitor = () =>
+      new H.Monitor(
+        limits,
+        () => true,
+        () => undefined,
+        () => machine(0),
+        store,
+      )
+    const mon = monitor()
+    mon.perfNow = () => ({ lag: 90, stalls: 1, working: 2 })
+    mon.tick(0)
+    mon.tick(30_000)
+    const file = join(dir, 'health.json')
+    const bytes = readFileSync(file, 'utf8')
+    expect(bytes).not.toContain('\n  "at"') // compact: the file is machine state, not something to read
+    expect(JSON.parse(bytes)).toMatchObject({ watch: {}, samples: [{ at: 0 }, { at: 30_000, lag: 90, stalls: 1, working: 2 }] })
+    // the next server reads the same ring back
+    expect(monitor().samples).toHaveLength(2)
+    // a file holding more than the cap keeps its newest PERF_KEEP entries
+    const older = Array.from({ length: H.PERF_KEEP + 50 }, (_, i) => line(1_000_000 + i * 1_000))
+    writeJson('health.json', { watch: { cpu: { since: 1, told: true } }, samples: older }, dir, true)
+    const reopened = monitor()
+    expect(reopened.samples).toHaveLength(H.PERF_KEEP)
+    expect(reopened.samples.at(-1)?.at).toBe(older.at(-1)?.at)
+    expect(reopened.told()).toEqual({ cpu: { since: 1, told: true } })
   })
 })

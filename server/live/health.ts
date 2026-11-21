@@ -6,10 +6,10 @@
 // numbers decide when Shepherdr starts more tasks (engine.release).
 import { readdirSync, readFileSync, readlinkSync, statfsSync, statSync } from 'node:fs'
 import { cpus, homedir, tmpdir } from 'node:os'
-import type { HealthLevel, HealthMeter } from '../../shared/types.ts'
-import type { MachineLimits } from './settings.ts'
-import { BOX, helperDir, runSync, type BoxInfo } from './box.ts'
 import { join } from 'node:path'
+import type { HealthLevel, HealthMeter } from '../../shared/types.ts'
+import { BOX, type BoxInfo, helperDir, runSync } from './box.ts'
+import type { MachineLimits } from './settings.ts'
 
 export const SAMPLE_MS = 30_000
 /** how long an nvidia-smi read may take before it is killed: a hung GPU read must not become a long event-loop stall */
@@ -409,7 +409,7 @@ export const PERF_RECENT_MS = 3_600_000
 const PERF_DAY_MS = 86_400_000
 /** one entry every 5 minutes, for the day before that */
 const PERF_BUCKET_MS = 300_000
-/** one every 30 minutes after a day: a week of history in 120 + 276 + 288 entries, some 90 KB of health.json */
+/** one every 30 minutes after a day: a week of history in 120 + 276 + 288 entries, about 95 KB of health.json */
 const PERF_WIDE_MS = 1_800_000
 /** the most entries the ring keeps, a little over what those three resolutions add up to */
 export const PERF_KEEP = 700
@@ -492,33 +492,47 @@ const percentile = (xs: number[], p: number) => {
   return s.length ? s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] : 0
 }
 const lapse = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`)
-const day = (t: number) => new Date(t).toISOString().slice(0, 10)
-const stamp = (t: number) => new Date(t).toISOString().slice(5, 16).replace('T', ' ')
+const pad = (n: number) => String(n).padStart(2, '0')
+/** a moment in this machine's own time, as the rest of doctor's lines are: "11-17" and "11-17 09:12" */
+const day = (t: number) => {
+  const d = new Date(t)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+const stamp = (t: number) => {
+  const d = new Date(t)
+  return `${day(t)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** a phrase of numbers: "a, b and c" */
+const list = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs.join(' and '))
 
 /**
  * `shepherdr doctor`'s performance block: the numbers this server kept, so "it is slow" has something to be slow
- * against. The loop's lateness day by day, the memory the server itself takes now and a day and a week ago, and the
- * slowest passes of the last day. Nothing until there is a sample.
+ * against. Each day's worst lag (a bucket keeps its worst, so a day's worst compares with another day's; a p95 would
+ * compare a day of 30-second samples with a day of 30-minute ones and read worse the older it is), the last hour's p95
+ * at the one resolution all of it was taken at, the memory the server itself takes now and a day and a week ago, and
+ * the slowest passes of the last day. Nothing until there is a sample. The server restarts on every merge, so those
+ * memory numbers are what runs took, not one process growing.
  */
 export function perfReport(ring: PerfSample[], now = Date.now()): string[] {
   const kept = ring.filter((s) => s.at <= now)
   if (!kept.length) return []
   const last = kept[kept.length - 1]
   const today = day(now)
-  const days = new Map<string, number[]>()
-  for (const s of kept) {
-    const d = day(s.at)
-    days.set(d, [...(days.get(d) ?? []), s.lag])
-  }
-  const lag = [...days].slice(-3).map(([d, lags]) => `${d === today ? 'today' : d.slice(5)} p95 ${lapse(percentile(lags, 95))} / max ${lapse(Math.max(...lags))}`)
+  const worst = new Map<string, number>()
+  for (const s of kept) worst.set(day(s.at), Math.max(worst.get(day(s.at)) ?? 0, s.lag))
+  const peak = [...worst].slice(-3).map(([d, v]) => `${d === today ? 'today' : d} ${lapse(v)}`)
+  const hour = kept.filter((s) => s.at >= now - PERF_RECENT_MS).map((s) => s.lag)
   const stalls = kept.filter((s) => s.at >= now - PERF_DAY_MS).reduce((n, s) => n + s.stalls, 0)
-  const back = (ago: number) => kept.filter((s) => s.at <= now - ago).at(-1)
+  // a value a day or a week back, only when a sample is that old within a few hours: a gap must not label an old
+  // number with an age it does not have
+  const back = (ago: number, slack: number) => kept.filter((s) => s.at <= now - ago && s.at >= now - ago - slack).at(-1)
   const memory = [`now ${mb(last.rss)}`]
-  for (const [ago, words] of [
-    [PERF_DAY_MS, '24 h ago'],
-    [7 * PERF_DAY_MS, '7 d ago'],
+  for (const [ago, slack, words] of [
+    [PERF_DAY_MS, 2 * 3_600_000, '24 h ago'],
+    [7 * PERF_DAY_MS, 12 * 3_600_000, '7 d ago'],
   ] as const) {
-    const s = back(ago)
+    const s = back(ago, slack)
     if (s) memory.push(`${words} ${mb(s.rss)}`)
   }
   const passes = new Map<string, number>()
@@ -528,8 +542,8 @@ export function perfReport(ring: PerfSample[], now = Date.now()): string[] {
     .slice(0, 3)
     .map(([label, ms]) => `${label} ${lapse(ms)}`)
   return [
-    `Performance: this server's own numbers, kept with the machine watch: one every 30 s for the last hour, every 5 minutes before that, every 30 minutes after a day (${kept.length} samples, back to ${stamp(kept[0].at)})`,
-    `  event loop lag: ${lag.join(' · ')} · stalls in the last day: ${stalls}`,
+    `Performance: this server's own numbers, kept with the machine watch: one every 30 s for the last hour, every 5 minutes before that, every 30 minutes after a day (${kept.length} sample${kept.length === 1 ? '' : 's'}, back to ${stamp(kept[0].at)})`,
+    `  event loop lag: ${[`worst by day ${list(peak)}`, ...(hour.length ? [`last hour p95 ${lapse(percentile(hour, 95))}`] : [])].join('; ')} · stalls in the last day: ${stalls}`,
     `  memory in use by the server: ${memory.join(' · ')}`,
     ...(slow.length ? [`  slowest passes in the last day: ${slow.join(', ')}`] : []),
   ]
