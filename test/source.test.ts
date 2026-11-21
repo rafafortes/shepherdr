@@ -1080,4 +1080,29 @@ describe('--json on the list and show commands', () => {
       expect(lines.some((l) => l.includes(`shepherdr ${verb}`))).toBe(true)
     expect(lines.some((l) => l.includes('doctor'))).toBe(false)
   })
+
+  test('help documents models --check', () => {
+    expect(HELP).toContain('shepherdr models [CLI] [--json] [--check]')
+    expect(HELP).toContain('--check on its own warns where the hand-kept fallback table drifts')
+  })
+
+  test('models --check warns on a stale fallback id and is never a failure', async () => {
+    const { TABLE } = await import('../server/live/models.ts')
+    const { writeJson, home } = await import('../server/store.ts')
+    const stale = TABLE.claude.models[0].id
+    writeJson('cli-models.json', { claude: { models: TABLE.claude.models.slice(1), efforts: ['medium'] } }, home())
+    const r = await src.cli(['models', '--check'], {})
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(stale)
+    expect(r.out).toContain('warning')
+  })
+
+  test('models --check says nothing was compared when no CLI has a stored read', async () => {
+    const { rmSync } = await import('node:fs')
+    const { home } = await import('../server/store.ts')
+    rmSync(join(home(), 'cli-models.json'), { force: true })
+    const r = await src.cli(['models', '--check'], {})
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('nothing was compared')
+  })
 })

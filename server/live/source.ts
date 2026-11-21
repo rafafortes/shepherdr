@@ -53,7 +53,7 @@ import { Agents, hidden, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
 import { launchesAgents } from './launch-policy.ts'
-import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
+import { checkModelTable, effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { HELP, helpTopic, helpVerb, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
@@ -5480,6 +5480,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'profile':
         return this.profileCommand(a1, rest, p)
       case 'models': {
+        if (p.flags.has('check')) {
+          const { warnings, compared } = checkModelTable()
+          if (!compared.length)
+            return 'Model table: no CLI has a stored read yet, so nothing was compared; the fallback table is used until each CLI answers. pi, opencode and agy have no fallback table.'
+          if (!warnings.length) return `Model table: no drift with the last stored read of ${compared.join(', ')} (CLIs with no read were skipped; pi, opencode and agy have no fallback table).`
+          return `Model table: the fallback is stale (a warning, not a failure; the CLI's own answer still wins):\n  ${warnings.join('\n  ')}\nConfirm a model before editing the hand-kept table.`
+        }
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode', 'agy']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
         if (p.flags.has('json'))
