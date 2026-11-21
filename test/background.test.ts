@@ -814,6 +814,25 @@ describe("OpenCode's background shells", () => {
     expect(p.shells('T-1/Agent', Date.now() + 7500)).toEqual([])
   })
 
+  // POL-495: OpenCode starts `sh -c "bash run_benchmark.sh"`, which execs into `bash run_benchmark.sh`. That command
+  // line has no -c, but it is still the chat's background shell: its parent is the pty daemon and its environment says
+  // whose it is. A python script (and any other direct child of that daemon carrying the chat) counts the same way.
+  test('a script a shell execd into under the daemon is still its background shell, with no -c in its argv', () => {
+    const proc = tmp('proc-oc-exec')
+    daemon(proc)
+    put(proc, 11, ['/bin/bash', 'run_benchmark.sh'], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'], 10)
+    put(proc, 12, ['/usr/bin/python3', 'worker.py'], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'], 10)
+    // under another parent, or without the chat: not this agent's background shell
+    put(proc, 13, ['/bin/bash', 'x.sh'], ['SHEPHERDR_CHAT=T-1/Agent'], 5)
+    put(proc, 14, ['/bin/bash', 'x.sh'], ['HOME=/h'], 10)
+    const p = new Procs(proc)
+    expect(p.shells('T-1/Agent')).toEqual([
+      ['/bin/bash', 'run_benchmark.sh'],
+      ['/usr/bin/python3', 'worker.py'],
+    ])
+    expect(p.shells('T-2/Agent')).toEqual([])
+  })
+
   test('with no /proc (macOS) a shell carrying the chat is one of them, since its parent cannot be read there', () => {
     const ps = [
       '/bin/bash -c tools/changed-check.sh --fast SHEPHERDR_CHAT=T-1/Agent HOME=/Users/e',
@@ -883,8 +902,9 @@ describe('the cost of a /proc pass', () => {
     })
     // only the shell and the headless CLI need their environ; the 100 builders and the daemon do not
     expect(count.env).toBe(2)
-    // argv: the 100 builders, the daemon, the shell, the reviewer, and the daemon again as the shell's parent
-    expect(count.argv).toBe(104)
+    // argv: the 100 builders, the daemon, the shell, the reviewer, the daemon again as the shell's parent, and the
+    // daemon's own parent (pid 5, absent here) read once to tell that it is not itself a daemon child
+    expect(count.argv).toBe(105)
   })
 
   // a process can end between its argv and its environ being read: the catch in chatOf is a normal pass on a busy
