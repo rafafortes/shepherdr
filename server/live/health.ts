@@ -409,9 +409,10 @@ export const PERF_RECENT_MS = 3_600_000
 const PERF_DAY_MS = 86_400_000
 /** one entry every 5 minutes, for the day before that */
 const PERF_BUCKET_MS = 300_000
-/** one every 30 minutes after a day: a week of history in 120 + 276 + 288 entries, up to about 115 KB of health.json */
+/** one every 30 minutes after a day: the rest of the week after it, up to 336 entries */
 const PERF_WIDE_MS = 1_800_000
-/** the most entries the ring keeps, a little over what those three resolutions add up to */
+/** the most entries the ring keeps: the hour's 120, the day's 276 and the wide week's 336 add up to 732, and the cap
+ *  drops the oldest of them, so the history reaches back a little over a week in at most about 115 KB of health.json */
 export const PERF_KEEP = 700
 
 /** one line of the performance history: what this server's own numbers were at a moment */
@@ -439,7 +440,8 @@ export interface PerfSample {
 
 /** a sample as health.json gave it: a hand edit or a half-written file must not stop the health tick (the alerts come
  *  from it), so an entry without a number and a moment is dropped */
-const isPerf = (s: unknown): s is PerfSample => typeof s === 'object' && s !== null && Number.isFinite((s as PerfSample).at) && Number.isFinite((s as PerfSample).lag)
+const isPerf = (s: unknown): s is PerfSample =>
+  typeof s === 'object' && s !== null && Number.isFinite((s as PerfSample).at) && Number.isFinite((s as PerfSample).lag) && Number.isFinite((s as PerfSample).rss)
 
 /** what the monitor is told of the loop and the agents since the sample before: the source's stall watch fills it */
 export type PerfExtra = Pick<PerfSample, 'lag' | 'stalls' | 'working' | 'pass'>
