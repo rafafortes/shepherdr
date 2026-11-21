@@ -874,8 +874,10 @@ the code: `hc` is herdr-core's CLI, which our 2.0 fork does not have (we run the
 reporter reads the child's chat through core.
 
 **port** (ours, SHE-182): `shepherdr review <id> --run <prompt-file>` counts the round as before, then opens the round's
-reviewer interactive and read-only in a new tab of the task's herdr worktree space beside its agent, labelled as its
-reviewer and with `SHEPHERDR_CHAT=<id>/Reviewer`. One verb for all five task CLIs; the per-CLI read-only words live beside
+reviewer interactive in a new tab of the task's herdr worktree space beside its agent, labelled as its
+reviewer and with `SHEPHERDR_CHAT=<id>/Reviewer`. It is read-only where the CLI supports it (Claude plan mode, Codex
+sandbox, agy plan mode); pi and OpenCode keep bash to run git, with changes forbidden by the prompt. One verb for all
+five task CLIs; the per-CLI read-only words live beside
 the headless line in `server/live/prompts.ts` (`reviewerPaneArgs`, checked against each installed CLI's `--help`; codex
 is not installed here, so its documented flag is marked unverified). `server/live/review-pane.ts` sends the prompt, answers
 startup dialogs, waits up to 900 s with progress on stderr, reads the final message from the reviewer's own CLI log

@@ -482,15 +482,22 @@ export class CliCommands {
     })
     // replace the "running in a pane" card with how the round ended, so the chat never shows a stale running line
     const cardId = `review-pane:${t.id}:${round}`
-    this.chats.post(`${t.id}/Agent`, {
-      id: cardId,
-      card: { id: cardId, text: got.failed ? `Review round ${round} fell back to headless: its pane could not open.` : `Review round ${round} finished in its reviewer pane.` },
-    })
+    const cardText = got.failed
+      ? `Review round ${round} fell back to headless: its pane could not open.`
+      : got.error
+        ? `Review round ${round} ended early: its reviewer gave an error.`
+        : `Review round ${round} finished in its reviewer pane.`
+    this.chats.post(`${t.id}/Agent`, { id: cardId, card: { id: cardId, text: cardText } })
     if (got.failed) {
       return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <prompt> and <out>), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
     }
     this.engine.reviewDone(t.id)
-    const cut = got.cutShort ? 'Cut short at the 900 s timeout; these are its partial findings.\n\n' : ''
+    // a provider error is not a timeout: say which it was, and never call an empty cut-short answer "partial findings"
+    const cut = got.error
+      ? `The reviewer gave an error (${got.error}); ${got.findings ? 'these are its partial findings' : 'it wrote no findings before the error'}.\n\n`
+      : got.cutShort
+        ? `Cut short at the 900 s timeout; these are its partial findings.\n\n`
+        : ''
     return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
   }
 

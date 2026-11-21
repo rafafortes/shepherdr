@@ -57,8 +57,9 @@ build, check and review the work is your own judgment.
    declined to give one, so decide it with your best judgment and say what you assumed — a dismissed plan is not
    approved, so don't carry it out. Decide the rest yourself and list those decisions in the facts.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change — the round's
-   reviewer started interactive and read-only in a herdr pane beside you (a headless run is only the fallback when a pane
-   cannot open), or a subagent when the reviewer cannot run at all. Give the reviewer, in a short prompt file, the brief,
+   reviewer started interactive in a herdr pane beside you (a headless run is only the fallback when a pane
+   cannot open), or a subagent when the reviewer cannot run at all. It is read-only where the CLI supports it; pi and
+   OpenCode keep bash to run git, with changes forbidden by the prompt. Give the reviewer, in a short prompt file, the brief,
    the repo's rules and the base with the command to read the change yourself (`git diff <merge-base>...HEAD`, `git log`,
    the files): it reads them with its own read-only tools, never pasted inline — a huge pasted diff once stalled a round
    for 540 s with no output. Then run in the foreground, with your authoritative command written out in full:

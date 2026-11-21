@@ -1,5 +1,6 @@
-// A review round the human can watch (SHE-182): the round's reviewer starts interactive and read-only in a new tab of
-// the task's herdr worktree space, beside the task's agent. Shepherdr sends it the prompt, waits in the foreground for its
+// A review round the human can watch (SHE-182): the round's reviewer starts interactive in a new tab of the task's herdr
+// worktree space, beside the task's agent, read-only where its CLI supports it (pi and OpenCode keep bash to run git; the
+// prompt forbids changes). Shepherdr sends it the prompt, waits in the foreground for its
 // findings, reads them from the reviewer's *own* CLI log (the readers Shepherdr already uses for its agents, never the
 // screen), and closes the pane. A pane that cannot open, or a CLI that will not start, is the one reason to fall back to
 // the headless line (prompts.ts reviewRunLine) — the pane is not a silent replacement for a review.
@@ -53,6 +54,8 @@ export interface RoundResult {
   findings: string
   /** the turn was cut by the timeout or a provider error: findings are partial, marked as such for the task agent */
   cutShort?: boolean
+  /** the reviewer's own provider error (quota hit, sign-out): the round could not finish, even if it wrote some text */
+  error?: string
   /** why a pane could not be used: the caller prints the headless line and leaves the round for `--done` */
   failed?: string
 }
@@ -192,9 +195,11 @@ export async function runReviewInPane(
         step(`Review round ${o.round} is still running in ${o.id}'s reviewer pane (${kind}).`)
         beat = at + 60_000
       }
+      // a signed-out or quota-hit reviewer fails now, instead of holding the round for the full 900 s. Text written
+      // before the error is still useful, but the round was cut short, not a finished review (the check below must come
+      // before `done && text`: an error event sets done too, so the old order returned a preamble as a complete review).
+      if (got.error) return { pane, args, findings: text, cutShort: true, error: got.error }
       if (done && text) break
-      // a signed-out or quota-hit reviewer fails now, instead of holding the round for the full 900 s with nothing to say
-      if (got.error && !text) return { pane, args, findings: '', failed: `the reviewer gave an error: ${got.error}` }
       if ((o.now?.() ?? Date.now()) >= until) {
         step(`Review round ${o.round}'s pane timed out after ${Math.round(timeout / 1000)} s; keeping what it wrote so far.`)
         return { pane, args, findings: text, cutShort: true }

@@ -280,6 +280,21 @@ describe('a round in a pane', () => {
     expect(steps.join('\n')).toContain('timed out')
   })
 
+  test('a provider error after some text keeps the partial findings and marks the round cut short', async () => {
+    const { h, calls } = fake()
+    const got = await runReviewInPane({
+      ...base,
+      h,
+      reviewer: { kind: 'claude' },
+      findings: async () => ({ text: 'Let me read the diff', done: true, error: '402 Insufficient funds' }),
+    })
+    expect(got.failed).toBeUndefined()
+    expect(got.findings).toBe('Let me read the diff')
+    expect(got.cutShort).toBe(true)
+    expect(got.error).toBe('402 Insufficient funds')
+    expect(calls.closed).toEqual(['w1:p9'])
+  })
+
   test('a long round keeps the CLI stream alive with an interim line each minute', async () => {
     const { h } = fake()
     const steps: string[] = []

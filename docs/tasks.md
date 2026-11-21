@@ -273,9 +273,11 @@
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
   say in your summary that you did." Every round runs `shepherdr review <id> --run <prompt-file>`: it counts the round,
   the caps decide the reviewer (the primary when it has room and is not out, else the first backup that has; its answer
-  says why, e.g. "Codex is at its limit, 4 of 4 at once"), and Shepherdr opens that reviewer interactive and read-only in
+  says why, e.g. "Codex is at its limit, 4 of 4 at once"), and Shepherdr opens that reviewer interactive in
   a new tab of the task's herdr space, beside the task's agent, labelled as its reviewer and with
-  `SHEPHERDR_CHAT=<id>/Reviewer`. The human watches it in herdr and in the task's terminal view. The agent raises its
+  `SHEPHERDR_CHAT=<id>/Reviewer`. It is read-only where the CLI supports it (Claude plan mode, Codex sandbox, agy plan
+  mode); pi and OpenCode keep bash to run git, with changes forbidden by the prompt. The human watches it in herdr and in
+  the task's terminal view. The agent raises its
   shell tool's timeout to at least 1020 s (17 min) for this command (a round may wait 90 s for a reviewer first; 600000 ms
   per call in Claude Code and OpenCode backgrounds it
   rather than stopping it — the agent keeps waiting; at least 960 s in pi): a client that times out leaves the pane and
