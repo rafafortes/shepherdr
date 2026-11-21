@@ -25,6 +25,12 @@ setTaskTmpBase(() => taskBase)
 process.env.SHEPHERDR_CHECK_LOG_ROOT = join(home, '.cache', 'shepherdr', 'check-local')
 // agy's store (~/.gemini/antigravity-cli) is never read by a test: a folder under the test's home that does not exist
 process.env.SHEPHERDR_AGY_HOME = join(home, 'no-agy-home')
+// Nor may a test reach the host's OpenCode (or any CLI that follows XDG) data and configs: each gets this file's own
+// home, which test/tmp.ts removes with the rest. A test that wants a fixture points these at one of its own folders and
+// restores them afterwards; the default is never ~/.local/share/opencode, ~/.config/opencode or the host's XDG dirs.
+process.env.SHEPHERDR_OPENCODE_DB = join(home, 'opencode', 'opencode.db')
+process.env.XDG_DATA_HOME = join(home, 'xdg-data')
+process.env.XDG_CONFIG_HOME = join(home, 'xdg-config')
 // bun starts every test file in a worker of its own and ends it without running what is registered on the process: the
 // folders go when its last test does, failing or not (a run that ends any other way keeps the sweep as its net)
 afterAll(cleanup)

@@ -45,14 +45,18 @@ export interface Reviewer {
 
 const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', opencode: 'OpenCode', agy: 'Antigravity' }
 
+/** how long a review round may run, whether its reviewer is in a pane (SHE-182) or headless (SHE-180). Not the
+ *  45-minute reviewer *lease* in engine.ts (a different REVIEW_TIMEOUT): this is one round's wall clock. */
+export const REVIEW_RUN_TIMEOUT = 900_000
+
 /**
- * The exact foreground command a task agent runs for its round's headless reviewer: `timeout 900` (not 540), stdin closed,
- * and the CLI's progressive output redirected to a file the agent reads if the run is cut. The prompt is a short file by
+ * The exact foreground command a task agent runs for its round's headless reviewer — the fallback for when a pane
+ * cannot open (SHE-182). `timeout 900` (not 540), stdin closed, and the CLI's progressive output redirected to a file
+ * the agent reads if the run is cut. The prompt is a short file by
  * reference: the reviewer reads the diff itself with its own read-only tools (`git diff <merge-base>...HEAD`, `git log`,
  * the files) — a huge pasted diff once stalled a round for 540 s and printed nothing. The round's model and effort are in
- * the line too (each CLI spells them differently), so it is ready to run after `<prompt>` and `<out>` are filled in. This
- * is the one place the per-CLI lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the
- * skill holds the general rules.
+ * the line too (each CLI spells them differently), so it is ready to run after `<prompt>` and `<out>` are filled in. The
+ * interactive pane's words are `reviewerPaneArgs` below; both live here, the one place for the per-CLI words.
  *
  * The streaming flag of each CLI was checked against its `--help` and run end to end where the CLI was available;
  * codex's `--json` comes from its documented JSONL event stream, as it was not available to run here:
@@ -94,6 +98,63 @@ export function reviewRunLine(r: Reviewer): string {
   }
 }
 
+/**
+ * The same round's reviewer started *interactive* in a herdr pane, read-only, with the prompt to follow sent to it by
+ * `runReviewInPane` (never as an argument: a prompt holds quotes and newlines). Kept beside `reviewRunLine` so the two
+ * spellings of a CLI's model, effort and read-only mode stay in one place; the skill and the tests use these words.
+ *
+ * Checked against each CLI's installed `--help` where it is installed (codex is not on this host, so its flag is from
+ * its docs, unverified here):
+ * - claude: `--permission-mode plan` plus Edit/Write/NotebookEdit refused; trustWorktree answers "Trust this folder?"
+ * - codex: `--sandbox read-only` (documented, unverified); effort is a `-c` setting, as in the headless line
+ * - pi: no permission system: the read tools (bash only to run git) are an allowlist and the prompt forbids changes;
+ *   `--approve` answers the worktree-trust screen (SHE-134), `--no-mcp` keeps an extension from starting one
+ * - opencode: its TUI has no model/agent flag; the session prepared for this round carries the model, effort and
+ *   permissions that deny edit (its one write permission), and `--session` opens it; `--standalone` keeps it in the pane's
+ *   process tree
+ * - agy: `--mode plan` is its read-only mode; `--settings` trusts this worktree for the session only
+ */
+export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string; modelId?: string } = {}): string[] {
+  const model = r.model && r.model !== 'default' ? r.model : undefined
+  const effort = r.effort && r.effort !== 'default' ? r.effort : undefined
+  const agyId = o.modelId ?? model
+  switch (r.kind) {
+    case 'claude':
+      // --disallowedTools is variadic: it must come last (there is no prompt argument here — the prompt is typed in
+      // later — but --model/--effort after it would be swallowed as tool names, as the headless line's `--` shows)
+      return [
+        ...(o.sessionId ? ['--session-id', o.sessionId] : []),
+        '--permission-mode',
+        'plan',
+        ...(model ? ['--model', model] : []),
+        ...(effort ? ['--effort', effort] : []),
+        '--disallowedTools',
+        'Edit,Write,NotebookEdit',
+      ]
+    case 'codex':
+      return ['--sandbox', 'read-only', ...(model ? ['-m', model] : []), ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : [])]
+    case 'pi':
+      return [
+        '--approve',
+        '--no-mcp',
+        '--tools',
+        'read,grep,find,ls,bash',
+        ...(o.sessionId ? ['--session-id', o.sessionId] : []),
+        ...(model ? ['--model', model] : []),
+        ...(effort ? ['--thinking', effort] : []),
+      ]
+    case 'opencode':
+      return ['--standalone', ...(o.session ? ['--session', o.session] : [])]
+    case 'agy':
+      // the same session-only trust as an agent's launch (agents.ts): otherwise a new reviewer process stops at agy's
+      // trust screen. Its effort goes in the model id (agyModelId, computed by the caller): --effort conflicts with one
+      // baked into that id, so it is never passed here.
+      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(agyId ? ['--model', agyId] : [])]
+    default:
+      return model ? ['--model', model] : []
+  }
+}
+
 /** "a headless Codex or a Codex subagent (its default model and effort)", "… Claude Code … (model opus, high effort)" */
 export function reviewerWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
@@ -117,7 +178,7 @@ export function reviewerWords(r: Reviewer) {
  *  next round */
 export function reviewerLine(r: Reviewer, backup: Reviewer | Reviewer[] | undefined, id: string) {
   const all = backup === undefined ? [] : Array.isArray(backup) ? backup : [backup]
-  const ask = `Each round, run \`shepherdr review ${id}\` first: it names the reviewer for that round and the words to pass. After the review, run \`shepherdr review ${id} --done\`.`
+  const ask = `Each round, run \`shepherdr review ${id} --run <prompt-file>\` first: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). If it says a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished. Plain \`shepherdr review ${id}\` still counts a round and names a reviewer without running one.`
   if (!all.length) return `Reviewer: ${reviewerWords(r)}. ${ask}`
   // a chain of them: each in turn, where the one before it cannot run either
   const rest = all.length > 1 ? `; where that one cannot run either, the next of, in turn: ${all.slice(1).map(reviewerWords).join('; ')}` : ''

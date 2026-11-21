@@ -271,30 +271,40 @@
   Settings → How tasks work → Reviewer → Backups → Backup (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
-  say in your summary that you did." Every round asks `shepherdr review <id>` which reviewer to use first, and the caps
-  decide it: the primary when it has room and is not out, else the first backup that has (its answer says why, e.g. "Codex
-  is at its limit, 4 of 4 at once"). The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts
-  that round like any other; nothing else about a review changes, and it is never a second opinion after findings. When every
-  reviewer is full or out, the command waits up to 90 seconds, then tells the agent to end its turn; a round is counted only
-  once a reviewer frees, and the agent is woken with the reviewer to use. Its reviewer holds a slot from the count until
-  `shepherdr review <id> --done`, the task's report, stop or end, or 45 minutes after the round was counted (or after its
-  agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
+  say in your summary that you did." Every round runs `shepherdr review <id> --run <prompt-file>`: it counts the round,
+  the caps decide the reviewer (the primary when it has room and is not out, else the first backup that has; its answer
+  says why, e.g. "Codex is at its limit, 4 of 4 at once"), and Shepherdr opens that reviewer interactive in
+  a new tab of the task's herdr space, beside the task's agent, labelled as its reviewer and with
+  `SHEPHERDR_CHAT=<id>/Reviewer`. It is read-only where the CLI supports it (Claude plan mode, Codex sandbox, agy plan
+  mode); pi and OpenCode keep bash to run git, with changes forbidden by the prompt. The human watches it in herdr and in
+  the task's terminal view. The agent raises its
+  shell tool's timeout to at least 1020 s (17 min) for this command (a round may wait 90 s for a reviewer first; 600000 ms
+  per call in Claude Code and OpenCode backgrounds it
+  rather than stopping it — the agent keeps waiting; at least 960 s in pi): a client that times out leaves the pane and
+  the lease running without the findings. It is never a second opinion after findings. When every reviewer is full or out, the command waits up to 90 seconds, then tells the agent
+  to end its turn; a round is counted only once a reviewer frees, and the agent is woken with the reviewer to use. Its
+  reviewer holds a slot from the count until the pane round ends (a `--run` frees it itself), or for a headless fallback
+  until `shepherdr review <id> --done`, the task's report, stop or end, or 45 minutes after the round was counted (or
+  after its agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
   agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
   always has. Each round the agent gives the reviewer a short prompt — the brief, the repo's rules and the base with
   `git diff <merge-base>...HEAD` to read the change itself, never a pasted diff (a huge one once stalled a round for
-  540 s with no output) — and runs the CLI's line from `shepherdr review <id>` in the foreground, stdin closed, under
-  `timeout 900` with its shell tool's timeout raised as far as the harness allows (600000 ms per call in Claude Code
-  and OpenCode, where the call then backgrounds rather than stops; at least 960 s in pi). The line already carries the
-  round's model and effort; the agent fills in the prompt and output files. That run streams its output to a file as it
-  is written; after a timeout the agent reads the file first and uses
+  540 s with no output) — and `--run` sends it to the pane, waits up to 900 s with progress on stderr, reads the
+  reviewer's last plain message from its own CLI log (not the screen) and closes the pane. A round cut by the timeout
+  prints what the reviewer had written so far, marked cut short, so the agent can use it or fall back to one subagent
+  review instead of starting over. Headless is only the fallback when a pane cannot open (no herdr space, or the CLI
+  will not start interactively): the answer says so and gives the CLI's line to run in the foreground, stdin closed,
+  under `timeout 900` with its shell tool's timeout raised as far as the harness allows (600000 ms per call in Claude
+  Code and OpenCode, where the call then backgrounds rather than stops; at least 960 s in pi), followed by `--done`.
+  That run streams its output to a file as it is written; after a timeout the agent reads the file first and uses
   findings already there instead of starting over. The reviewer itself holds no slot longer than the 45-minute lease
   above.
-  Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail: the only
-  failure it reads as a provider's is a cut-off turn of an agent it started itself (`retry.ts` on that chat's own
-  `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
-  the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
-  it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
+  Shepherdr does not nudge an agent towards that backup, because it has no exact way to tell a reviewer that cannot run
+  from one that is merely full: the only failure it reads as a provider's is a cut-off turn of an agent it started
+  itself (`retry.ts` on that chat's own `error` event, and `checkCut` needs the agent's record), and a round it opened
+  in a pane that fails to start reports the fallback instead of blaming the model. A nudge would rest on a guess, and a
+  wrong one would send an agent to its backup reviewer over a normal finding.
   The brief's words are the trigger, and they are the way back too: every round asks `shepherdr review` first again, so a
   reviewer goes back by itself as soon as its primary answers (a task already running keeps the reviewer
   its own brief named); with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers

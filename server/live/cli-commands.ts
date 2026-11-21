@@ -16,8 +16,10 @@ import { startsWords, whenFrom } from '../../shared/when.ts'
 import { parseHosts, refusedHosts } from '../hosts.ts'
 import { has } from '../plugins.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
+import { ROOT } from '../root.ts'
 import type { Agents } from './agents.ts'
 import { HELP, helpTopic, helpVerb, one, type Parsed, summaryOpts } from './args.ts'
+import { agentEnv } from './box.ts'
 import { type ArtifactRec, Artifacts, type Checker } from './artifacts.ts'
 import type { Automation, Automations, Template } from './automations.ts'
 import { BOX, boxHome } from './box.ts'
@@ -28,6 +30,7 @@ import { HELD_NAMED, HOME_NO_PLACE, minutesOf, statusLine } from './cli-shared.t
 import { swallowedReport } from './debug.ts'
 import { age, checkTitle, type Engine, ended, fitStatus, type HeldWhy, type Retune, retuneLine, reviewRetuneLine, type TaskRec } from './engine/engine.ts'
 import { validateBase } from './engine/git.ts'
+import { agyModelId } from './agy.ts'
 import { type Monitor, perfReport, summary } from './health.ts'
 import { type Heartbeats, heartbeatFile, WAKE_ANYWAY, wakesAnyway } from './heartbeat.ts'
 import { herdr } from './herdr.ts'
@@ -35,12 +38,15 @@ import { chatDir } from './inbox.ts'
 import type { Machines } from './machines.ts'
 import * as task from './mfs.ts'
 import { boxDir } from './mfs.ts'
-import { checkModelTable, effortsOf, findModel, knowsModels, modelsOf } from './models.ts'
+import { agyIds, checkModelTable, effortsOf, findModel, knowsModels, modelsOf } from './models.ts'
 import { type Finding, lines as orphanLines } from './orphans.ts'
 import { asMode, HOST, NAME, type Places, placeId, type Space, shortId } from './places.ts'
 import { type ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
 import { type Change, changeWords, PROFILES_ON_MAIN, type Profiles, previewWords, waitingPicks } from './profiles.ts'
-import { settingsBlock } from './prompts.ts'
+import { createSession } from './opencode.ts'
+import { privatePrompt, reviewRunLine, reviewerWords, settingsBlock } from './prompts.ts'
+import { readPromptFile, reviewerPrompt, runReviewInPane } from './review-pane.ts'
+import { trustWorktree } from './trust.ts'
 import type { RequestedNewsMailbox } from './requested-news.ts'
 import { type Resources, lines as resourceLines } from './resources.ts'
 import { fitHarness, type Harness, harnessProblem, harnessWords } from './restart.ts'
@@ -413,6 +419,88 @@ export class CliCommands {
       .map((x) => x.name)
   }
 
+  /**
+   * `shepherdr review <id> --run <prompt-file>` (SHE-182): count the round, start its reviewer interactive and read-only
+   * in a tab of the task's herdr space, wait for its findings, close the pane and free the reviewer. One verb for every
+   * task CLI. A pane that cannot open (no herdr space, CLI will not start) is said plainly; the round then falls back to
+   * the headless line and is left for `--done`, so a review that could not run is never passed off as one that found
+   * nothing. The reviewer's findings come from its own CLI log, as every other Shepherdr agent's chat does.
+   */
+  private async reviewRunCommand(
+    t: TaskRec,
+    promptFile: string | undefined,
+    ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean },
+    onStep?: (words: string) => void,
+  ): Promise<string> {
+    if (!promptFile) throw new Error(`shepherdr review ${t.id} --run <prompt-file>: write the reviewer's short prompt to a file first`)
+    if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent runs its review, not ${ctx.chat ? 'this chat' : 'you at the command'}`)
+    // read the prompt before counting a round: a missing file must not burn one
+    const base = readPromptFile(promptFile)
+    const r = await this.engine.reviewRound(t.id)
+    if ('wait' in r) return this.engine.reviewWaitWords(t.id, r.wait)
+    const round = r.round
+    const reviewer = r.reviewer
+    const space = this.places.nameOf(t.project) ?? t.project
+    const env = { ...agentEnv(`${t.id}/Reviewer`, ROOT) }
+    const prompt = reviewerPrompt(base, {
+      id: t.id,
+      round,
+      privacy: privatePrompt('', this.settings.instructions('reviewer', space)),
+    })
+    const step = (words: string) => {
+      onStep?.(words)
+      // the human watches the task's chat too: the round shows there while its pane is open
+      if (words.startsWith(`Review round ${round} running in a pane`))
+        this.chats.post(`${t.id}/Agent`, { id: `review-pane:${t.id}:${round}`, card: { id: `review-pane:${t.id}:${round}`, text: words } })
+    }
+    const got = await runReviewInPane({
+      id: t.id,
+      round,
+      reviewer,
+      cwd: t.worktree!,
+      workspace: `${t.id} ${t.title}`,
+      prompt,
+      env,
+      onStep: step,
+      trust: trustWorktree,
+      prepare: async (kind, _chat, rev) => {
+        if (kind === 'opencode') return { session: await createSession({ cwd: t.worktree!, title: `${t.id} reviewer ${round}`, model: rev.model, effort: rev.effort, deny: ['edit'] }) }
+        if (kind === 'codex')
+          // codex gives its tools the environment its own policy names, not the pane's shell environment (agents.ts)
+          return {
+            sessionId: randomUUID(),
+            extra: [
+              '-c',
+              `shell_environment_policy.set={${Object.entries(env)
+                .map(([k, v]) => `${JSON.stringify(k)}=${JSON.stringify(v)}`)
+                .join(',')}}`,
+            ],
+          }
+        if (kind === 'agy') return { sessionId: randomUUID(), modelId: rev.model ? agyModelId(rev.model, rev.effort, agyIds()) : undefined }
+        return { sessionId: randomUUID() }
+      },
+    })
+    // replace the "running in a pane" card with how the round ended, so the chat never shows a stale running line
+    const cardId = `review-pane:${t.id}:${round}`
+    const cardText = got.failed
+      ? `Review round ${round} fell back to headless: its pane could not open.`
+      : got.error
+        ? `Review round ${round} ended early: its reviewer gave an error.`
+        : `Review round ${round} finished in its reviewer pane.`
+    this.chats.post(`${t.id}/Agent`, { id: cardId, card: { id: cardId, text: cardText } })
+    if (got.failed) {
+      return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <prompt> and <out>), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
+    }
+    this.engine.reviewDone(t.id)
+    // a provider error is not a timeout: say which it was, and never call an empty cut-short answer "partial findings"
+    const cut = got.error
+      ? `The reviewer gave an error (${got.error}); ${got.findings ? 'these are its partial findings' : 'it wrote no findings before the error'}.\n\n`
+      : got.cutShort
+        ? `Cut short at the 900 s timeout; these are its partial findings.\n\n`
+        : ''
+    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
+  }
+
   async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0) return HELP
@@ -537,6 +625,7 @@ export class CliCommands {
         if (ctx.chat !== `${t.id}/Agent`)
           throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
         if (p.flags.has('done')) return this.engine.reviewDone(t.id) ? `Review of ${t.id} is done: its reviewer is free again.` : `No review of ${t.id} is running: nothing to release.`
+        if (one(p, 'run') !== undefined || p.flags.has('run')) return this.reviewRunCommand(t, one(p, 'run') ?? rest[0], ctx, onStep)
         const r = await this.engine.reviewRound(t.id)
         return 'wait' in r ? this.engine.reviewWaitWords(t.id, r.wait) : this.engine.reviewWords(t.id, r)
       }

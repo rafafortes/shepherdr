@@ -190,8 +190,9 @@
     a model right now; a start or a switch on its way, on the model it goes to, from the moment it is chosen (so two
     starts, or two cut-offs, a moment apart never both take the last slot); and the advisor's headless runs while each one
     runs (a slot of the model it runs on, held for the whole run and given back when it ends, even on a failure). A merge
-    waiting in line or in its gate holds no slot, so it counts nothing (its agent waits on Shepherdr, not on its model). A round's reviewer counts while the round runs: a
-    lease from `shepherdr review <id>` until `shepherdr review <id> --done` (see [tasks](tasks.md)). **Not counted yet:**
+    waiting in line or in its gate holds no slot, so it counts nothing (its agent waits on Shepherdr, not on its model). A round's reviewer counts while the round runs, whether it
+    is in a herdr pane or headless: a lease from `shepherdr review <id>` that a pane round frees itself and a headless one
+    holds until `shepherdr review <id> --done` (see [tasks](tasks.md)). **Not counted yet:**
     any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
     those, so a server that serves them too needs a lower cap than its own work alone would.
   - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry

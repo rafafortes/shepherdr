@@ -1,7 +1,7 @@
-// The Reviewer line of a brief, as the tests expect it: the reviewer's words, how a round asks which reviewer it runs
-// with (`shepherdr review <id>`, then `--done`), the backup's sentence when one is set, and who set the line.
+// The Reviewer line of a brief, as the tests expect it: the reviewer's words, how a round runs it in a herdr pane
+// (`shepherdr review <id> --run`), the headless fallback with `--done`, the backup's sentence when one is set, and who set it.
 export const ASK = (id: string) =>
-  `Each round, run \`shepherdr review ${id}\` first: it names the reviewer for that round and the words to pass. After the review, run \`shepherdr review ${id} --done\`.`
+  `Each round, run \`shepherdr review ${id} --run <prompt-file>\` first: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). If it says a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished. Plain \`shepherdr review ${id}\` still counts a round and names a reviewer without running one.`
 
 /** a Reviewer line: `- Reviewer: <words> <ask>`, then the backup's sentence, then the mark of who set it, when they are given */
 export const reviewerLineFor = (words: string, id: string, backup = '', mark = '') => `- Reviewer: ${words} ${ASK(id)}${backup ? ` ${backup}` : ''}${mark ? ` ${mark}` : ''}`

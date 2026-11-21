@@ -594,7 +594,7 @@ describe.skipIf(!browser)('a reviewer saved, and the tasks already waiting', () 
       expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
       // the picker writes the model as it lists it or by its id: either names the same model
       expect(reviewerLine('HP-203')).toMatch(
-        /model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$/,
+        /model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --run <prompt-file>` first.*\(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --run <prompt-file>` first.*\(this space's setting\)$/,
       )
       // the same words for each task, and its own id in the ask
       expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203')!.replaceAll('HP-203', 'HP-204'))

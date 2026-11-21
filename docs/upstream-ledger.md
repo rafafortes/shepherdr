@@ -860,3 +860,30 @@ screen already count it; Codex is not installed on this host (removed 2026-10-15
 is never woken by it, so its end still waits on you (upstream's SHEP-207/SHEP-267 guardian work is herdr children, not
 an in-app subagent that outlives the turn); pi 1.5.2's help lists read, bash, edit and write with no background or task
 tool, so its bash waits inside the turn and only a herdr child it spawned can wake it. Neither has an equivalent here.
+
+## Reviewers run in a herdr pane (SHE-182)
+
+Checked 2026-11-21 on `upstream/main` (`3.1.46`) and `upstream/v2.0` (`ebb17d58`), their code, history and the public
+issues and pull requests (read only). Upstream already solved the operator's "I can't see the process happening":
+`templates/worker.md`'s Review step starts the reviewer interactive and read-only as the worker's own helper agent with
+`hc run --bg --name <id>-review --label herdr.role=reviewer …`, never `claude -p` or `codex exec` ("nobody sees those"),
+waits with `hc wait … --timeout 600` (answering a startup dialog such as "Trust this folder?" with `hc keys … enter`),
+reads the report with `hc read … --lines 400`, then `hc kill`s it; `templates/reviewer.md` has it write its findings as
+its last plain message, and `docs/settings.md` says "Reviewers run as their worker's own helper agents". The idea, not
+the code: `hc` is herdr-core's CLI, which our 2.0 fork does not have (we run the herdr terminal app), and upstream's
+reporter reads the child's chat through core.
+
+**port** (ours, SHE-182): `shepherdr review <id> --run <prompt-file>` counts the round as before, then opens the round's
+reviewer interactive in a new tab of the task's herdr worktree space beside its agent, labelled as its
+reviewer and with `SHEPHERDR_CHAT=<id>/Reviewer`. It is read-only where the CLI supports it (Claude plan mode, Codex
+sandbox, agy plan mode); pi and OpenCode keep bash to run git, with changes forbidden by the prompt. One verb for all
+five task CLIs; the per-CLI read-only words live beside
+the headless line in `server/live/prompts.ts` (`reviewerPaneArgs`, checked against each installed CLI's `--help`; codex
+is not installed here, so its documented flag is marked unverified). `server/live/review-pane.ts` sends the prompt, answers
+startup dialogs, waits up to 900 s with progress on stderr, reads the final message from the reviewer's own CLI log
+(the readers every Shepherdr agent's chat uses, never the screen), marks a timeout's partial findings cut short, and
+closes the pane. A pane that cannot open falls back to the headless line and says so; the pane round frees its reviewer
+itself, the headless one still uses `--done`. The reviewer is a tab in the task's own space, visible in herdr and in
+Shepherdr's terminal view, and holds a reviewer slot under `models.maxAtOnce` exactly as before. The skill's Review step
+and the round answer point to `--run` first, headless second. Cost: one interactive TUI per round uses more memory than a
+headless run; measured RSS is in the task's facts, not repeated here.
