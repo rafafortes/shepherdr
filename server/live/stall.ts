@@ -31,6 +31,12 @@ export class StallWatch {
   /** how many there were since this started */
   count = 0
   private passes: { label: string; ms: number; at: number }[] = []
+  /** the worst lateness of a tick since the performance ring last read it, ms */
+  private lag = 0
+  /** the stalls since the performance ring last read it */
+  private since = 0
+  /** the slowest pass named since the performance ring last read it */
+  private slowest?: { label: string; ms: number }
   private last: number
   private timer?: ReturnType<typeof setInterval>
   private every: number
@@ -70,6 +76,7 @@ export class StallWatch {
       if (ms >= this.slow) {
         this.passes.push({ label, ms, at: began + ms })
         if (this.passes.length > 200) this.passes.splice(0, this.passes.length - 100)
+        if (!this.slowest || ms > this.slowest.ms) this.slowest = { label, ms }
       }
     }
   }
@@ -78,6 +85,7 @@ export class StallWatch {
   tick(): Stall | undefined {
     const now = this.now()
     const late = now - this.last - this.every
+    if (late > this.lag) this.lag = late
     const since = this.last
     this.last = now
     const done = this.passes.filter((p) => p.at > since)
@@ -88,10 +96,24 @@ export class StallWatch {
     const ran = [...by].map(([label, ms]) => ({ label, ms })).sort((a, b) => b.ms - a.ms)
     const stall: Stall = { at: now, late, ran }
     this.count++
+    this.since++
     this.stalls.push(stall)
     if (this.stalls.length > KEEP) this.stalls.shift()
     this.log(`shepherdr: the event loop stalled for ${seconds(late)} s, until ${new Date(now).toTimeString().slice(0, 8)}; ${words(ran)}`)
     return stall
+  }
+
+  /**
+   * What the performance ring records with each sample (health.ts's PerfSample): the worst lateness of the tick, stall or
+   * not, the stalls that came and the slowest pass named since the last read. Reading clears them, so one sample tells
+   * what happened between it and the one before it.
+   */
+  drainPerf(): { lag: number; stalls: number; pass?: { label: string; ms: number } } {
+    const taken = { lag: Math.max(0, this.lag), stalls: this.since, ...(this.slowest ? { pass: this.slowest } : {}) }
+    this.lag = 0
+    this.since = 0
+    this.slowest = undefined
+    return taken
   }
 
   /** what `shepherdr doctor` says: nothing while there were none, else how many and the latest with what ran */

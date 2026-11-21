@@ -91,6 +91,26 @@ describe('a stall', () => {
   })
 })
 
+describe('what the performance ring reads', () => {
+  test('the worst lateness of the tick, the stalls that came, and the slowest pass named, each read once', () => {
+    const { w, advance } = watch()
+    advance(250)
+    w.tick() // on time
+    advance(1100)
+    w.tick() // 850 ms late: under the stall limit, and still a number doctor wants
+    expect(w.drainPerf()).toEqual({ lag: 850, stalls: 0 })
+    advance(250)
+    w.tick()
+    w.run('snapshot', () => advance(400))
+    advance(2000)
+    expect(w.tick()?.late).toBe(2150)
+    // the pass it names, and the stalls since the read before
+    expect(w.drainPerf()).toEqual({ lag: 2150, stalls: 1, pass: { label: 'snapshot', ms: 400 } })
+    // read once, cleared: the next sample has only what came after it
+    expect(w.drainPerf()).toEqual({ lag: 0, stalls: 0 })
+  })
+})
+
 describe('what doctor says', () => {
   test('nothing while there was no stall', () => {
     expect(watch().w.report()).toEqual([])

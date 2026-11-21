@@ -151,7 +151,7 @@ import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
 import { RequestedNewsMailbox } from './requested-news.ts'
 import { Unread } from './unread.ts'
-import { levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
+import { levels, Monitor, memoryOver, meters, perfReport, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type HealthKept, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
 import { installLines, INSTALL_AGE_MS, staleInstalls, systemInstallIO, type InstallIO } from '../../scripts/supervisor.ts'
@@ -272,7 +272,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     () => this.agents.reachable,
     (e) => void this.onHealth(e).catch(() => undefined),
     undefined,
-    { read: () => readJson('health.json', {}), write: (w) => writeJson('health.json', w) },
+    { read: () => readJson<HealthKept>('health.json', {}), write: (w) => writeJson('health.json', w) },
     () => this.emit('snapshot'),
   )
   /** when each chat last had something new, and how far you have read each (on the main machine) */
@@ -366,6 +366,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   constructor() {
     super()
     if (process.env.NODE_ENV !== 'test') this.stall.start()
+    // what each health sample keeps of this server itself (health.ts's PerfSample, which doctor reads): how late the
+    // loop's tick came since the sample before, the stalls it made, the slowest pass named, and the agents working
+    this.health.perfNow = () => ({
+      ...this.stall.drainPerf(),
+      working: Object.values(this.agents.records).filter((r) => this.agents.status(r.key) === 'working').length,
+    })
     // a route provisioned while the loop stalls is answered late by its own timers: bindRoute waits for the loop to keep
     // up before it trusts a check, without polling herdr any more often than it does today
     this.agents.healthy = () => !this.stall.stalls.length || Date.now() - this.stall.stalls.at(-1)!.at > 1500
@@ -5653,6 +5659,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           hosts,
           refused,
           ...this.stall.report(),
+          ...perfReport(this.health.samples),
           ...swallowedReport(),
           ...this.pushWarnings().map((warning) => `Alerts: ${warning}`),
           ...this.agents.unreadableLogs(),
