@@ -117,6 +117,7 @@ export function reviewRunLine(r: Reviewer): string {
 export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string; modelId?: string } = {}): string[] {
   const model = r.model && r.model !== 'default' ? r.model : undefined
   const effort = r.effort && r.effort !== 'default' ? r.effort : undefined
+  const agyId = o.modelId ?? model
   switch (r.kind) {
     case 'claude':
       // --disallowedTools is variadic: it must come last (there is no prompt argument here — the prompt is typed in
@@ -148,8 +149,7 @@ export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?:
       // the same session-only trust as an agent's launch (agents.ts): otherwise a new reviewer process stops at agy's
       // trust screen. Its effort goes in the model id (agyModelId, computed by the caller): --effort conflicts with one
       // baked into that id, so it is never passed here.
-      const id = o.modelId ?? model
-      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(id ? ['--model', id] : [])]
+      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(agyId ? ['--model', agyId] : [])]
     default:
       return model ? ['--model', model] : []
   }
