@@ -456,8 +456,8 @@ describe('the brief and the skill say how a round asks its reviewer', () => {
     expect(skill).toContain('timeout 900')
     expect(skill).not.toContain('timeout 540 codex exec')
     expect(skill).toContain('< /dev/null')
-    expect(skill).toContain("streams the reviewer's output to `<out>` as it is written")
-    expect(skill).toContain('after a timeout, read `<out>` first')
+    expect(skill).toContain("streams the reviewer's output to that file as it is")
+    expect(skill).toContain('after a timeout, read the file first')
     expect(skill).toContain('one subagent review instead')
   })
 })
@@ -480,6 +480,10 @@ describe("the round's headless review command, one ready-to-run line per reviewe
       expect(line).toContain('> <out>')
       expect(line).toContain(flag)
       expect(line).toContain('"$(cat <prompt>)"')
+      // --disallowedTools (claude) takes a list: the `--` terminator keeps it from eating the prompt
+      if (kind === 'claude') expect(line).toContain('-- "$(cat <prompt>)"')
+      // agy's -p takes the next token as the prompt: it must come right after -p, before any other flag
+      if (kind === 'agy') expect(line).toContain('agy -p "$(cat <prompt>)"')
       expect(line).not.toContain('git diff')
       // foreground: nothing backgrounds it and no turn ends while it runs (the skill says so)
       expect(line).not.toContain(' &')

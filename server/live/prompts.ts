@@ -52,21 +52,25 @@ const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'C
  * the files) — a huge pasted diff once stalled a round for 540 s and printed nothing. This is the one place the per-CLI
  * lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the skill holds the general rules.
  *
- * The streaming flag of each CLI was checked against its installed `--help` on 2026-11-21:
- * - claude: `-p --output-format stream-json --verbose` (stream-json needs --verbose; "text" prints only at the end);
- * - codex: `exec --json` (JSONL events as they happen; `-o` writes only the last message at the end — too late for a timeout).
- *   Codex is not installed on this host (`command -v codex` is empty), so this uses its documented flag, not a local run;
- * - pi: `-p --mode json` (verified: emits `message_update`/`thinking_delta` events as they are written);
- * - opencode: `run --format json` (per-event JSON lines; the plan agent is the read-only one);
- * - agy: `-p --output-format stream-json --mode plan` (help lists text, json and stream-json).
- * All five can stream; none needs a "cannot stream" note. pi's `bash` timeout is in seconds, the others' tool timeout in ms.
+ * The streaming flag of each CLI was checked against its installed `--help` and run end to end on 2026-11-21, except
+ * codex (not installed on this host: `command -v codex` is empty), whose `--json` is the documented JSONL event stream:
+ * - claude: `-p --output-format stream-json --verbose` (stream-json needs --verbose; "text" prints only at the end).
+ *   `--disallowedTools` is variadic, so `--` terminates the options before the prompt;
+ * - codex: `exec --json` (`-o` writes only the last message at the end — too late for a timeout);
+ * - pi: `-p --mode json` (emits `message_update`/`thinking_delta` events as they are written);
+ * - opencode: `run --standalone --agent plan --format json` (per-event JSON lines, plan agent read only);
+ * - agy: `-p <prompt> --output-format stream-json --mode plan` — the prompt must follow `-p` immediately, or `-p` takes
+ *   the next flag as its prompt (the repo's own agy calls do the same, in advisor.ts and return.ts).
+ * All five can stream; none needs a "cannot stream" note. pi has no read-only mode: `bash` is in its tool list only so
+ * the reviewer can run `git diff`/`git log`, and the prompt forbids changes. The four others use a read-only mode.
  */
 export function reviewRunLine(kind: string): string {
   const prompt = '"$(cat <prompt>)"'
   const out = '> <out> 2>&1 < /dev/null'
   switch (kind) {
     case 'claude':
-      return `timeout 900 claude -p --output-format stream-json --verbose --permission-mode plan --disallowedTools Edit,Write,NotebookEdit ${prompt} ${out}`
+      // --disallowedTools is variadic: without `--` it swallows the prompt that follows (`... -- "prompt"` is the fix)
+      return `timeout 900 claude -p --output-format stream-json --verbose --permission-mode plan --disallowedTools Edit,Write,NotebookEdit -- ${prompt} ${out}`
     case 'codex':
       return `timeout 900 codex exec -s read-only --json ${prompt} ${out}`
     case 'pi':
@@ -74,7 +78,8 @@ export function reviewRunLine(kind: string): string {
     case 'opencode':
       return `timeout 900 opencode run --standalone --agent plan --format json ${prompt} ${out}`
     case 'agy':
-      return `timeout 900 agy -p --output-format stream-json --mode plan --model <model> ${prompt} ${out}`
+      // -p takes the token right after it as the prompt: `agy -p --flag "prompt"` fails with "took --flag as its prompt"
+      return `timeout 900 agy -p ${prompt} --output-format stream-json --mode plan --model <model> ${out}`
     default:
       return `timeout 900 ${kind} <its streaming-output flag> ${prompt} ${out}`
   }

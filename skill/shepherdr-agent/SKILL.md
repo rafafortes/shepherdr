@@ -68,12 +68,17 @@ build, check and review the work is your own judgment.
    limits, and report without it. Give the reviewer, in a short prompt file, the brief, the repo's rules and the base with
    the command to read the change yourself (`git diff <merge-base>...HEAD`, `git log`, the files): it reads them with its
    own read-only tools, never pasted inline — a huge pasted diff once stalled a round for 540 s with no output. Run the
-   line from `shepherdr review <id>` in the foreground, its stdin closed (`< /dev/null`) and under `timeout 900`, not 540,
-   with your shell tool's timeout at its maximum for this harness (Claude Code and OpenCode `Bash`: 600000 ms;
-   Antigravity: 600000 ms; pi `bash`: 960 seconds; Codex: no per-call tool clock, the shell `timeout` is it). That line
-   streams the reviewer's output to `<out>` as it is written; after a timeout, read `<out>` first and use any findings
-   there instead of starting over. Never in the background, and never end your turn while a review runs. Timed out or
-   failed with nothing usable: one subagent review instead, the same round. Give the reviewer the authoritative command
+   line from `shepherdr review <id>` in the foreground, its stdin closed (`< /dev/null`) and under `timeout 900`, not 540.
+   Raise your shell tool's timeout to cover those 900 s: Claude Code `Bash` 600000 ms per call (a call that reaches it
+   moves to the background, not stopped — keep waiting for the file); OpenCode `bash` 600000 ms, or `0` where 0 disables
+   the cap; pi `bash` at least 960 seconds (its cap is far higher); Antigravity: the largest its shell tool accepts
+   (unverified here); Codex: no per-call tool clock, the shell `timeout` is it. The line is a template: replace `<prompt>`
+   with your short prompt file, `<out>` with the file to stream into and `<model>` with the round's model, and add the
+   round's model and effort flags from the answer's reviewer words. It streams the reviewer's output to that file as it is
+   written; after a timeout, read the file first and use any findings there instead of starting over. Never in the
+   background, and never end your turn while a review runs. Timed out or
+   failed with nothing usable: one subagent review instead, the same round. pi has no enforced read-only mode: its
+   reviewer needs `bash` to run git, and the prompt forbids changes. Give the reviewer the authoritative command
    from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), never your own
    reasoning; ask for what this
    change broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work),

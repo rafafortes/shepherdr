@@ -282,10 +282,12 @@
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
   always has. Each round the agent gives the reviewer a short prompt — the brief, the repo's rules and the base with
   `git diff <merge-base>...HEAD` to read the change itself, never a pasted diff (a huge one once stalled a round for
-  540 s with no output) — and runs the CLI's exact line from `shepherdr review <id>` in the foreground, stdin closed,
-  under `timeout 900` with its shell tool's timeout at that harness's maximum. That run streams its output to a file as
-  it is written; after a timeout the agent reads the file first and uses findings already there instead of starting
-  over. The reviewer itself holds no slot longer than the 45-minute lease above.
+  540 s with no output) — and runs the CLI's line from `shepherdr review <id>` in the foreground, stdin closed, under
+  `timeout 900` with its shell tool's timeout raised to cover it (600000 ms per call in Claude Code and OpenCode,
+  at least 960 s in pi; the line is a template: the agent fills in the prompt file, output file, model and effort).
+  That run streams its output to a file as it is written; after a timeout the agent reads the file first and uses
+  findings already there instead of starting over. The reviewer itself holds no slot longer than the 45-minute lease
+  above.
   Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail: the only
   failure it reads as a provider's is a cut-off turn of an agent it started itself (`retry.ts` on that chat's own
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
