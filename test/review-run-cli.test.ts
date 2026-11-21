@@ -63,7 +63,12 @@ function task() {
     agent: { kind: 'claude' },
     reviewer: { kind: 'claude' },
   } as never)
-  return src.engine.task(id)!
+  return (
+    src.engine.task(id) ??
+    (() => {
+      throw new Error(`task ${id} was not added`)
+    })()
+  )
 }
 
 const promptFile = () => {
