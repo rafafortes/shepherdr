@@ -93,7 +93,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const r = await review(t)
     expect(r.code).toBe(0)
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`${reviewRunLine({ kind: 'codex' })}\`. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`${reviewRunLine({ kind: 'codex' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     // the lease counts toward the caps: the reviewer's run is on its model, of this space
@@ -106,7 +106,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     hold('advisor:busy', 'codex/gpt-5.5')
     const r = await review(t)
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\`. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'pi/unknown' })])
@@ -155,7 +155,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.unlease('advisor:b')
     const r = await pending
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\`. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
@@ -464,7 +464,7 @@ describe('the brief and the skill say how a round asks its reviewer', () => {
 
 describe("the round's headless review command, one ready-to-run line per reviewer CLI", () => {
   const streaming: Record<string, string> = {
-    claude: '--output-format stream-json --verbose',
+    claude: '--output-format stream-json --verbose --include-partial-messages',
     codex: '--json',
     pi: '--mode json',
     opencode: '--format json',
@@ -493,7 +493,7 @@ describe("the round's headless review command, one ready-to-run line per reviewe
       if (kind === 'claude') expect(line).toContain('-- "$(cat <prompt>)"')
       // agy's -p takes the next token as the prompt: it must come right after -p, before any other flag
       if (kind === 'agy') expect(line).toContain('agy -p "$(cat <prompt>)"')
-      expect(line).not.toContain('git diff')
+      // the prompt is a reference to a short file, never pasted diff text (the skill pins that rule for the prompt itself)
       // foreground: nothing backgrounds it and no turn ends while it runs (the skill says so)
       expect(line).not.toContain(' &')
       expect(line).not.toContain('nohup')
@@ -507,6 +507,7 @@ describe("the round's headless review command, one ready-to-run line per reviewe
       const answer = src.engine.reviewWords('RV-X', round)
       expect(answer).toContain(`Run \`${reviewRunLine(reviewer)}\``)
       expect(answer).toContain(modelEffort[kind] ?? '')
+      expect(answer).toContain('(fill in <prompt> and <out>)')
     }
   })
 

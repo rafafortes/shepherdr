@@ -72,8 +72,8 @@ build, check and review the work is your own judgment.
    Raise your shell tool's timeout as far as that harness allows: Claude Code `Bash` 600000 ms per call (at that cap the
    call moves to the background rather than stopping — keep waiting for the file); OpenCode `bash` 600000 ms, or `0` where
    0 disables the cap; pi `bash` at least 960 seconds (its cap is far higher); Antigravity: the largest its shell tool
-   accepts, unverified here; Codex: no per-call tool clock, so the shell `timeout` is it. Only the claude, pi, agy and
-   opencode lines were run on this host; Codex is not installed, so its line comes from its documented flags. The line
+   accepts, unverified here; Codex: no per-call tool clock, so the shell `timeout` is it. Where a CLI is not installed,
+   its line comes from that CLI's documented flags; a figure that could not be verified is marked unverified. The line
    already carries the round's model and effort: replace `<prompt>` with your short prompt file and `<out>` with the file
    to stream into. It streams the reviewer's output there as it is written; after a timeout, read the file first and use
    any findings there instead of starting over. Never in the background, and never end your turn while a review runs.

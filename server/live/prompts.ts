@@ -54,17 +54,20 @@ const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'C
  * is the one place the per-CLI lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the
  * skill holds the general rules.
  *
- * The streaming flag of each CLI was checked against its installed `--help` and run end to end on 2026-11-21, except
- * codex (not installed on this host: `command -v codex` is empty), whose `--json` is the documented JSONL event stream:
- * - claude: `-p --output-format stream-json --verbose` (stream-json needs --verbose; "text" prints only at the end).
+ * The streaming flag of each CLI was checked against its `--help` and run end to end where the CLI was available;
+ * codex's `--json` comes from its documented JSONL event stream, as it was not available to run here:
+ * - claude: `-p --output-format stream-json --verbose --include-partial-messages` (stream-json needs --verbose; "text"
+ *   prints only at the end; without --include-partial-messages a message is printed whole, so a cut mid-report loses it).
  *   `--disallowedTools` is variadic, so `--` terminates the options before the prompt;
  * - codex: `exec --json` (`-o` writes only the last message at the end — too late for a timeout);
  * - pi: `-p --mode json` (emits `message_update`/`thinking_delta` events as they are written);
  * - opencode: `run --standalone --agent plan --format json` (per-event JSON lines, plan agent read only);
  * - agy: `-p <prompt> --output-format stream-json --mode plan` — the prompt must follow `-p` immediately, or `-p` takes
  *   the next flag as its prompt (the repo's own agy calls do the same, in advisor.ts and return.ts).
- * All five can stream; none needs a "cannot stream" note. pi has no read-only mode: `bash` is in its tool list only so
- * the reviewer can run `git diff`/`git log`, and the prompt forbids changes. The four others use a read-only mode.
+ * All five can stream; none needs a "cannot stream" note. pi emits partial deltas and claude needs --include-partial-messages
+ * for them; whether agy, opencode and codex also emit deltas before a message is complete was not verified. pi has no
+ * read-only mode: `bash` is in its tool list only so the reviewer can run `git diff`/`git log`, and the prompt forbids
+ * changes. The four others use a read-only mode.
  */
 export function reviewRunLine(r: Reviewer): string {
   const model = r.model && r.model !== 'default' ? r.model : undefined
@@ -74,7 +77,7 @@ export function reviewRunLine(r: Reviewer): string {
   switch (r.kind) {
     case 'claude':
       // --disallowedTools is variadic: without `--` it swallows the prompt that follows (`... -- "prompt"` is the fix)
-      return `timeout 900 claude -p --output-format stream-json --verbose ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}--permission-mode plan --disallowedTools Edit,Write,NotebookEdit -- ${prompt} ${out}`
+      return `timeout 900 claude -p --output-format stream-json --verbose --include-partial-messages ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}--permission-mode plan --disallowedTools Edit,Write,NotebookEdit -- ${prompt} ${out}`
     case 'codex':
       // codex takes its effort from its own config, not a flag (as in oneShot), so only the model goes here
       return `timeout 900 codex exec -s read-only ${model ? `--model ${model} ` : ''}--json ${prompt} ${out}`
