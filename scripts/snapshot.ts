@@ -234,16 +234,19 @@ export function prune(root: string): string[] {
     weekly++
   }
   const removed: string[] = []
-  for (const day of days)
-    if (!keep.has(day))
-      try {
-        rmSync(join(root, day), { recursive: true, force: true })
-        removed.push(day)
-      } catch {
-        // coverage-exempt: a folder that will not go (a mode, a mount) is left for the next night rather than failing a
-        // night that has already saved its snapshot
-      }
+  for (const day of days) if (!keep.has(day) && drop(join(root, day))) removed.push(day)
   return removed
+}
+
+/** remove one snapshot folder, and say whether it went: one that will not (a mode, a mount) is left for the next night
+ *  rather than failing a run whose snapshot is already saved */
+export function drop(dir: string): boolean {
+  try {
+    rmSync(dir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export type Restored = { day: string; from: string; files: string[] }

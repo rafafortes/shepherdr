@@ -5,7 +5,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DAILY, dated, dayOf, FOLDER, linked, main, pidAlive, prune, restore, same, size, snapshot, stores, WEEKLY, weekOf } from '../scripts/snapshot.ts'
+import { DAILY, dated, dayOf, drop, FOLDER, linked, main, pidAlive, prune, restore, same, size, snapshot, stores, WEEKLY, weekOf } from '../scripts/snapshot.ts'
 import { tmp } from './tmp.ts'
 
 /** a file in `dir`, made with its folders: `put(home, 'inbox/a.png')` is an attachment, never a store */
@@ -231,6 +231,22 @@ describe('the retention', () => {
     expect(kept).not.toContain('2026-09-27')
     // a second prune finds nothing left to remove
     expect(prune(join(dir, FOLDER))).toEqual([])
+  })
+
+  test.skipIf(process.getuid?.() === 0)('a folder the retention cannot remove is left, not failed over', () => {
+    const dir = tmp('snapshot-keep-failing')
+    const root = join(dir, FOLDER)
+    for (const day of ['2026-11-01', '2026-11-02', '2026-11-03']) fabricate(dir, day)
+    chmodSync(root, 0o500)
+    try {
+      // the folder will not go, so the run says it went nowhere rather than throwing over a snapshot it already saved
+      expect(prune(root)).toEqual([])
+      expect(drop(join(root, '2026-11-01'))).toBe(false)
+      expect(drop(join(root, 'not-there'))).toBe(true)
+      expect(existsSync(join(root, '2026-11-01'))).toBe(true)
+    } finally {
+      chmodSync(root, 0o700)
+    }
   })
 
   test('the weeks are the ISO ones, so a new year does not cost a snapshot', () => {
