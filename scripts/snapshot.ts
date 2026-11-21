@@ -296,6 +296,10 @@ export function main(argv: string[] = process.argv.slice(2), dir = home(), at = 
     console.error(`snapshot: no ${what}: try list, or restore <YYYY-MM-DD>`)
     return 2
   }
+  if (!existsSync(dir)) {
+    console.error(`snapshot: no Shepherdr home in ${dir}: point SHEPHERDR_HOME at the one to copy, or start Shepherdr once`)
+    return 1
+  }
   const made = snapshot(dir, at)
   console.log(
     `snapshot ${made.day}: ${size(made.bytes)} in ${names(made.files.length, 'file', 'files')}` +

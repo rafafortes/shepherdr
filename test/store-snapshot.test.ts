@@ -294,6 +294,9 @@ describe('the command', () => {
       expect(said(log)).toMatch(/\d{4}-\d{2}-\d{2} {2}\d+ B {2}1 file/)
       expect(main(['nonsense'], dir)).toBe(2)
       expect(said(page)).toContain('snapshot: no nonsense')
+      // a home that is not there is said, not a stack trace in a nightly log
+      expect(main([], join(dir, 'not-a-home'))).toBe(1)
+      expect(said(page)).toContain('no Shepherdr home in')
     } finally {
       log.mockRestore()
       page.mockRestore()

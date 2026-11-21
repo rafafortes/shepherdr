@@ -1,7 +1,7 @@
 # Backups
 
 All of Shepherdr's own work lives in a few files in its home, `~/.shepherdr` (`SHEPHERDR_HOME` moves it): the tasks with
-their briefs, status and reports, the spaces, the settings, the automations, the agents' chats, and the plan usage read
+their briefs, status and reports, the spaces, the settings, the automations, the agents' records, and the plan usage read
 from their logs. Each is one JSON file written whole, and the writes are atomic, so a crash never leaves half a store.
 Nothing in that keeps a write that reads back fine from replacing hours of work: a typo in a setting, a delete confirmed
 in a hurry, a release that writes wrong state for days before anyone notices. A snapshot is that net.
@@ -20,17 +20,18 @@ many snapshots are kept. It ends non-zero when a store could not be copied, nami
 failed run, never a quiet one.
 
 **It holds:** every JSON file in the home's own folder — the stores of record (tasks, spaces, settings, automations) and
-the caches that are hours of work too (the agents and their chats, the usage ledger, the outbox, the returns, the task
-status lines) — and the task-ID store with the two files SQLite keeps beside it (`task-ids.sqlite`, `-wal` and `-shm`),
-which are copied together because a database alone means nothing.
+the caches that are hours of work too (the agents' records: which agent, which CLI, which worktree and log, the session
+it resumes from; the usage ledger read from their logs; the outbox and the returns; the task status lines) — and the
+task-ID store with the two files SQLite keeps beside it (`task-ids.sqlite`, `-wal` and `-shm`), which are copied
+together because a database alone means nothing.
 
 **It never holds:**
 
 - the secrets: `secrets.json`, `vapid.json`, `push.json` and `vault.json`, the vault your keys are kept in — and any
   file whose name says it holds one, whether or not this page lists it;
-- anything outside the home's own folder: no chat log (`chatlog/`), no attachment you sent (`inbox/`), no artifact's
-  files (`artifacts/`), no other machine's payload (`machines/`). A backup must not duplicate a secret or a chat, and
-  none of those is a store that nothing re-derives;
+- anything outside the home's own folder: no chat text (each chat is a file under `chatlog/`), no attachment you sent
+  (`inbox/`), no artifact's files (`artifacts/`), no other machine's payload (`machines/`). A backup must not duplicate a
+  secret or a chat, and none of those is a store that nothing re-derives;
 - the server's own `server.json`, and the copies kept beside a store (`.corrupt-…`, `.before-empty-…`, and the `.bak-…`
   you make by hand): a snapshot of copies would only cost space.
 
@@ -61,7 +62,7 @@ its next read would see half of each. It stops nothing itself, and it changes no
 What a restore costs: it copies the day's files over the live ones, so anything newer is gone with them. If tonight's
 snapshot already exists and you want it kept too, copy its folder aside first
 (`cp -a ~/.shepherdr/backups/<date> /tmp/`). A restore brings back the tasks, spaces, settings and automations of that
-day, the agents' chats, and the task numbers their ID store held. It does not bring back a worktree, a branch or a
+day, the agents' records, and the task numbers their ID store held. It does not bring back a worktree, a branch or a
 commit (they are in git), an agent that was running then, or a chat line written after that day.
 
 ## A schedule
