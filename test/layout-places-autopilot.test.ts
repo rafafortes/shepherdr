@@ -266,6 +266,10 @@ describe.skipIf(!browser)('pausing a space or a machine', () => {
       await sw.click()
       await pill.waitFor()
       expect(await pill.textContent()).toBe('Paused')
+      // the sidebar row carries the tag too, in the mark slot before Autopilot's dot
+      const pausedRow = page.locator('#places li', { hasText: 'gtm' })
+      await pausedRow.locator('[data-paused]').waitFor()
+      expect(await pausedRow.locator('button[aria-label]:not([aria-expanded]):not([aria-haspopup])').first().getAttribute('aria-label')).toContain('paused')
       expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'space.maxTasks', value: '0', place: p.id })
       expect(await sw.getAttribute('aria-checked')).toBe('true')
       expect(await pop.getByText('New tasks wait, held; running ones keep going').count()).toBe(1)
@@ -280,6 +284,7 @@ describe.skipIf(!browser)('pausing a space or a machine', () => {
       expect(await rowSw.getAttribute('aria-checked')).toBe('true')
       await rowSw.click()
       await page.waitForFunction(() => !document.querySelector('[data-chrome] [data-mode="paused"]'))
+      expect(await pausedRow.locator('[data-paused]').count()).toBe(0)
       expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'space.maxTasks', value: null, place: p.id })
       expect(await rowSw.getAttribute('aria-checked')).toBe('false')
     } finally {

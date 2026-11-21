@@ -114,6 +114,8 @@ function AutopilotSwitch({ place }: { place: Place }) {
  *  note is the confirm line: nothing already running stops, and held tasks start by themselves on Resume */
 function PauseSwitch({ place }: { place: Place }) {
   const snap = useSnap()
+  // the home space holds no tasks of its own: a switch here would do nothing
+  if (place.home) return null
   const on = pausedPlace(snap, place.id)
   return (
     <MenuSwitch

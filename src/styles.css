@@ -795,6 +795,13 @@
     width: 6px;
     height: 6px;
   }
+  /* the row's Paused mark: a quiet pause sign in the same room as Autopilot's dot, never its red */
+  .mode-pill.mark.paused-mark {
+    --m: var(--fg2);
+  }
+  .mode-pill.mark.paused-mark::before {
+    display: none;
+  }
   [data-device="phone"] .mode-pill.mark {
     width: 16px;
     height: 16px;

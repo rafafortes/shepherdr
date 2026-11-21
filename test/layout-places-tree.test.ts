@@ -116,8 +116,6 @@ describe.skipIf(!browser)('the ⋯ menu is one design', () => {
     // the Autopilot switch first, a row like the others
     expect(await focused()).toBe('Autopilot')
     await page.keyboard.press('ArrowDown')
-    expect(await focused()).toBe('Pause space')
-    await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Search in this chat')
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Search this chat and beyond')

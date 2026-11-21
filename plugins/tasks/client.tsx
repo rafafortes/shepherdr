@@ -798,7 +798,7 @@ function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Autom
         <dt className="font-medium text-fg">Last runs</dt>
         <dd className="text-fg2">
           {a.runs.length
-            ? a.runs.slice(0, 3).map((r) => (
+            ? a.runs.slice(0, 3).map((r, i) => (
                 <div key={r.at}>
                   {ranAt(r.at)} ·{' '}
                   {r.task ? (
@@ -808,7 +808,8 @@ function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Autom
                   ) : (
                     <span className="text-need">failed: {r.error}</span>
                   )}
-                  {paused && r.task ? <span className="text-need"> · held: its space is set to 0 tasks</span> : null}
+                  {/* runs are newest first: only the one a paused space just added reads as held, not older finished ones */}
+                  {paused && i === 0 && r.task ? <span className="text-need"> · held: its space is set to 0 tasks</span> : null}
                 </div>
               ))
             : 'Not run yet'}

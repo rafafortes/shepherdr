@@ -313,16 +313,19 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const quiet = muted(snap, p.id)
   const off = p.status === 'off' && !p.connecting
   const pilot = p.mode === 'autopilot' && !off
+  const paused = pausedPlace(snap, p.id)
   return {
     sel,
     // what the row says aloud, its count and offline too
-    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? ', on Autopilot' : ''}${quiet ? ', muted' : ''}`,
+    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? ', on Autopilot' : ''}${paused ? ', paused' : ''}${quiet ? ', muted' : ''}`,
     fresh,
-    // the Autopilot mark, then the space's # before the name, as Slack's channels have: grey, lit with the name where
-    // it is open or something is new
+    // one mark room as before: a quiet pause sign while paused, else Autopilot's dot, then the space's # before its
+    // name. No extra room, so the # stays under its machine's name and no name moves
     mark: (
       <>
-        <span aria-hidden data-autopilot={pilot || undefined} className={clsx('mode-pill mark', !pilot && 'invisible')} />
+        <span aria-hidden data-paused={paused || undefined} data-autopilot={pilot || undefined} className={clsx('mode-pill mark', paused ? 'paused-mark' : !pilot && 'invisible')}>
+          {paused ? <PauseIcon className="size-2.5" /> : null}
+        </span>
         <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />
       </>
     ),
@@ -520,6 +523,8 @@ function MoveItems({ p, snap, menu, onBack }: { p: Place; snap: Snapshot; menu: 
 /** Pause a space from its row's ⋯ (the same switch as in its chat's menu): new tasks wait, held, nothing already
  *  running stops; the note is the confirm line, and Resume lets the held tasks start by themselves */
 function PauseItem({ p, snap }: { p: Place; snap: Snapshot }) {
+  // the home space holds no tasks of its own: a switch here would do nothing
+  if (p.home) return null
   const on = pausedPlace(snap, p.id)
   return (
     <MenuSwitch
