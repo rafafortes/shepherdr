@@ -3,7 +3,7 @@
 // prints, and the restore that refuses while a server runs in the home it would write over. Every home here is a folder
 // in /tmp: no test touches the Shepherdr of the machine it runs on.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DAILY, dated, dayOf, FOLDER, linked, main, pidAlive, prune, restore, same, size, snapshot, stores, WEEKLY, weekOf } from '../scripts/snapshot.ts'
 import { tmp } from './tmp.ts'
@@ -38,8 +38,8 @@ async function gonePid(): Promise<number> {
 /** everything a fake home holds, as the live stores of a working Shepherdr and the things a snapshot must not bring */
 function working(dir: string) {
   for (const name of ['tasks.json', 'spaces.json', 'settings.json', 'automations.json', 'agents.json', 'usage.json', 'returns.json']) put(dir, name, `{"store":"${name}"}`)
-  // the text of messages, waiting or typed: chat content, so never in a snapshot
-  for (const name of ['outbox.json', 'typed.json']) put(dir, name, `{"text":"${name}"}`)
+  // the text of messages — waiting, typed, or the advisor's answers: chat content, so never in a snapshot
+  for (const name of ['outbox.json', 'typed.json', 'advice.json']) put(dir, name, `{"text":"${name}"}`)
   put(dir, 'task-ids.sqlite', 'db')
   put(dir, 'task-ids.sqlite-wal', 'wal')
   put(dir, 'task-ids.sqlite-shm', 'shm')
@@ -78,10 +78,10 @@ describe('what a snapshot takes', () => {
     // the whole point: no secret file, no message text, no chat, no attachment, no other machine's payload, not even
     // under its own name
     for (const name of made.files) expect(name).not.toMatch(/secret|vapid|push|vault|outbox|typed|chatlog|inbox|machines|artifacts/)
-    expect(made.files).not.toContain('outbox.json')
-    expect(made.files).not.toContain('typed.json')
-    // the ID store is copied last: a number reserved before its task is never older than tasks.json beside it
-    expect(made.files.slice(-3)).toEqual(['task-ids.sqlite', 'task-ids.sqlite-shm', 'task-ids.sqlite-wal'])
+    for (const name of ['advice.json', 'outbox.json', 'typed.json']) expect(made.files).not.toContain(name)
+    // the ID store comes last, its database after its log: a number reserved before its task is never older than the
+    // tasks.json beside it, and the database copy is never older than the log copied with it
+    expect(made.files.slice(-3)).toEqual(['task-ids.sqlite-shm', 'task-ids.sqlite-wal', 'task-ids.sqlite'])
     expect(readdirSync(made.dir).sort()).toEqual([...made.files].sort())
     expect(readFileSync(join(made.dir, 'tasks.json'), 'utf8')).toBe('{"store":"tasks.json"}')
     // the three files of the ID store are copied together: a database restored without its log means nothing
@@ -90,7 +90,7 @@ describe('what a snapshot takes', () => {
     expect(made.shared).toBe(0)
   })
 
-  test('a folder the home does not have is not a store, and a file it cannot read is named instead of lost in silence', () => {
+  test.skipIf(process.getuid?.() === 0)('a folder the home does not have is not a store, and a file it cannot read is named instead of lost in silence', () => {
     const dir = tmp('snapshot-broken')
     put(dir, 'tasks.json', '{"tasks":[]}')
     const bad = put(dir, 'usage.json', '{"usage":{}}')
@@ -116,6 +116,19 @@ describe('what a snapshot takes', () => {
       page.mockRestore()
       log.mockRestore()
     }
+  })
+
+  test('a store linked from another disk is still a store, and a link to nothing is skipped', () => {
+    const dir = tmp('snapshot-link-store')
+    put(dir, 'tasks.json', '{"tasks":[]}')
+    const elsewhere = join(tmp('snapshot-elsewhere'), 'settings.json')
+    writeFileSync(elsewhere, '{"settings":{}}')
+    symlinkSync(elsewhere, join(dir, 'settings.json'))
+    symlinkSync(join(dir, 'not-there.json'), join(dir, 'spaces.json'))
+    expect(stores(dir)).toEqual(['settings.json', 'tasks.json'])
+    const made = snapshot(dir, new Date(2026, 10, 18))
+    expect(made.files).toEqual(['settings.json', 'tasks.json'])
+    expect(readFileSync(join(made.dir, 'settings.json'), 'utf8')).toBe('{"settings":{}}')
   })
 
   test('an unchanged store is a hard link to the last snapshot, not a second copy of it', () => {
@@ -256,6 +269,11 @@ describe('a restore', () => {
       // a server.json that is there and unreadable could be a server's: a restore must not guess, and changes nothing
       put(dir, 'server.json', 'not json at all')
       expect(() => restore(dir, '2026-11-18')).toThrow(/cannot be read .*, so a server could be running in this home/)
+      for (const noPid of ['{}', '[]', 'null', '{"pid":"4242"}', '{"port":7787}'])
+        expect(() => {
+          writeFileSync(join(dir, 'server.json'), noPid)
+          return restore(dir, '2026-11-18')
+        }).toThrow(/names no process to check, so a server could be running in this home/)
       expect(main(['restore', '2026-11-18'], dir)).toBe(1)
       expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe('{"tasks":[]}')
       expect(pidAlive(0)).toBe(false)

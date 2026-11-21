@@ -15,7 +15,7 @@ bun scripts/snapshot.ts restore <date>     # put one back (stop Shepherdr first,
 ```
 
 Run it from Shepherdr's checkout, or from a release's folder; it reads `SHEPHERDR_HOME`, or `~/.shepherdr` when that is
-not set. Each run prints its date, how many files and bytes it took, how many it shared with the night before, and how
+not set. A home is one machine's, so run it on each machine that runs Shepherdr, with that machine's own home. Each run prints its date, how many files and bytes it took, how many it shared with the night before, and how
 many snapshots are kept. It ends non-zero when a store could not be copied, naming it, and then that day is not saved
 at all: a folder that looks like a backup and is missing a store is worse than none.
 
@@ -31,9 +31,9 @@ is never older than the `tasks.json` beside it.
 - the secrets: `secrets.json`, `vapid.json`, `push.json` and `vault.json`, the vault your keys are kept in — and any
   file whose name says it holds one (an auth, cookie, session, token or key file a later release adds, say), whether or
   not this page lists it;
-- the text of messages rather than a record of anything: the outbox (`outbox.json`, what waits to go in to an agent) and
-  the drafts you typed but did not send (`typed.json`). After a restore they would mean nothing anyway — the agent they
-  were meant for went with the day;
+- the text of messages rather than a record of anything: the outbox (`outbox.json`, what waits to go in to an agent), the
+  drafts you typed but did not send (`typed.json`), and the answers the advisor wrote for a question (`advice.json`).
+  After a restore they would mean nothing anyway — the agent, the question and the card went with the day;
 - anything outside the home's own folder: no chat text (each chat is a file under `chatlog/`), no attachment you sent
   (`inbox/`), no artifact's files (`artifacts/`), no other machine's payload (`machines/`). A backup must not duplicate a
   secret or a chat, and none of those is a store that nothing re-derives;
@@ -59,10 +59,11 @@ is built beside the old one and renamed into place whole, so a run killed halfwa
 half one — and the next run clears what it left.
 
 A snapshot taken while Shepherdr runs is a snapshot of one moment per file, and each store is written whole and renamed
-into place. The task-ID store is the one SQLite file: its database, log and index are copied in one go, after the other
-stores, so a number reserved before its task was written is never older than the `tasks.json` beside it; and a store it
-cannot read is rebuilt from `tasks.json`'s own record of the numbers. A restore of it is still the one thing to do with
-Shepherdr stopped, below.
+into place. The task-ID store is the one SQLite file, and the three files it is are copied after the other stores, its
+log and index first and the database last: a number reserved before its task was written is never older than the
+`tasks.json` beside it, and the database copy is never older than the log that goes with it, so SQLite either finds those
+frames already in it or ignores the log whole. One it can still not read is rebuilt from `tasks.json`'s own record of
+the numbers. A restore of it is still the thing to do with Shepherdr stopped, below.
 
 ## Putting one back
 
@@ -72,8 +73,9 @@ Shepherdr stopped, below.
 
 The restore refuses while a server runs in that home, naming its pid: its saves would write over what was put back and
 its next read would see half of each. It stops nothing itself, and it changes nothing when it refuses. It also refuses
-when there is a `server.json` it cannot read — that could be a server's own — and says to delete the file once you know
-no Shepherdr is running there.
+when there is a `server.json` it cannot read or that names no pid to check — either could be a server's own — and says
+to delete the file once you know no Shepherdr runs there. Each store goes back whole in one rename, and the live log and
+index of the task-ID store go first, so what the snapshot's database is replayed with is always its own.
 
 What a restore costs: it copies the day's files over the live ones, one store at a time and each whole, so anything
 newer is gone with them. If tonight's snapshot already exists and you want it kept too, copy its folder aside first

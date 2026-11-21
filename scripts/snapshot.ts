@@ -42,10 +42,12 @@ export const NEVER = new Set(['secrets.json', 'vault.json', 'vapid.json', 'push.
  *  file does not need this list changed to be left out of a backup: what a name says it holds, it is not copied */
 const SECRET_WORDS = /(^|[-_.])(secrets?|vault|credentials?|passwords?|passwd|tokens?|keys?|apikeys?|auth|logins?|cookies?|sessions?|oauth\d?|otp|totp|push|vapid)([-_.]|$)/i
 
-/** and the two that are the text of messages, not a record of anything: what waits in the outbox to go in to an agent,
- *  and what was typed and not sent yet. A snapshot never duplicates a chat, and neither of them means anything after a
- *  restore — the agent it was meant for went with the day */
-const TEXT = new Set(['outbox.json', 'typed.json'])
+/** and the three that hold the text of messages rather than a record of anything: what waits in the outbox to go in to
+ *  an agent, what was typed and not sent yet, and the answers the advisor wrote for a chat's cards. A snapshot never
+ *  duplicates a chat, and none of them means anything after a restore — the agent, the card and the question it answered
+ *  went with the day. A later release's store that holds message text belongs in this set: collecting names is the one
+ *  thing this script cannot see by itself. */
+const TEXT = new Set(['advice.json', 'outbox.json', 'typed.json'])
 
 /** what is not a store to take: the server's own address of the moment (its folder is stopped for a restore anyway),
  *  and a copy kept beside a store (store.ts's `.corrupt-…` and `.before-empty-…`, an operator's `.bak-…`), which is a
@@ -85,11 +87,19 @@ function keptOut(name: string): boolean {
  *  files SQLite keeps beside it. Folders are never entered: a chat log, an attachment or an artifact is neither a store
  *  nor a secret this script has any business copying. */
 export function stores(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => e.name)
-    .filter((n) => (n.endsWith('.json') || IDS.test(n)) && !keptOut(n))
+  return readdirSync(dir)
+    .filter((n) => (n.endsWith('.json') || IDS.test(n)) && !keptOut(n) && isFile(join(dir, n)))
     .sort()
+}
+
+/** whether a name in the home is a regular file, following a link: a store moved to another disk and linked back from
+ *  the home is still the store the person's work is in, and a link that leads nowhere is nothing to copy */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false // a link whose target is gone
+  }
 }
 
 /** the snapshot folders in `root`, newest first: the day folders, never a run's half-made one */
@@ -149,12 +159,14 @@ function clear(root: string) {
 
 export type Snapshot = { day: string; dir: string; files: string[]; bytes: number; shared: number; skipped: string[]; removed: string[]; saved: boolean }
 
-/** the order the files are copied in: the JSON stores first, the ID store's three files last. A task's number is
- *  reserved before its task is written, so a copy of the ID store older than tasks.json beside it could hand that number
- *  out again after a restore: copied last, the ID store is never older than the stores it belongs to, and at worst a
- *  number is skipped. */
+/** the order the files are copied in: the JSON stores, then the ID store's log and index, and its database last.
+ *  A task's number is reserved before its task is written, so a copy of the ID store older than the tasks.json beside it
+ *  could hand that number out again after a restore; copied after them, it is never older, and at worst a number is
+ *  skipped. Inside it the database comes last, so the copy of the database is never older than the copy of its log: a
+ *  log SQLite replays over it either holds frames the database already has, or is ignored whole. */
 function copyOrder(names: string[]): string[] {
-  return [...names.filter((n) => !IDS.test(n)), ...names.filter((n) => IDS.test(n))]
+  const rank = (n: string) => (!IDS.test(n) ? 0 : n === 'task-ids.sqlite' ? 2 : 1)
+  return [...names].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
 }
 
 /** tonight's snapshot of the stores in `dir`: the day's folder lands whole, so a run killed halfway leaves last night's
@@ -185,8 +197,8 @@ export function snapshot(dir: string, at = new Date()): Snapshot {
       bytes += statSync(to).size
       files.push(name)
     } catch {
-      // coverage-exempt: only a filesystem error reaches this (a store vanishing mid-copy, a full disk); the run says
-      // which store it missed and ends non-zero rather than losing the others too
+      // coverage-exempt: a store that vanishes mid-copy or a full disk, which a real night can have; the test makes one
+      // unreadable instead, and a run as root cannot make that fail either.
       skipped.push(name)
     }
   }
@@ -232,29 +244,32 @@ export function prune(root: string): string[] {
 export type Restored = { day: string; from: string; files: string[] }
 
 /** what the server in this home says of itself, or nothing when it left no file. A file that is there and cannot be
- *  read or parsed is never taken for a home that nothing serves: it could be a server's own, and a restore must not
- *  write over the stores under one it could not rule out, so it is refused with what to do about it. */
-function serverOf(dir: string): { pid?: number } | undefined {
+ *  read, parsed or given a pid is never taken for a home that nothing serves: it could be a server's own, and a restore
+ *  must not write over the stores under one it could not rule out, so it is refused with what to do about it. */
+function serverOf(dir: string): { pid: number } | undefined {
   const file = join(dir, 'server.json')
   if (!existsSync(file)) return undefined
+  const nothing = (why: string) => new Error(`${file} ${why}, so a server could be running in this home: delete the file if none is, then run this again`)
+  let v: unknown
   try {
-    const v = JSON.parse(readFileSync(file, 'utf8')) as { pid?: number }
-    return v && typeof v === 'object' ? v : {}
+    v = JSON.parse(readFileSync(file, 'utf8'))
   } catch (e) {
-    const why = e instanceof Error ? e.message : String(e)
-    throw new Error(`${file} cannot be read (${why}), so a server could be running in this home: delete the file if none is, then run this again`)
+    throw nothing(`cannot be read (${e instanceof Error ? e.message : String(e)})`)
   }
+  const pid = (v as { pid?: unknown } | null)?.pid
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) throw nothing('names no process to check')
+  return { pid }
 }
 
 /** copy one snapshot back over the live stores. Refused while a server runs in this home: its saves would write over
  *  what was put back and its next read would see half of each. It stops nothing itself — stopping Shepherdr is the
  *  operator's own step, said in the refusal and in the success line. */
-export function restore(dir: string, day: string, alive: (pid: number) => boolean = pidAlive): Restored {
+export function restore(dir: string, day: string): Restored {
   const root = join(dir, FOLDER)
   const from = join(root, day)
   if (!DAY.test(day) || !existsSync(from)) throw new Error(`no snapshot ${day} in ${root}: \`bun scripts/snapshot.ts list\` names the ones kept`)
   const server = serverOf(dir)
-  if (server?.pid && alive(server.pid))
+  if (server && pidAlive(server.pid))
     throw new Error(
       `Shepherdr is running in this home (pid ${server.pid}) and would write over what a restore puts back: stop it first \`herdr plugin action invoke herdr-projects.stop\`, then run this again`,
     )
@@ -262,12 +277,13 @@ export function restore(dir: string, day: string, alive: (pid: number) => boolea
     .filter((e) => e.isFile())
     .map((e) => e.name)
     .sort()
-  // the ID store's log and index belong to the database they were copied with: a live one left beside a restored
-  // database would be replayed against the wrong file, so both come from the snapshot or neither stays
-  if (files.includes('task-ids.sqlite')) for (const ext of ['-wal', '-shm']) if (!files.includes(`task-ids.sqlite${ext}`)) rmSync(join(dir, `task-ids.sqlite${ext}`), { force: true })
+  // the ID store's log and index belong to the database they were copied with: one still living beside a restored
+  // database would be replayed against it, so the live two go first and the snapshot's own (if it has any) come back
+  // with its database, which lands last
+  if (files.includes('task-ids.sqlite')) for (const ext of ['-wal', '-shm']) rmSync(join(dir, `task-ids.sqlite${ext}`), { force: true })
   // each file lands whole in one rename, as a store's own write does: a restore killed halfway leaves some stores of
   // the day and some of the day before, never a torn one
-  for (const name of files) {
+  for (const name of copyOrder(files)) {
     const to = join(dir, name)
     const tmp = `${to}.restore-tmp`
     copyFileSync(join(from, name), tmp)
