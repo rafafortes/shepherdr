@@ -30,6 +30,7 @@ import { HELD_NAMED, HOME_NO_PLACE, minutesOf, statusLine } from './cli-shared.t
 import { swallowedReport } from './debug.ts'
 import { age, checkTitle, type Engine, ended, fitStatus, type HeldWhy, type Retune, retuneLine, reviewRetuneLine, type TaskRec } from './engine/engine.ts'
 import { validateBase } from './engine/git.ts'
+import { agyModelId } from './agy.ts'
 import { type Monitor, perfReport, summary } from './health.ts'
 import { type Heartbeats, heartbeatFile, WAKE_ANYWAY, wakesAnyway } from './heartbeat.ts'
 import { herdr } from './herdr.ts'
@@ -37,7 +38,7 @@ import { chatDir } from './inbox.ts'
 import type { Machines } from './machines.ts'
 import * as task from './mfs.ts'
 import { boxDir } from './mfs.ts'
-import { checkModelTable, effortsOf, findModel, knowsModels, modelsOf } from './models.ts'
+import { agyIds, checkModelTable, effortsOf, findModel, knowsModels, modelsOf } from './models.ts'
 import { type Finding, lines as orphanLines } from './orphans.ts'
 import { asMode, HOST, NAME, type Places, placeId, type Space, shortId } from './places.ts'
 import { type ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
@@ -475,8 +476,15 @@ export class CliCommands {
                 .join(',')}}`,
             ],
           }
+        if (kind === 'agy') return { sessionId: randomUUID(), modelId: rev.model ? agyModelId(rev.model, rev.effort, agyIds()) : undefined }
         return { sessionId: randomUUID() }
       },
+    })
+    // replace the "running in a pane" card with how the round ended, so the chat never shows a stale running line
+    const cardId = `review-pane:${t.id}:${round}`
+    this.chats.post(`${t.id}/Agent`, {
+      id: cardId,
+      card: { id: cardId, text: got.failed ? `Review round ${round} fell back to headless: its pane could not open.` : `Review round ${round} finished in its reviewer pane.` },
     })
     if (got.failed) {
       return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <prompt> and <out>), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`

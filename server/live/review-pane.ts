@@ -5,7 +5,7 @@
 // the headless line (prompts.ts reviewRunLine) — the pane is not a silent replacement for a review.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { opencodeLogPath } from './opencode.ts'
+import { mirrorSession, opencodeLogPath } from './opencode.ts'
 import { herdr } from './herdr.ts'
 import { REVIEW_RUN_TIMEOUT, reviewerPaneArgs, type Reviewer } from './prompts.ts'
 import { claudeLogPath, findLog, piSessionDir } from './readers/find.ts'
@@ -101,7 +101,17 @@ export async function readFindings(kind: string, cwd: string, since: number, ses
   const reader = readerFor(kind)
   if (!reader) return { text: '', done: false }
   const file = sessionLog(kind, cwd, since, session, exclude)
-  if (!file || !existsSync(file)) return { text: '', done: false }
+  if (!file) return { text: '', done: false }
+  // OpenCode keeps its transcript in its own database: the log path is only a mirror, made on the first read. Do that
+  // here, before checking that the file exists, or a round that starts before the first poll can never see its findings.
+  if (kind === 'opencode' && session) {
+    try {
+      mirrorSession(session, file)
+    } catch {
+      // a database not written yet is just an empty read this poll; the next one tries again
+    }
+  }
+  if (!existsSync(file)) return { text: '', done: false }
   const events: LogEvent[] = new LogTail(file, reader).readAll()
   let text = ''
   let done = false
@@ -170,10 +180,18 @@ export async function runReviewInPane(
     let text = ''
     let done = false
     const until = start + timeout
+    // the /api/cli answer is a stream, and the live server drops an idle one (120 s): a line every minute keeps the
+    // calling agent's connection (and its shell timeout) alive across a review that takes several minutes.
+    let beat = (o.now?.() ?? Date.now()) + 60_000
     for (;;) {
       const got = await read(kind, o.cwd, start - 2000, session, before.file)
       text = got.text || text
       done = got.done
+      const at = o.now?.() ?? Date.now()
+      if (at >= beat) {
+        step(`Review round ${o.round} is still running in ${o.id}'s reviewer pane (${kind}).`)
+        beat = at + 60_000
+      }
       if (done && text) break
       // a signed-out or quota-hit reviewer fails now, instead of holding the round for the full 900 s with nothing to say
       if (got.error && !text) return { pane, args, findings: '', failed: `the reviewer gave an error: ${got.error}` }

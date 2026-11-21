@@ -43,7 +43,7 @@ const wait = merge
     : args[0] === 'pr'
       ? envWait('SHEPHERDR_PR_WAIT', 2 * 120_000 + 30_000)
       : args[0] === 'review' && (args.includes('--run') || args.includes('--run='))
-        ? envWait('SHEPHERDR_REVIEW_RUN_WAIT', 930_000)
+        ? envWait('SHEPHERDR_REVIEW_RUN_WAIT', 1_020_000)
         : args[0] === 'review'
           ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
           : envWait('SHEPHERDR_CLI_WAIT', 30_000)

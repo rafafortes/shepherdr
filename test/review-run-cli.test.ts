@@ -90,7 +90,11 @@ describe('shepherdr review --run', () => {
     expect(t.reviews).toBe(1)
     expect(src.engine.runs().filter((x) => x.role === 'reviewer')).toHaveLength(0)
     expect(calls.opts).toMatchObject({ id: t.id, round: 1, cwd: t.worktree, workspace: `${t.id} Paned review` })
-    expect(src.chats.log(`${t.id}/Agent`).posted.some((p) => p.card?.text?.includes('running in a pane'))).toBe(true)
+    // the running card is replaced by the finished one, with the same id: no stale "running" line in the chat
+    const cards = src.chats.log(`${t.id}/Agent`).posted.filter((p) => p.card?.id === `review-pane:${t.id}:1`)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.card?.text).toContain('finished in its reviewer pane')
+    expect(calls.steps.join('\n')).toContain('running in a pane')
   })
 
   test('a cut-short round says its findings are partial', async () => {
@@ -100,6 +104,20 @@ describe('shepherdr review --run', () => {
     expect(r.out).toContain('Cut short at the 900 s timeout')
     expect(r.out).toContain('minor: unfinished thought')
     expect(t.reviews).toBe(1)
+  })
+
+  test('the setup callback gives codex its tool environment and does not pass agy a conflicting effort', async () => {
+    const t = task()
+    await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    const prepare = calls.opts?.prepare as ((k: string, c: string, r: { kind: string; model?: string; effort?: string }) => Promise<Record<string, unknown>>) | undefined
+    if (!prepare) throw new Error('the round had no setup callback')
+    const codex = await prepare('codex', `${t.id}/Reviewer`, { kind: 'codex', model: 'gpt-5.5', effort: 'high' })
+    const policy = (codex.extra as string[])[1]
+    expect(codex.extra).toMatchObject(['-c', expect.stringContaining('shell_environment_policy.set=')])
+    expect(String(policy)).toContain('SHEPHERDR_CHAT')
+    const agy = await prepare('agy', `${t.id}/Reviewer`, { kind: 'agy' })
+    expect(agy.modelId).toBeUndefined()
+    expect(typeof agy.sessionId).toBe('string')
   })
 
   test('a missing prompt file refuses before a round is counted', async () => {

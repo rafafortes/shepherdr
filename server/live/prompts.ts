@@ -114,7 +114,7 @@ export function reviewRunLine(r: Reviewer): string {
  *   process tree
  * - agy: `--mode plan` is its read-only mode; `--settings` trusts this worktree for the session only
  */
-export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string } = {}): string[] {
+export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string; modelId?: string } = {}): string[] {
   const model = r.model && r.model !== 'default' ? r.model : undefined
   const effort = r.effort && r.effort !== 'default' ? r.effort : undefined
   switch (r.kind) {
@@ -146,8 +146,10 @@ export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?:
       return ['--standalone', ...(o.session ? ['--session', o.session] : [])]
     case 'agy':
       // the same session-only trust as an agent's launch (agents.ts): otherwise a new reviewer process stops at agy's
-      // trust screen; an effort baked into the model id is the CLI's own way of setting it, so no --effort here
-      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+      // trust screen. Its effort goes in the model id (agyModelId, computed by the caller): --effort conflicts with one
+      // baked into that id, so it is never passed here.
+      const id = o.modelId ?? model
+      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(id ? ['--model', id] : [])]
     default:
       return model ? ['--model', model] : []
   }

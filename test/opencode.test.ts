@@ -460,6 +460,15 @@ describe('opencode api client', () => {
     expect(body.permissions).toEqual(['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })))
   })
 
+  test('createSession with deny makes a review session read-only, with the deny rules last', async () => {
+    reset()
+    answer({ id: 'ses_deny' })
+    await createSession({ cwd: app, title: 'Reviewer', deny: ['edit'], ask: true })
+    const body = JSON.parse(calls()[0].argv[4])
+    expect(body.permissions.at(-1)).toEqual({ action: 'edit', resource: '*', effect: 'deny' })
+    expect(body.permissions.filter((p: { effect: string }) => p.effect === 'ask')).toHaveLength(5)
+  })
+
   test('createSession without a model or ask sends neither', async () => {
     reset()
     answer({ id: 'ses_2' })

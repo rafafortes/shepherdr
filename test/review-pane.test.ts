@@ -53,8 +53,10 @@ describe('the interactive pane launch is read-only for every reviewer CLI', () =
     expect(reviewerPaneArgs({ kind: 'opencode', model: 'opencode/hy4-flash-free', effort: 'high' }, { session: 'ses-1' })).toEqual(['--standalone', '--session', 'ses-1'])
   })
 
-  test('agy: plan mode is its read-only mode', () => {
-    expect(reviewerPaneArgs({ kind: 'agy', model: 'gemini-4-hydrogen', effort: 'high' })).toEqual(['--mode', 'plan', '--model', 'gemini-4-hydrogen', '--effort', 'high'])
+  test('agy: plan mode is its read-only mode, the worktree is trusted for this session, and effort stays in the id', () => {
+    const args = reviewerPaneArgs({ kind: 'agy', model: 'gemini-4-hydrogen-high', effort: 'high' }, { cwd: '/work/tree', modelId: 'gemini-4-hydrogen-high' })
+    expect(args).toEqual(['--mode', 'plan', '--settings', JSON.stringify({ trustedWorkspaces: ['/work/tree'] }), '--model', 'gemini-4-hydrogen-high'])
+    expect(args).not.toContain('--effort')
   })
 })
 
@@ -224,6 +226,27 @@ describe('a round in a pane', () => {
     expect(got.findings).toBe('major: unfinished but useful')
     expect(got.cutShort).toBe(true)
     expect(calls.closed).toEqual(['w1:p9'])
+    expect(steps.join('\n')).toContain('timed out')
+  })
+
+  test('a long round keeps the CLI stream alive with an interim line each minute', async () => {
+    const { h } = fake()
+    const steps: string[] = []
+    let clock = 0
+    const got = await runReviewInPane({
+      ...base,
+      h,
+      reviewer: { kind: 'claude' },
+      now: () => clock,
+      sleep: async () => {
+        clock += 30_000
+      },
+      timeout: 900_000,
+      onStep: (s) => steps.push(s),
+      findings: async () => ({ text: '', done: false }),
+    })
+    expect(got.cutShort).toBe(true)
+    expect(steps.filter((s) => s.includes('still running in')).length).toBeGreaterThan(1)
     expect(steps.join('\n')).toContain('timed out')
   })
 
