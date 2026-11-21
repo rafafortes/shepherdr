@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { opencodeLogPath } from '../server/live/opencode.ts'
+import { opencodeDb, opencodeLogPath } from '../server/live/opencode.ts'
 import { reviewerPaneArgs } from '../server/live/prompts.ts'
 import { claudeLogPath, piSessionDir } from '../server/live/readers/find.ts'
 import { readFindings, reviewerPrompt, runReviewInPane, type PaneHerdr } from '../server/live/review-pane.ts'
@@ -71,6 +71,10 @@ describe("the reviewer's prompt and its own log", () => {
     expect(p).toContain('PRIVATE from default')
   })
 
+  test('an unknown CLI still gets a model flag when it has one', () => {
+    expect(reviewerPaneArgs({ kind: 'other', model: 'm' })).toEqual(['--model', 'm'])
+  })
+
   test('the findings come from the reviewer transcript, not the screen: last message, done on turn end', async () => {
     const dir = tmp('review-log')
     process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude')
@@ -110,6 +114,53 @@ describe("the reviewer's prompt and its own log", () => {
     expect((await readFindings('opencode', cwd, 0, session)).file).toBe(ocFile)
     if (saved === undefined) delete process.env.SHEPHERDR_HOME
     else process.env.SHEPHERDR_HOME = saved
+  })
+
+  test('a missing pi session folder and a broken OpenCode mirror are empty reads, not throws', async () => {
+    const saved = process.env.SHEPHERDR_HOME
+    const savedDb = process.env.SHEPHERDR_OPENCODE_DB
+    const dir = tmp('review-broken')
+    process.env.SHEPHERDR_HOME = join(dir, 'home')
+    // the broken database goes to a path of this test's own: never let a test write ~/.local/share/opencode
+    const db = join(dir, 'broken-opencode.db')
+    process.env.SHEPHERDR_OPENCODE_DB = db
+    const cwd = join(dir, 'worktree')
+    expect((await readFindings('pi', cwd, 0, 'not-there-yet')).text).toBe('')
+    const ocFile = opencodeLogPath(home(), 'broken-session')
+    mkdirSync(dirname(ocFile), { recursive: true })
+    writeFileSync(ocFile, '{"type":"session","id":"ses_broken-session"}\n')
+    expect(opencodeDb()).toBe(db)
+    mkdirSync(dirname(db), { recursive: true })
+    writeFileSync(db, 'not a database')
+    expect((await readFindings('opencode', cwd, 0, 'broken-session')).text).toBe('')
+    if (saved === undefined) delete process.env.SHEPHERDR_HOME
+    else process.env.SHEPHERDR_HOME = saved
+    if (savedDb === undefined) delete process.env.SHEPHERDR_OPENCODE_DB
+    else process.env.SHEPHERDR_OPENCODE_DB = savedDb
+  })
+
+  test('a provider error in the reviewer log fails the round instead of waiting for a turn end', async () => {
+    const dir = tmp('review-error')
+    const savedClaude = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude')
+    const cwd = join(dir, 'worktree')
+    const session = 'error-session'
+    const file = claudeLogPath(cwd, session)
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: object) => `${JSON.stringify({ sessionId: session, timestamp: '2026-01-01T00:00:00Z', ...o })}\n`
+    writeFileSync(
+      file,
+      line({
+        type: 'assistant',
+        uuid: 'e1',
+        isApiErrorMessage: true,
+        error: '402 Insufficient funds',
+        message: { id: 'm1', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: '402 Insufficient funds' }], usage: {} },
+      }),
+    )
+    expect(await readFindings('claude', cwd, 0, session)).toMatchObject({ done: true, error: '402 Insufficient funds' })
+    if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = savedClaude
   })
 
   test('a log already there is excluded for the CLIs that name their own session', async () => {

@@ -118,6 +118,9 @@ describe('shepherdr review --run', () => {
     const agy = await prepare('agy', `${t.id}/Reviewer`, { kind: 'agy' })
     expect(agy.modelId).toBeUndefined()
     expect(typeof agy.sessionId).toBe('string')
+    // a named model is resolved to the id agy takes for it and its effort, never as a conflicting --effort pair
+    const named = await prepare('agy', `${t.id}/Reviewer`, { kind: 'agy', model: 'gemini-4-hydrogen', effort: 'high' })
+    expect(typeof named.modelId).toBe('string')
   })
 
   test('a missing prompt file refuses before a round is counted', async () => {
