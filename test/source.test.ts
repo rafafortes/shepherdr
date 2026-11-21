@@ -4,8 +4,8 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 import { tmp } from './tmp.ts'
+import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
@@ -1042,6 +1042,25 @@ describe('--json on the list and show commands', () => {
       expect(r.out).toContain('snapshot 800 ms')
     } finally {
       src.health.samples = before
+    }
+  })
+
+  test('a health tick keeps what the stall watch saw and how many agents work', () => {
+    const before = src.health.samples
+    const last = src.health.last
+    const drain = src.stall.drainPerf
+    try {
+      src.health.samples = []
+      src.health.last = undefined
+      src.stall.drainPerf = () => ({ lag: 321, stalls: 1, pass: { label: 'snapshot', ms: 400 } })
+      src.healthTick(Date.now())
+      const kept = src.health.samples.at(-1)
+      expect(kept).toMatchObject({ lag: 321, stalls: 1, pass: { label: 'snapshot', ms: 400 } })
+      expect(kept?.working).toBe(Object.values(src.agents.records).filter((r) => src.agents.status(r.key) === 'working').length)
+    } finally {
+      src.health.samples = before
+      src.health.last = last
+      src.stall.drainPerf = drain
     }
   })
 

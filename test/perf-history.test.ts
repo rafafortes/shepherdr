@@ -66,6 +66,13 @@ describe('the ring', () => {
     })
   })
 
+  test('nothing older than the week it describes is kept', () => {
+    const now = Date.UTC(2026, 10, 18, 12)
+    const ring = [line(now - 9 * DAY), line(now - 7 * DAY - 3_600_000), line(now - 60_000)]
+    const kept = H.keepPerf(ring, now)
+    expect(kept.map((s) => s.at)).toEqual([ring[1].at, ring[2].at])
+  })
+
   test('the cap drops the oldest entries first', () => {
     const now = Date.UTC(2026, 10, 18, 12)
     const ring = Array.from({ length: 1000 }, (_, i) => line(now - (999 - i) * 3_000)) // all within the last hour: none thinned
@@ -108,6 +115,21 @@ describe('kept in health.json', () => {
     expect(writes.at(-1)).toEqual({ watch: {}, samples: mon.samples })
     // a restart reads them back
     expect(monitor().samples).toEqual(mon.samples)
+  })
+
+  test('an entry health.json gives that is not a sample is dropped instead of stopping the tick', () => {
+    const kept = { watch: {}, samples: [null, { at: 'x' }, { lag: 3 }, line(0), line(30_000)] } as unknown as HealthKept
+    const mon = new H.Monitor(
+      limits,
+      () => true,
+      () => undefined,
+      () => machine(0),
+      { read: () => kept, write: () => undefined },
+    )
+    expect(mon.samples.map((s) => s.at)).toEqual([0, 30_000])
+    // the tick keeps sampling: the alerts the monitor exists for are not lost to a hand-edited file
+    expect(() => mon.tick(60_000)).not.toThrow()
+    expect(mon.samples.at(-1)?.at).toBe(60_000)
   })
 
   test('a health.json from before the ring, with the watch alone at its top, is still read', () => {

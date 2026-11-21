@@ -6,10 +6,10 @@
 // numbers decide when Shepherdr starts more tasks (engine.release).
 import { readdirSync, readFileSync, readlinkSync, statfsSync, statSync } from 'node:fs'
 import { cpus, homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { HealthLevel, HealthMeter } from '../../shared/types.ts'
-import { BOX, type BoxInfo, helperDir, runSync } from './box.ts'
 import type { MachineLimits } from './settings.ts'
+import { BOX, helperDir, runSync, type BoxInfo } from './box.ts'
+import { join } from 'node:path'
 
 export const SAMPLE_MS = 30_000
 /** how long an nvidia-smi read may take before it is killed: a hung GPU read must not become a long event-loop stall */
@@ -409,7 +409,7 @@ export const PERF_RECENT_MS = 3_600_000
 const PERF_DAY_MS = 86_400_000
 /** one entry every 5 minutes, for the day before that */
 const PERF_BUCKET_MS = 300_000
-/** one every 30 minutes after a day: a week of history in 120 + 276 + 288 entries, about 95 KB of health.json */
+/** one every 30 minutes after a day: a week of history in 120 + 276 + 288 entries, up to about 115 KB of health.json */
 const PERF_WIDE_MS = 1_800_000
 /** the most entries the ring keeps, a little over what those three resolutions add up to */
 export const PERF_KEEP = 700
@@ -436,6 +436,10 @@ export interface PerfSample {
   /** how many samples this one stands for: 1 for one as taken, more in a bucket */
   n?: number
 }
+
+/** a sample as health.json gave it: a hand edit or a half-written file must not stop the health tick (the alerts come
+ *  from it), so an entry without a number and a moment is dropped */
+const isPerf = (s: unknown): s is PerfSample => typeof s === 'object' && s !== null && Number.isFinite((s as PerfSample).at) && Number.isFinite((s as PerfSample).lag)
 
 /** what the monitor is told of the loop and the agents since the sample before: the source's stall watch fills it */
 export type PerfExtra = Pick<PerfSample, 'lag' | 'stalls' | 'working' | 'pass'>
@@ -484,7 +488,10 @@ export function keepPerf(ring: PerfSample[], now = Date.now()): PerfSample[] {
     }
   }
   flush()
-  return kept.length > PERF_KEEP ? kept.slice(kept.length - PERF_KEEP) : kept
+  // a server that ran rarely must not keep a month of entries labelled by a day with no year: the week it describes
+  // and a day of slack for the comparison a week back
+  const recent = kept.filter((s) => s.at >= now - 8 * PERF_DAY_MS)
+  return recent.length > PERF_KEEP ? recent.slice(recent.length - PERF_KEEP) : recent
 }
 
 const percentile = (xs: number[], p: number) => {
@@ -542,7 +549,7 @@ export function perfReport(ring: PerfSample[], now = Date.now()): string[] {
     .slice(0, 3)
     .map(([label, ms]) => `${label} ${lapse(ms)}`)
   return [
-    `Performance: this server's own numbers, kept with the machine watch: one every 30 s for the last hour, every 5 minutes before that, every 30 minutes after a day (${kept.length} sample${kept.length === 1 ? '' : 's'}, back to ${stamp(kept[0].at)})`,
+    `Performance: this server's own numbers, kept with the machine watch: one every 30 s for the last hour, every 5 minutes before that, every 30 minutes after a day (${kept.length} sample${kept.length === 1 ? '' : 's'}, back to ${stamp(kept[0].at)}; an older entry is its bucket's peak, and a restart starts the server's memory again)`,
     `  event loop lag: ${[`worst by day ${list(peak)}`, ...(hour.length ? [`last hour p95 ${lapse(percentile(hour, 95))}`] : [])].join('; ')} · stalls in the last day: ${stalls}`,
     `  memory in use by the server: ${memory.join(' · ')}`,
     ...(slow.length ? [`  slowest passes in the last day: ${slow.join(', ')}`] : []),
@@ -601,10 +608,10 @@ export class Monitor {
   ) {
     this.ownSample = !take
     this.take = take ?? (() => sample(this.gpus))
-    const kept = store.read()
+    const kept = store.read() ?? {}
     // a health.json from before the performance ring holds the watch alone, as its kinds at the top: still read
     this.watch = kept.watch ?? (Object.fromEntries(Object.entries(kept).filter(([k]) => KINDS.includes(k as Kind))) as Partial<Record<Kind, Watch>>)
-    this.samples = Array.isArray(kept.samples) ? kept.samples.slice(-PERF_KEEP) : []
+    this.samples = Array.isArray(kept.samples) ? kept.samples.filter(isPerf).slice(-PERF_KEEP) : []
   }
 
   /** a look: a fresh sample when the last is old (the GPU read starts off the loop, never waited for), then each limit judged */
