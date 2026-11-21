@@ -67,6 +67,9 @@ build, check and review the work is your own judgment.
    is full or out, with why), opens the reviewer in a new tab of your task's herdr space labelled as its reviewer with
    `SHEPHERDR_CHAT=<id>/Reviewer`, sends it the prompt, waits up to 900 s printing progress on stderr, then prints its
    last plain message on stdout and closes the pane. It frees the reviewer itself: a pane round needs no `--done`.
+   Raise your shell tool's timeout to at least 930 s for this one command (Claude Code and OpenCode `Bash` 600000 ms
+   per call moves it to the background rather than stopping — keep waiting for the answer; pi at least 960 s): a client
+   that times out leaves the pane and the lease running without giving you the findings.
    When every
    reviewer is full or out it waits up to 90 seconds, then tells you to end your turn: Shepherdr wakes you with the
    reviewer to use, and that round is counted only then. When every reviewer is blocked (0 allowed in Settings → Limits),

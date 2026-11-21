@@ -3,12 +3,15 @@
 // findings, reads them from the reviewer's *own* CLI log (the readers Shepherdr already uses for its agents, never the
 // screen), and closes the pane. A pane that cannot open, or a CLI that will not start, is the one reason to fall back to
 // the headless line (prompts.ts reviewRunLine) — the pane is not a silent replacement for a review.
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { opencodeLogPath } from './opencode.ts'
 import { herdr } from './herdr.ts'
-import { REVIEW_TIMEOUT, reviewerPaneArgs, type Reviewer } from './prompts.ts'
-import { claudeLogPath, findLog } from './readers/find.ts'
+import { REVIEW_RUN_TIMEOUT, reviewerPaneArgs, type Reviewer } from './prompts.ts'
+import { claudeLogPath, findLog, piSessionDir } from './readers/find.ts'
 import { LogTail, readerFor } from './readers/index.ts'
 import type { LogEvent } from './readers/types.ts'
+import { home } from '../store.ts'
 
 /** the herdr calls the pane round makes; the real `herdr` is the default, tests pass a fake with the same shape */
 export interface PaneHerdr {
@@ -28,9 +31,18 @@ export interface RoundDeps {
   sleep?: (ms: number) => Promise<void>
   timeout?: number
   poll?: number
-  /** where to look for the reviewer's transcript; defaults to the CLI's own log, found by cwd and start time */
-  findings?: (kind: string, cwd: string, since: number, session?: string) => Promise<{ text: string; done: boolean }>
+  /** where to look for the reviewer's transcript; defaults to the CLI's own log, found by cwd, session and start time */
+  findings?: (kind: string, cwd: string, since: number, session?: string, exclude?: string) => Promise<Findings>
   onStep?: (words: string) => void
+}
+
+/** what one read of the reviewer's own transcript says */
+export interface Findings {
+  file?: string
+  text: string
+  done: boolean
+  /** a provider cut-off or sign-out: a review that cannot run is a failure, not an empty verdict */
+  error?: string
 }
 
 export interface RoundResult {
@@ -60,23 +72,49 @@ async function answerStartup(h: PaneHerdr, pane: string, sleep: (ms: number) => 
   }
 }
 
+/** the reviewer's own transcript path: where a session we named lands, never "the newest log in the worktree", which
+ *  could be the task agent's own chat (the reviewer runs in that very worktree). codex and agy name their sessions
+ *  themselves, so those are filtered by start time and by the log that was already there before this round. */
+function sessionLog(kind: string, cwd: string, since: number, session?: string, exclude?: string): string | undefined {
+  if (session && kind === 'claude') return claudeLogPath(cwd, session)
+  if (session && kind === 'opencode') return opencodeLogPath(home(), session)
+  if (session && kind === 'pi') {
+    const dir = piSessionDir(cwd)
+    try {
+      return readdirSync(dir)
+        .filter((f) => f.endsWith(`_${session}.jsonl`))
+        .map((f) => join(dir, f))
+        .sort()
+        .at(-1)
+    } catch {
+      return undefined
+    }
+  }
+  const newest = findLog(kind, cwd, since)
+  return newest && newest !== exclude ? newest : undefined
+}
+
 /** the last plain message of a CLI log: its reader's `agent` events, latest text per id, in write order. `done` is its
  *  end-of-turn marker — all five readers emit one. A timeout reads whatever is there, so a cut round keeps its findings
- *  (SHE-180's rule) instead of starting over. */
-export async function readFindings(kind: string, cwd: string, since: number, session?: string): Promise<{ text: string; done: boolean }> {
+ *  (SHE-180's rule) instead of starting over. An error event is a failed review, not a silent empty one. */
+export async function readFindings(kind: string, cwd: string, since: number, session?: string, exclude?: string): Promise<Findings> {
   const reader = readerFor(kind)
   if (!reader) return { text: '', done: false }
-  const file = kind === 'claude' && session ? claudeLogPath(cwd, session) : findLog(kind, cwd, since)
+  const file = sessionLog(kind, cwd, since, session, exclude)
   if (!file || !existsSync(file)) return { text: '', done: false }
   const events: LogEvent[] = new LogTail(file, reader).readAll()
   let text = ''
   let done = false
+  let error: string | undefined
   for (const e of events) {
     if (e.kind === 'agent') text = e.text
     else if (e.kind === 'turn-end') done = true
-    else if (e.kind === 'error') done = true
+    else if (e.kind === 'error') {
+      done = true
+      error = e.text
+    }
   }
-  return { text: text.trim(), done }
+  return { file, text: text.trim(), done, error }
 }
 
 /**
@@ -100,7 +138,7 @@ export async function runReviewInPane(
 ): Promise<RoundResult> {
   const h = o.h ?? herdr
   const sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
-  const timeout = o.timeout ?? REVIEW_TIMEOUT
+  const timeout = o.timeout ?? REVIEW_RUN_TIMEOUT
   const poll = o.poll ?? 1000
   const start = o.now?.() ?? Date.now()
   const kind = o.reviewer.kind
@@ -118,21 +156,27 @@ export async function runReviewInPane(
     name = paneName(o.id)
     o.trust?.(o.cwd, kind, o.env)
     const prepared = (await o.prepare?.(kind, chat, o.reviewer)) ?? {}
-    const args = [...reviewerPaneArgs(o.reviewer, prepared), ...(prepared.extra ?? [])]
+    const session = prepared.sessionId ?? prepared.session
+    const read = o.findings ?? readFindings
+    // the log already there is the task agent's: a round run in the same worktree must never read its last message as
+    // the reviewer's. codex and agy name their sessions themselves, so this is how those two are told apart.
+    const before = await read(kind, o.cwd, 0)
+    const args = [...reviewerPaneArgs(o.reviewer, { ...prepared, cwd: o.cwd }), ...(prepared.extra ?? [])]
     await h.start(name, kind, pane, args)
     await answerStartup(h, pane, sleep)
     step(`Review round ${o.round} running in a pane: ${o.id} reviewer (${kind}).`)
     await h.prompt(name, o.prompt)
 
-    const read = o.findings ?? readFindings
     let text = ''
     let done = false
     const until = start + timeout
     for (;;) {
-      const got = await read(kind, o.cwd, start - 2000, prepared.sessionId ?? prepared.session)
+      const got = await read(kind, o.cwd, start - 2000, session, before.file)
       text = got.text || text
       done = got.done
       if (done && text) break
+      // a signed-out or quota-hit reviewer fails now, instead of holding the round for the full 900 s with nothing to say
+      if (got.error && !text) return { pane, args, findings: '', failed: `the reviewer gave an error: ${got.error}` }
       if ((o.now?.() ?? Date.now()) >= until) {
         step(`Review round ${o.round}'s pane timed out after ${Math.round(timeout / 1000)} s; keeping what it wrote so far.`)
         return { pane, args, findings: text, cutShort: true }
@@ -154,7 +198,7 @@ export function reviewerPrompt(base: string, o: { id: string; round: number; pri
     base.trim(),
     `You are ${o.id}'s reviewer, round ${o.round}. Read only: never edit, commit or push. Read the change yourself with git diff <merge-base>...HEAD, git log and the files; the brief and the base are below in the prompt above.`,
     "Report what this change broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work), major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style).",
-    'Write your findings as your LAST plain message: never a plan to approve, never a question, never a summary that ends the task. Start no other agents. Say "no findings" plainly when there are none.',
+    'Write your findings as your LAST plain message: never a plan to approve, never ExitPlanMode, never a question, never a summary that ends the task. Start no other agents. Say "no findings" plainly when there are none.',
     o.privacy,
   ]
     .filter(Boolean)

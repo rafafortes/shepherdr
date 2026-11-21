@@ -45,8 +45,9 @@ export interface Reviewer {
 
 const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', opencode: 'OpenCode', agy: 'Antigravity' }
 
-/** how long a review round may run, whether its reviewer is in a pane (SHE-182) or headless (SHE-180) */
-export const REVIEW_TIMEOUT = 900_000
+/** how long a review round may run, whether its reviewer is in a pane (SHE-182) or headless (SHE-180). Not the
+ *  45-minute reviewer *lease* in engine.ts (a different REVIEW_TIMEOUT): this is one round's wall clock. */
+export const REVIEW_RUN_TIMEOUT = 900_000
 
 /**
  * The exact foreground command a task agent runs for its round's headless reviewer — the fallback for when a pane
@@ -109,10 +110,11 @@ export function reviewRunLine(r: Reviewer): string {
  * - pi: no permission system: the read tools (bash only to run git) are an allowlist and the prompt forbids changes;
  *   `--approve` answers the worktree-trust screen (SHE-134), `--no-mcp` keeps an extension from starting one
  * - opencode: its TUI has no model/agent flag; the session prepared for this round carries the model, effort and
- *   permissions that deny edit/write/patch, and `--session` opens it; `--standalone` keeps it in the pane's process tree
+ *   permissions that deny edit (its one write permission), and `--session` opens it; `--standalone` keeps it in the pane's
+ *   process tree
  * - agy: `--mode plan` is its read-only mode; `--settings` trusts this worktree for the session only
  */
-export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string } = {}): string[] {
+export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string } = {}): string[] {
   const model = r.model && r.model !== 'default' ? r.model : undefined
   const effort = r.effort && r.effort !== 'default' ? r.effort : undefined
   switch (r.kind) {
@@ -143,7 +145,9 @@ export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?:
     case 'opencode':
       return ['--standalone', ...(o.session ? ['--session', o.session] : [])]
     case 'agy':
-      return ['--mode', 'plan', ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+      // the same session-only trust as an agent's launch (agents.ts): otherwise a new reviewer process stops at agy's
+      // trust screen; an effort baked into the model id is the CLI's own way of setting it, so no --effort here
+      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
     default:
       return model ? ['--model', model] : []
   }

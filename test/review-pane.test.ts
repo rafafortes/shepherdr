@@ -5,9 +5,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { opencodeLogPath } from '../server/live/opencode.ts'
 import { reviewerPaneArgs } from '../server/live/prompts.ts'
-import { claudeLogPath } from '../server/live/readers/find.ts'
+import { claudeLogPath, piSessionDir } from '../server/live/readers/find.ts'
 import { readFindings, reviewerPrompt, runReviewInPane, type PaneHerdr } from '../server/live/review-pane.ts'
+import { home } from '../server/store.ts'
 import { tmp } from './tmp.ts'
 
 const KINDS = ['claude', 'codex', 'pi', 'opencode', 'agy']
@@ -86,7 +88,39 @@ describe("the reviewer's prompt and its own log", () => {
         }) +
         line({ type: 'result', uuid: 'r1', subtype: 'success' }),
     )
-    expect(await readFindings('claude', cwd, 0, session)).toEqual({ text: 'major: it drops the user work', done: true })
+    expect(await readFindings('claude', cwd, 0, session)).toMatchObject({ text: 'major: it drops the user work', done: true })
+  })
+
+  test('pi and opencode read the named session, never the newest log in the worktree', async () => {
+    const saved = process.env.SHEPHERDR_HOME
+    const dir = tmp('review-sessions')
+    process.env.SHEPHERDR_HOME = join(dir, 'home')
+    const cwd = join(dir, 'worktree')
+    const session = 'reviewer-session-9'
+    const piDir = piSessionDir(cwd)
+    mkdirSync(piDir, { recursive: true })
+    const piFile = join(piDir, `2026-01-01T00-00-00-000Z_${session}.jsonl`)
+    writeFileSync(piFile, '{"type":"session","id":"reviewer-session-9"}\n')
+    expect((await readFindings('pi', cwd, 0, session)).file).toBe(piFile)
+    const ocFile = opencodeLogPath(home(), session)
+    mkdirSync(dirname(ocFile), { recursive: true })
+    writeFileSync(ocFile, '{"type":"session","id":"ses_reviewer-session-9"}\n')
+    expect((await readFindings('opencode', cwd, 0, session)).file).toBe(ocFile)
+    if (saved === undefined) delete process.env.SHEPHERDR_HOME
+    else process.env.SHEPHERDR_HOME = saved
+  })
+
+  test('a log already there is excluded for the CLIs that name their own session', async () => {
+    const saved = process.env.SHEPHERDR_HOME
+    const dir = tmp('review-exclude')
+    process.env.SHEPHERDR_HOME = join(dir, 'home')
+    const cwd = join(dir, 'worktree')
+    const other = opencodeLogPath(home(), 'task-agent-session')
+    mkdirSync(dirname(other), { recursive: true })
+    writeFileSync(other, '{"type":"session","id":"ses_task-agent-session"}\n')
+    expect((await readFindings('opencode', cwd, 0, undefined, other)).text).toBe('')
+    if (saved === undefined) delete process.env.SHEPHERDR_HOME
+    else process.env.SHEPHERDR_HOME = saved
   })
 })
 

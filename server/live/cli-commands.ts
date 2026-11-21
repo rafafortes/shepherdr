@@ -463,8 +463,18 @@ export class CliCommands {
       onStep: step,
       trust: trustWorktree,
       prepare: async (kind, _chat, rev) => {
-        if (kind === 'opencode')
-          return { session: await createSession({ cwd: t.worktree!, title: `${t.id} reviewer ${round}`, model: rev.model, effort: rev.effort, deny: ['edit', 'write', 'patch'] }) }
+        if (kind === 'opencode') return { session: await createSession({ cwd: t.worktree!, title: `${t.id} reviewer ${round}`, model: rev.model, effort: rev.effort, deny: ['edit'] }) }
+        if (kind === 'codex')
+          // codex gives its tools the environment its own policy names, not the pane's shell environment (agents.ts)
+          return {
+            sessionId: randomUUID(),
+            extra: [
+              '-c',
+              `shell_environment_policy.set={${Object.entries(env)
+                .map(([k, v]) => `${JSON.stringify(k)}=${JSON.stringify(v)}`)
+                .join(',')}}`,
+            ],
+          }
         return { sessionId: randomUUID() }
       },
     })

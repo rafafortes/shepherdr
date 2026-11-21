@@ -275,8 +275,10 @@
   the caps decide the reviewer (the primary when it has room and is not out, else the first backup that has; its answer
   says why, e.g. "Codex is at its limit, 4 of 4 at once"), and Shepherdr opens that reviewer interactive and read-only in
   a new tab of the task's herdr space, beside the task's agent, labelled as its reviewer and with
-  `SHEPHERDR_CHAT=<id>/Reviewer`. The human watches it in herdr and in the task's terminal view. It is never a second
-  opinion after findings. When every reviewer is full or out, the command waits up to 90 seconds, then tells the agent
+  `SHEPHERDR_CHAT=<id>/Reviewer`. The human watches it in herdr and in the task's terminal view. The agent raises its
+  shell tool's timeout to at least 930 s for this command (600000 ms per call in Claude Code and OpenCode backgrounds it
+  rather than stopping it — the agent keeps waiting; at least 960 s in pi): a client that times out leaves the pane and
+  the lease running without the findings. It is never a second opinion after findings. When every reviewer is full or out, the command waits up to 90 seconds, then tells the agent
   to end its turn; a round is counted only once a reviewer frees, and the agent is woken with the reviewer to use. Its
   reviewer holds a slot from the count until the pane round ends (a `--run` frees it itself), or for a headless fallback
   until `shepherdr review <id> --done`, the task's report, stop or end, or 45 minutes after the round was counted (or
