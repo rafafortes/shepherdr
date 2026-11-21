@@ -280,7 +280,12 @@
   agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
   agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
-  always has.
+  always has. Each round the agent gives the reviewer a short prompt — the brief, the repo's rules and the base with
+  `git diff <merge-base>...HEAD` to read the change itself, never a pasted diff (a huge one once stalled a round for
+  540 s with no output) — and runs the CLI's exact line from `shepherdr review <id>` in the foreground, stdin closed,
+  under `timeout 900` with its shell tool's timeout at that harness's maximum. That run streams its output to a file as
+  it is written; after a timeout the agent reads the file first and uses findings already there instead of starting
+  over. The reviewer itself holds no slot longer than the 45-minute lease above.
   Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail: the only
   failure it reads as a provider's is a cut-off turn of an agent it started itself (`retry.ts` on that chat's own
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell

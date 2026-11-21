@@ -57,18 +57,25 @@ build, check and review the work is your own judgment.
    declined to give one, so decide it with your best judgment and say what you assumed — a dismissed plan is not
    approved, so don't carry it out. Decide the rest yourself and list those decisions in the facts.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or a
-   headless `codex exec`, `claude -p` or `pi -p` as the Reviewer line names). Each round, ask `shepherdr review <id>`
-   which reviewer to use: it counts the round, holds that reviewer for it, and answers with the reviewer and the words to
-   pass (the primary, or the backup your Reviewer line names when the primary is full or out, with why). When every
+   headless run of the CLI the Reviewer line names). Each round, ask `shepherdr review <id>`
+   which reviewer to use: it counts the round, holds that reviewer for it, and answers with the reviewer, the words to
+   pass (the primary, or the backup your Reviewer line names when the primary is full or out, with why) and that
+   reviewer's exact ready-to-run line. When every
    reviewer is full or out it waits up to 90 seconds, then tells you to end your turn: Shepherdr wakes you with the
    reviewer to use, and that round is counted only then. When every reviewer is blocked (0 allowed in Settings → Limits),
    nothing waits and no round is counted: the answer says `No reviewer may run under the limits: every reviewer <id> may use
    is blocked (0 allowed).` Then run no review at all: say in your summary that this review did not run because of the
-   limits, and report without it. Run that reviewer in the foreground, its stdin closed (or it waits on stdin forever) and under a
-   timeout, with your shell's timeout at its most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`.
-   Never in the background, and never end your turn while a review runs. Timed out or failed: one subagent review instead,
-   the same round. Give the reviewer the authoritative command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer`
-   (never an inherited other task), the brief, the diff and the repo's rules, never your own reasoning; ask for what this
+   limits, and report without it. Give the reviewer, in a short prompt file, the brief, the repo's rules and the base with
+   the command to read the change yourself (`git diff <merge-base>...HEAD`, `git log`, the files): it reads them with its
+   own read-only tools, never pasted inline — a huge pasted diff once stalled a round for 540 s with no output. Run the
+   line from `shepherdr review <id>` in the foreground, its stdin closed (`< /dev/null`) and under `timeout 900`, not 540,
+   with your shell tool's timeout at its maximum for this harness (Claude Code and OpenCode `Bash`: 600000 ms;
+   Antigravity: 600000 ms; pi `bash`: 960 seconds; Codex: no per-call tool clock, the shell `timeout` is it). That line
+   streams the reviewer's output to `<out>` as it is written; after a timeout, read `<out>` first and use any findings
+   there instead of starting over. Never in the background, and never end your turn while a review runs. Timed out or
+   failed with nothing usable: one subagent review instead, the same round. Give the reviewer the authoritative command
+   from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), never your own
+   reasoning; ask for what this
    change broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work),
    major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style). When the round's review
    has finished, run `shepherdr review <id> --done`: it frees the reviewer and counts nothing. Fix every finding at or above

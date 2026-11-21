@@ -45,6 +45,41 @@ export interface Reviewer {
 
 const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', opencode: 'OpenCode', agy: 'Antigravity' }
 
+/**
+ * The exact foreground command a task agent runs for its round's headless reviewer: `timeout 900` (not 540), stdin closed,
+ * and the CLI's progressive output redirected to a file the agent reads if the run is cut. The prompt is a short file by
+ * reference: the reviewer reads the diff itself with its own read-only tools (`git diff <merge-base>...HEAD`, `git log`,
+ * the files) — a huge pasted diff once stalled a round for 540 s and printed nothing. This is the one place the per-CLI
+ * lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the skill holds the general rules.
+ *
+ * The streaming flag of each CLI was checked against its installed `--help` on 2026-11-21:
+ * - claude: `-p --output-format stream-json --verbose` (stream-json needs --verbose; "text" prints only at the end);
+ * - codex: `exec --json` (JSONL events as they happen; `-o` writes only the last message at the end — too late for a timeout).
+ *   Codex is not installed on this host (`command -v codex` is empty), so this uses its documented flag, not a local run;
+ * - pi: `-p --mode json` (verified: emits `message_update`/`thinking_delta` events as they are written);
+ * - opencode: `run --format json` (per-event JSON lines; the plan agent is the read-only one);
+ * - agy: `-p --output-format stream-json --mode plan` (help lists text, json and stream-json).
+ * All five can stream; none needs a "cannot stream" note. pi's `bash` timeout is in seconds, the others' tool timeout in ms.
+ */
+export function reviewRunLine(kind: string): string {
+  const prompt = '"$(cat <prompt>)"'
+  const out = '> <out> 2>&1 < /dev/null'
+  switch (kind) {
+    case 'claude':
+      return `timeout 900 claude -p --output-format stream-json --verbose --permission-mode plan --disallowedTools Edit,Write,NotebookEdit ${prompt} ${out}`
+    case 'codex':
+      return `timeout 900 codex exec -s read-only --json ${prompt} ${out}`
+    case 'pi':
+      return `timeout 900 pi -p --mode json --tools read,grep,find,ls,bash --no-session ${prompt} ${out}`
+    case 'opencode':
+      return `timeout 900 opencode run --standalone --agent plan --format json ${prompt} ${out}`
+    case 'agy':
+      return `timeout 900 agy -p --output-format stream-json --mode plan --model <model> ${prompt} ${out}`
+    default:
+      return `timeout 900 ${kind} <its streaming-output flag> ${prompt} ${out}`
+  }
+}
+
 /** "a headless Codex or a Codex subagent (its default model and effort)", "… Claude Code … (model opus, high effort)" */
 export function reviewerWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
