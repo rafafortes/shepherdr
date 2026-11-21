@@ -49,8 +49,10 @@ const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'C
  * The exact foreground command a task agent runs for its round's headless reviewer: `timeout 900` (not 540), stdin closed,
  * and the CLI's progressive output redirected to a file the agent reads if the run is cut. The prompt is a short file by
  * reference: the reviewer reads the diff itself with its own read-only tools (`git diff <merge-base>...HEAD`, `git log`,
- * the files) — a huge pasted diff once stalled a round for 540 s and printed nothing. This is the one place the per-CLI
- * lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the skill holds the general rules.
+ * the files) — a huge pasted diff once stalled a round for 540 s and printed nothing. The round's model and effort are in
+ * the line too (each CLI spells them differently), so it is ready to run after `<prompt>` and `<out>` are filled in. This
+ * is the one place the per-CLI lines live; `shepherdr review`'s answer names only the round's reviewer's line, and the
+ * skill holds the general rules.
  *
  * The streaming flag of each CLI was checked against its installed `--help` and run end to end on 2026-11-21, except
  * codex (not installed on this host: `command -v codex` is empty), whose `--json` is the documented JSONL event stream:
@@ -64,24 +66,28 @@ const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'C
  * All five can stream; none needs a "cannot stream" note. pi has no read-only mode: `bash` is in its tool list only so
  * the reviewer can run `git diff`/`git log`, and the prompt forbids changes. The four others use a read-only mode.
  */
-export function reviewRunLine(kind: string): string {
+export function reviewRunLine(r: Reviewer): string {
+  const model = r.model && r.model !== 'default' ? r.model : undefined
+  const effort = r.effort && r.effort !== 'default' ? r.effort : undefined
   const prompt = '"$(cat <prompt>)"'
   const out = '> <out> 2>&1 < /dev/null'
-  switch (kind) {
+  switch (r.kind) {
     case 'claude':
       // --disallowedTools is variadic: without `--` it swallows the prompt that follows (`... -- "prompt"` is the fix)
-      return `timeout 900 claude -p --output-format stream-json --verbose --permission-mode plan --disallowedTools Edit,Write,NotebookEdit -- ${prompt} ${out}`
+      return `timeout 900 claude -p --output-format stream-json --verbose ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}--permission-mode plan --disallowedTools Edit,Write,NotebookEdit -- ${prompt} ${out}`
     case 'codex':
-      return `timeout 900 codex exec -s read-only --json ${prompt} ${out}`
+      // codex takes its effort from its own config, not a flag (as in oneShot), so only the model goes here
+      return `timeout 900 codex exec -s read-only ${model ? `--model ${model} ` : ''}--json ${prompt} ${out}`
     case 'pi':
-      return `timeout 900 pi -p --mode json --tools read,grep,find,ls,bash --no-session ${prompt} ${out}`
+      return `timeout 900 pi -p --mode json --tools read,grep,find,ls,bash --no-session ${model ? `--model ${model} ` : ''}${effort ? `--thinking ${effort} ` : ''}${prompt} ${out}`
     case 'opencode':
-      return `timeout 900 opencode run --standalone --agent plan --format json ${prompt} ${out}`
+      // OpenCode's model id carries the variant after `#`, as in oneShot and adviceArgs
+      return `timeout 900 opencode run --standalone --agent plan --format json ${model ? `-m ${effort ? `${model}#${effort}` : model} ` : ''}${prompt} ${out}`
     case 'agy':
       // -p takes the token right after it as the prompt: `agy -p --flag "prompt"` fails with "took --flag as its prompt"
-      return `timeout 900 agy -p ${prompt} --output-format stream-json --mode plan --model <model> ${out}`
+      return `timeout 900 agy -p ${prompt} --output-format stream-json --mode plan ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}${out}`
     default:
-      return `timeout 900 ${kind} <its streaming-output flag> ${prompt} ${out}`
+      return `timeout 900 ${r.kind} ${model ? `--model ${model} ` : ''}${prompt} ${out}`
   }
 }
 

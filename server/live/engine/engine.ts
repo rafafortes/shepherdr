@@ -3641,7 +3641,7 @@ export class Engine extends Emitter<Events> {
     const why = a.why
       ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : a.why.why === 'blocked' ? `${chainWords(a.why.harness.h)} is blocked (0 allowed)` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})`
       : ''
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`${reviewRunLine(a.reviewer.kind)}\`. Run \`shepherdr review ${id} --done\` when the round's review has finished.`
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`${reviewRunLine(a.reviewer)}\`. Run \`shepherdr review ${id} --done\` when the round's review has finished.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
