@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { HealthKept } from '../server/live/health.ts'
 import { tmp } from './tmp.ts'
 
 const perl = spawnSync('perl', ['-e1']).status === 0
@@ -424,6 +425,27 @@ describe('limits', () => {
     expect(told).toEqual(['memory over'])
     mon().tick(60_000)
     expect(told).toEqual(['memory over'])
+  })
+
+  test("each 30-second sample keeps this server's own numbers with the watch, in the ring doctor reads", () => {
+    const writes: HealthKept[] = []
+    const mon = new H.Monitor(
+      limits,
+      () => true,
+      () => undefined,
+      () => at(1),
+      { read: () => ({}), write: (w) => writes.push(w) },
+    )
+    mon.perfNow = () => ({ lag: 1200, stalls: 2, working: 3, pass: { label: 'snapshot', ms: 250 } })
+    mon.tick(0)
+    mon.tick(5_000) // the tick between samples takes none: the same numbers are not counted twice
+    expect(mon.samples).toHaveLength(1)
+    mon.tick(30_000)
+    expect(mon.samples).toHaveLength(2)
+    expect(mon.samples[1]).toMatchObject({ at: 30_000, load: 1, lag: 1200, stalls: 2, working: 3, pass: { label: 'snapshot', ms: 250 } })
+    expect(mon.samples[1].rss).toBeGreaterThan(0)
+    // one write holds both the watch and the ring
+    expect(writes.at(-1)).toEqual({ watch: {}, samples: mon.samples })
   })
 })
 

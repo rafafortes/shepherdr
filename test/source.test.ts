@@ -1025,6 +1025,45 @@ describe('--json on the list and show commands', () => {
     expect(r.out).toContain('takes no --json')
   })
 
+  test('doctor prints the performance block from the samples the server kept', async () => {
+    const before = src.health.samples
+    const now = Date.now()
+    try {
+      src.health.samples = [
+        { at: now - 120_000, load: 4, memUsed: 8 * 2 ** 30, rss: 200 * 2 ** 20, lag: 10, stalls: 0, working: 1 },
+        { at: now - 60_000, load: 6, memUsed: 9 * 2 ** 30, rss: 320 * 2 ** 20, lag: 1500, stalls: 2, working: 4, pass: { label: 'snapshot', ms: 800 } },
+      ]
+      const r = await src.cli(['doctor'], {})
+      expect(r.code).toBe(0)
+      expect(r.out).toContain('Performance:')
+      expect(r.out).toContain('worst by day today 1.5 s')
+      expect(r.out).toContain('stalls in the last day: 2')
+      expect(r.out).toContain('now 320 MB')
+      expect(r.out).toContain('snapshot 800 ms')
+    } finally {
+      src.health.samples = before
+    }
+  })
+
+  test('a health tick keeps what the stall watch saw and how many agents work', () => {
+    const before = src.health.samples
+    const last = src.health.last
+    const drain = src.stall.drainPerf
+    try {
+      src.health.samples = []
+      src.health.last = undefined
+      src.stall.drainPerf = () => ({ lag: 321, stalls: 1, pass: { label: 'snapshot', ms: 400 } })
+      src.healthTick(Date.now())
+      const kept = src.health.samples.at(-1)
+      expect(kept).toMatchObject({ lag: 321, stalls: 1, pass: { label: 'snapshot', ms: 400 } })
+      expect(kept?.working).toBe(Object.values(src.agents.records).filter((r) => src.agents.status(r.key) === 'working').length)
+    } finally {
+      src.health.samples = before
+      src.health.last = last
+      src.stall.drainPerf = drain
+    }
+  })
+
   test('--json is only accepted on automation list, not the verbs that still answer prose', async () => {
     const dir = tmp('src-repo')
     run(REPO, dir)

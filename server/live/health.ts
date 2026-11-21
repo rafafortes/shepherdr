@@ -402,6 +402,162 @@ export function summary(s: Sample) {
   ].join(' · ')
 }
 
+/* ---------- the performance history ---------- */
+
+/** the last hour of samples is kept as it was taken */
+export const PERF_RECENT_MS = 3_600_000
+const PERF_DAY_MS = 86_400_000
+/** one entry every 5 minutes, for the day before that */
+const PERF_BUCKET_MS = 300_000
+/** one every 30 minutes after a day: the rest of the week after it, up to 336 entries */
+const PERF_WIDE_MS = 1_800_000
+/** the most entries the ring keeps: the hour's 120, the day's 276 and the wide week's 336 add up to 732, and the cap
+ *  drops the oldest of them, so the history reaches back a little over a week in at most about 115 KB of health.json */
+export const PERF_KEEP = 700
+
+/** one line of the performance history: what this server's own numbers were at a moment */
+export interface PerfSample {
+  at: number
+  /** the machine's 1-minute load */
+  load: number
+  /** the share of the last minute some task waited for a CPU, where the kernel gives it */
+  cpuSome?: number
+  /** the machine's memory in use, bytes */
+  memUsed: number
+  /** this server's own resident memory, bytes (process.memoryUsage().rss) */
+  rss: number
+  /** the worst event-loop tick lateness since the sample before, ms (0 on time) */
+  lag: number
+  /** the event loop stalls that came since the sample before */
+  stalls: number
+  /** the agents working at that moment */
+  working: number
+  /** the slowest pass the stall watch named since the sample before, where one was slow */
+  pass?: { label: string; ms: number }
+  /** how many samples this one stands for: 1 for one as taken, more in a bucket */
+  n?: number
+}
+
+/** a sample as health.json gave it: a hand edit or a half-written file must not stop the health tick (the alerts come
+ *  from it), so an entry without a number and a moment is dropped */
+const isPerf = (s: unknown): s is PerfSample =>
+  typeof s === 'object' && s !== null && Number.isFinite((s as PerfSample).at) && Number.isFinite((s as PerfSample).lag) && Number.isFinite((s as PerfSample).rss)
+
+/** what the monitor is told of the loop and the agents since the sample before: the source's stall watch fills it */
+export type PerfExtra = Pick<PerfSample, 'lag' | 'stalls' | 'working' | 'pass'>
+
+/** two entries of one bucket as one: the worst lag and the slowest pass, stalls added up, the rest at their peak */
+function merged(a: PerfSample, b: PerfSample): PerfSample {
+  const pass = (a.pass?.ms ?? 0) >= (b.pass?.ms ?? 0) ? a.pass : b.pass
+  return {
+    at: a.at,
+    load: Math.max(a.load, b.load),
+    ...(a.cpuSome !== undefined || b.cpuSome !== undefined ? { cpuSome: Math.max(a.cpuSome ?? 0, b.cpuSome ?? 0) } : {}),
+    memUsed: Math.max(a.memUsed, b.memUsed),
+    rss: Math.max(a.rss, b.rss),
+    lag: Math.max(a.lag, b.lag),
+    stalls: a.stalls + b.stalls,
+    working: Math.max(a.working, b.working),
+    ...(pass ? { pass } : {}),
+    n: (a.n ?? 1) + (b.n ?? 1),
+  }
+}
+
+/**
+ * The ring keeps a week at three resolutions: every sample for the last hour, one every 5 minutes for the day before
+ * that, one every 30 minutes after it. Nothing here starts a timer or writes a file: the health tick that already
+ * samples calls it once per sample, and health.json keeps what it returns.
+ */
+export function keepPerf(ring: PerfSample[], now = Date.now()): PerfSample[] {
+  const kept: PerfSample[] = []
+  let bucket: PerfSample | undefined
+  const flush = () => {
+    if (bucket) kept.push(bucket)
+    bucket = undefined
+  }
+  for (const s of ring) {
+    const every = s.at >= now - PERF_RECENT_MS ? 0 : s.at >= now - PERF_DAY_MS ? PERF_BUCKET_MS : PERF_WIDE_MS
+    if (!every) {
+      flush()
+      kept.push(s)
+      continue
+    }
+    const at = Math.floor(s.at / every) * every
+    if (bucket?.at === at) bucket = merged(bucket, s)
+    else {
+      flush()
+      bucket = { ...s, at, n: s.n ?? 1 }
+    }
+  }
+  flush()
+  // a server that ran rarely must not keep a month of entries labelled by a day with no year: the week it describes
+  // and a day of slack for the comparison a week back
+  const recent = kept.filter((s) => s.at >= now - 8 * PERF_DAY_MS)
+  return recent.length > PERF_KEEP ? recent.slice(recent.length - PERF_KEEP) : recent
+}
+
+const percentile = (xs: number[], p: number) => {
+  const s = [...xs].sort((a, b) => a - b)
+  return s.length ? s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] : 0
+}
+const lapse = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`)
+const pad = (n: number) => String(n).padStart(2, '0')
+/** a moment in this machine's own time, as the rest of doctor's lines are: "11-17" and "11-17 09:12" */
+const day = (t: number) => {
+  const d = new Date(t)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+const stamp = (t: number) => {
+  const d = new Date(t)
+  return `${day(t)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** a phrase of numbers: "a, b and c" */
+const list = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs.join(' and '))
+
+/**
+ * `shepherdr doctor`'s performance block: the numbers this server kept, so "it is slow" has something to be slow
+ * against. Each day's worst lag (a bucket keeps its worst, so a day's worst compares with another day's; a p95 would
+ * compare a day of 30-second samples with a day of 30-minute ones and read worse the older it is), the last hour's p95
+ * at the one resolution all of it was taken at, the memory the server itself takes now and a day and a week ago, and
+ * the slowest passes of the last day. Nothing until there is a sample. The server restarts on every merge, so those
+ * memory numbers are what runs took, not one process growing.
+ */
+export function perfReport(ring: PerfSample[], now = Date.now()): string[] {
+  const kept = ring.filter((s) => s.at <= now)
+  if (!kept.length) return []
+  const last = kept[kept.length - 1]
+  const today = day(now)
+  const worst = new Map<string, number>()
+  for (const s of kept) worst.set(day(s.at), Math.max(worst.get(day(s.at)) ?? 0, s.lag))
+  const peak = [...worst].slice(-3).map(([d, v]) => `${d === today ? 'today' : d} ${lapse(v)}`)
+  const hour = kept.filter((s) => s.at >= now - PERF_RECENT_MS).map((s) => s.lag)
+  const stalls = kept.filter((s) => s.at >= now - PERF_DAY_MS).reduce((n, s) => n + s.stalls, 0)
+  // a value a day or a week back, only when a sample is that old within a few hours: a gap must not label an old
+  // number with an age it does not have
+  const back = (ago: number, slack: number) => kept.filter((s) => s.at <= now - ago && s.at >= now - ago - slack).at(-1)
+  const memory = [`now ${mb(last.rss)}`]
+  for (const [ago, slack, words] of [
+    [PERF_DAY_MS, 2 * 3_600_000, '24 h ago'],
+    [7 * PERF_DAY_MS, 12 * 3_600_000, '7 d ago'],
+  ] as const) {
+    const s = back(ago, slack)
+    if (s) memory.push(`${words} ${mb(s.rss)}`)
+  }
+  const passes = new Map<string, number>()
+  for (const s of kept) if (s.at >= now - PERF_DAY_MS && s.pass) passes.set(s.pass.label, Math.max(passes.get(s.pass.label) ?? 0, s.pass.ms))
+  const slow = [...passes]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([label, ms]) => `${label} ${lapse(ms)}`)
+  return [
+    `Performance: this server's own numbers, kept with the machine watch: one every 30 s for the last hour, every 5 minutes before that, every 30 minutes after a day (${kept.length} sample${kept.length === 1 ? '' : 's'}, back to ${stamp(kept[0].at)}; an older entry is its bucket's peak, and a restart starts the server's memory again)`,
+    `  event loop lag: ${[`worst by day ${list(peak)}`, ...(hour.length ? [`last hour p95 ${lapse(percentile(hour, 95))}`] : [])].join('; ')} · stalls in the last day: ${stalls}`,
+    `  memory in use by the server: ${memory.join(' · ')}`,
+    ...(slow.length ? [`  slowest passes in the last day: ${slow.join(', ')}`] : []),
+  ]
+}
+
 /* ---------- the watch ---------- */
 
 export interface HealthEvent {
@@ -412,6 +568,16 @@ export interface HealthEvent {
   since?: number
 }
 
+/** what health.json keeps: what was told (so a restart tells nothing again while it is still over), and the
+ *  performance history doctor reads */
+export interface HealthKept {
+  watch?: Partial<Record<Kind, Watch>>
+  samples?: PerfSample[]
+}
+
+/** the watch's kinds: a health.json from before the performance ring held those alone, at its top */
+const KINDS: Kind[] = ['cpu', 'memory', 'pressure', 'disk', 'herdr']
+
 /**
  * Samples this machine every SAMPLE_MS and looks at herdr every few seconds; tells `on` when something crossed its
  * limit or came back under. What was told is kept on disk: a restart (Shepherdr restarts on every merge) tells
@@ -419,6 +585,10 @@ export interface HealthEvent {
  */
 export class Monitor {
   last?: Sample
+  /** the performance history, oldest first: what this server's own numbers were, kept in health.json with the watch */
+  samples: PerfSample[] = []
+  /** what the loop and the agents were since the sample before: the source puts its stall watch here, a test its own */
+  perfNow: () => PerfExtra = () => ({ lag: 0, stalls: 0, working: 0 })
   /** the last GPU reading, kept when a read misses so the meters still show something */
   private gpus: Gpu[] = []
   /** one GPU read at a time: a tick never waits for it */
@@ -435,26 +605,60 @@ export class Monitor {
     private herdr: () => boolean,
     private on: (e: HealthEvent) => void,
     take?: () => Sample,
-    private store: { read: () => Partial<Record<Kind, Watch>>; write: (w: Partial<Record<Kind, Watch>>) => void } = { read: () => ({}), write: () => undefined },
+    private store: { read: () => HealthKept; write: (k: HealthKept) => void } = { read: () => ({}), write: () => undefined },
     private onSample: () => void = () => undefined,
   ) {
     this.ownSample = !take
     this.take = take ?? (() => sample(this.gpus))
-    this.watch = store.read()
+    const kept = store.read() ?? {}
+    // a health.json from before the performance ring holds the watch alone, as its kinds at the top: still read
+    this.watch = kept.watch ?? (Object.fromEntries(Object.entries(kept).filter(([k]) => KINDS.includes(k as Kind))) as Partial<Record<Kind, Watch>>)
+    this.samples = Array.isArray(kept.samples) ? kept.samples.filter(isPerf).slice(-PERF_KEEP) : []
   }
 
   /** a look: a fresh sample when the last is old (the GPU read starts off the loop, never waited for), then each limit judged */
   tick(now = Date.now()) {
+    let fresh: Sample | undefined
     if (!this.last || now - this.last.at >= SAMPLE_MS - 1000) {
-      const fresh = { ...this.take(), at: now }
+      fresh = { ...this.take(), at: now }
       this.last = fresh
       if (this.ownSample && !BOX && !this.sampling) this.sampling = this.refresh(fresh).finally(() => (this.sampling = undefined))
     }
+    // the branch above takes a sample when there is none, so there is one here
+    // biome-ignore lint/style/noNonNullAssertion: tick always has a sample: the branch above takes one when there is none
+    const last = this.last!
     const was = this.watch
-    const { next, events } = judge(was, levels(this.last, this.herdr(), this.limits()), now)
+    const { next, events } = judge(was, levels(last, this.herdr(), this.limits()), now)
     this.watch = next
-    if (JSON.stringify(next) !== JSON.stringify(was)) this.store.write(next)
-    for (const e of events) this.on({ ...e, sample: this.last, since: was[e.kind]?.since })
+    if (fresh)
+      this.keep(fresh) // one write of the watch and the new sample
+    else if (JSON.stringify(next) !== JSON.stringify(was)) this.save()
+    for (const e of events) this.on({ ...e, sample: last, since: was[e.kind]?.since })
+  }
+
+  /** one line of the performance history per sample, with what the source's stall watch saw since the one before */
+  private keep(s: Sample) {
+    const extra = this.perfNow()
+    this.samples = keepPerf(
+      [
+        ...this.samples,
+        {
+          at: s.at,
+          load: s.load,
+          ...(s.cpuSome !== undefined ? { cpuSome: s.cpuSome } : {}),
+          memUsed: s.memUsed,
+          rss: process.memoryUsage().rss,
+          ...extra,
+        },
+      ],
+      s.at,
+    )
+    this.save()
+  }
+
+  /** health.json: the watch, so a restart tells nothing again, and the performance history */
+  private save() {
+    this.store.write({ watch: this.watch, samples: this.samples })
   }
 
   /** read the GPU off the loop and put it in the sample we just took; a miss leaves the last reading in place */
