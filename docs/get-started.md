@@ -65,5 +65,6 @@ echo "<your ElevenLabs API key>" | shepherdr secret elevenlabs
 ## Next
 
 - [Upgrading and updates](upgrading.md): coming from herdr-projects, going back, and how Shepherdr keeps itself up to date.
+- [Backups](backups.md): a snapshot of Shepherdr's own stores, how to make it nightly, and how to put one back.
 - [Other machines](machines.md): run spaces and tasks on more machines from the same app.
 - [Spaces](spaces.md), [Chats](chat.md), [Tasks](tasks.md), [Autopilot](autopilot.md), [Artifacts](artifacts.md), [Shared browser](browser.md) and [Settings](settings.md): how it all works.

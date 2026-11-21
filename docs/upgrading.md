@@ -36,6 +36,12 @@ If you changed herdr's config since the upgrade, paste the `# >>> herdr-projects
 keeper and agent skill come back by themselves. Shepherdr's own data stays in `~/.shepherdr` for a later try; to
 return to Shepherdr, `herdr plugin install rafafortes/shepherdr --yes`.
 
+## Backups
+
+An update can be taken back (below), but a store that a wrong setting, a hasty delete or a bad release wrote over stays
+written over. [Backups](backups.md) has the snapshot: what it holds, what it never holds (secrets, chats, attachments),
+how it is kept, and how to put one back with Shepherdr stopped.
+
 ## Updates
 
 Shepherdr keeps itself up to date. When its own checkout moves to a new commit (a task merged into main), it makes a
