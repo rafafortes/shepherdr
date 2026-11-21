@@ -356,11 +356,14 @@ export const TOPIC = {
                                                  reviewer too, from their next round); running tasks keep their
                                                  agent. advisor.* is refused: it applies at once already
   shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"]
-                         [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME]
+                         [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME] [--set KEY=VALUE …]
                                                  each run adds that task to the space, with a fresh agent; it runs on
-                                                 its time rule, its events, or both (at least one)
+                                                 its time rule, its events, or both (at least one). --set is repeatable:
+                                                 review=off, review.rounds=1, merge=… (shepherdr show lists the keys);
+                                                 agent/model/effort name its agent instead of the flags above
   shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when … | off] [--on … | none]
-                         [--agent …]
+                         [--agent …] [--set KEY=VALUE …]
+                                                 --set replaces the whole set; a bare --set clears it
 
 ${TRIGGERS}  shepherdr automation pause|resume|run|remove "<name>" [--space NAME]
                                                  run: add its task now

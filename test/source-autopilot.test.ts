@@ -856,6 +856,73 @@ describe('automations add tasks with fresh agents', () => {
     // the old kinds are gone
     expect((await src.cli(['automation', 'add', 'Ask', '--ask', 'What waits?', '--when', 'FREQ=DAILY'], { chat: place })).out).toContain('takes no --ask')
   })
+
+  /** what a fixture must have, or a named failure instead of a non-null assertion */
+  const need = <T>(x: T | undefined, what: string): T => {
+    if (x === undefined) throw new Error(`No ${what} in this test world`)
+    return x
+  }
+
+  test('--set keeps the task ways on the template and gives them to each task it adds', async () => {
+    const { place } = await workedTask('autoset')
+    const added = await src.cli(['automation', 'add', 'Weekly', '--task', 'Check upstream', '--when', 'FREQ=DAILY', '--set', 'review=off', '--set', 'review.rounds=1'], { chat: place })
+    expect(added.code).toBe(0)
+    const a = need(src.automations.find(place, 'Weekly'), 'Weekly automation')
+    expect(a.task.set).toEqual({ 'brief.review': 'off', 'review.rounds': '1 round' })
+    expect(await src.act({ type: 'automation', place, op: 'run', name: 'Weekly' })).toEqual({ ok: true })
+    const t = need(
+      src.engine.tasks.find((x) => x.by.includes('Weekly')),
+      'Weekly task',
+    )
+    expect(t.set).toEqual(a.task.set)
+    // the brief says who set the ways, as a coordinator's flags do
+    expect(t.desc).toContain("- Review: off. No review; the lines on reviewing below don't apply. (set by coordinator for this task)")
+    expect(t.desc).toContain('- Review rounds: 1. One round, no review again. (set by coordinator for this task)')
+    // setForTask's own refusal at add and at edit, leaving what was stored alone
+    const bad = await src.cli(['automation', 'add', 'Bad', '--task', 'x', '--when', 'FREQ=DAILY', '--set', 'nonsense=1'], { chat: place })
+    expect(bad.code).toBe(1)
+    expect(bad.out).toContain('--set takes key=value')
+    expect(src.automations.find(place, 'Bad')).toBeUndefined()
+    const badEdit = await src.cli(['automation', 'edit', 'Weekly', '--set', 'nonsense=1'], { chat: place })
+    expect(badEdit.code).toBe(1)
+    expect(badEdit.out).toContain('--set takes key=value')
+    expect(need(src.automations.find(place, 'Weekly'), 'Weekly automation').task.set).toEqual(a.task.set)
+    // edit replaces the whole set; a bare --set clears it
+    expect((await src.cli(['automation', 'edit', 'Weekly', '--set', 'review.mustFix=critical'], { chat: place })).code).toBe(0)
+    expect(need(src.automations.find(place, 'Weekly'), 'Weekly automation').task.set).toEqual({ 'review.mustFix': 'critical' })
+    expect((await src.cli(['automation', 'edit', 'Weekly', '--set'], { chat: place })).code).toBe(0)
+    expect(need(src.automations.find(place, 'Weekly'), 'Weekly automation').task.set).toBeUndefined()
+    // a set-less old automation adds the task it always did
+    expect(await src.act({ type: 'automation', place, op: 'run', name: 'Weekly' })).toEqual({ ok: true })
+    const plain = need(src.engine.tasks.filter((x) => x.by.includes('Weekly')).at(-1), 'plain task')
+    expect(plain.set).toBeUndefined()
+    expect(plain.desc).toContain('- Review: on.')
+    expect(plain.desc).not.toContain('set by coordinator for this task')
+    // FUNC-09's cost, counted in the same test world: a set-less automation (what it was before) adds a task with
+    // three review rounds to run; one with --set review=off adds one with none
+    const reviewerRuns = (x: typeof t) => {
+      const w = src.settings.ways(src.places.space(x.project)?.name, x.set)
+      return w.review ? w.rounds : 0
+    }
+    expect(reviewerRuns(plain)).toBe(3)
+    expect(reviewerRuns(t)).toBe(0)
+  })
+
+  test('--set agent keys name the template agent; a reviewer and a browser merge gate are refused', async () => {
+    const { place } = await workedTask('autosetflag')
+    expect((await src.cli(['automation', 'add', 'OnPi', '--task', 'Read', '--when', 'FREQ=DAILY', '--set', 'agent=codex'], { chat: place })).code).toBe(0)
+    expect(need(src.automations.find(place, 'OnPi'), 'OnPi automation').task.agent).toEqual({ kind: 'codex' })
+    expect((await src.cli(['automation', 'add', 'WithReviewer', '--task', 'x', '--when', 'FREQ=DAILY', '--set', 'reviewer=claude'], { chat: place })).out).toContain(
+      "An automation's --set takes task ways, not reviewer",
+    )
+    const gate = await src.cli(['automation', 'add', 'Gate', '--task', 'x', '--when', 'FREQ=DAILY', '--set', 'merge.gate=yes'], { chat: place })
+    expect(gate.code).toBe(1)
+    expect(gate.out).toContain('Set it in Settings')
+    expect((await src.cli(['automation', 'add', 'Gate', '--task', 'x', '--when', 'FREQ=DAILY', '--set', 'merge.gate=yes'], { chat: place, local: true })).code).toBe(0)
+    // --set is only an add/edit flag: on the other verbs it stays refused rather than silently doing nothing
+    expect((await src.cli(['automation', 'run', 'OnPi', '--set', 'review=off'], { chat: place })).out).toContain('Automation run takes no --set')
+    expect((await src.cli(['automation', 'edit'], { chat: place })).out).toContain('shepherdr automation edit "<name>"')
+  })
 })
 
 describe('artifacts from the command', () => {

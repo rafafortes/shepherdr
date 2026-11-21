@@ -3950,7 +3950,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const p = this.places.space(a.place)
     try {
       if (!p) throw new Error('Its space is gone')
-      const t = this.engine.add({ project: p.name, title: a.task.title, desc: a.task.desc, by: `${BY_AUTOMATION} “${a.name}”`, agent: a.task.agent })
+      const t = this.engine.add({ project: p.name, title: a.task.title, desc: a.task.desc, by: `${BY_AUTOMATION} “${a.name}”`, agent: a.task.agent, set: a.task.set })
       this.automations.fired(a, { task: t.id }, Date.now(), timed)
       return t
     } catch (e) {
@@ -3965,12 +3965,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     place: string,
     op: 'add' | 'pause' | 'resume' | 'run' | 'remove',
     name: string | undefined,
-    to?: { name: string; when?: string; on?: string; title: string; brief?: string; agent?: Template['agent'] },
+    to?: { name: string; when?: string; on?: string; title: string; brief?: string; agent?: Template['agent']; set?: Record<string, string> },
   ) {
     if (!this.places.space(place)) throw new Error('Automations add tasks to a space with a repo: pick one (--space NAME)')
     if (op === 'add') {
       const t = to!
-      const task: Template = { title: checkTitle(t.title), ...(t.brief?.trim() ? { desc: t.brief.trim() } : {}), ...(t.agent ? { agent: t.agent } : {}) }
+      const task: Template = {
+        title: checkTitle(t.title),
+        ...(t.brief?.trim() ? { desc: t.brief.trim() } : {}),
+        ...(t.agent ? { agent: t.agent } : {}),
+        ...(t.set && Object.keys(t.set).length ? { set: t.set } : {}),
+      }
       const time = t.when?.trim() ? timeRule(t.when) : 'off'
       const on = t.on?.trim() ? eventRules(t.on) : []
       if (!t.name?.trim()) throw new Error('An automation needs a name')
@@ -5576,12 +5581,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const pr = one(p, 'space') || op !== 'list' ? this.projectFor(p, ctx) : null
         const place = pr ? placeId.space(pr.name) : ''
         const name = rest[0]
-        const allowed = ['when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name', ...(op === 'list' ? ['json'] : [])]
+        const allowed = ['when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name', ...(op === 'add' || op === 'edit' ? ['set'] : []), ...(op === 'list' ? ['json'] : [])]
         const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !allowed.includes(f))
         if (odd.length)
           throw new Error(
-            `Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name and --space${op === 'list' ? ', plus --json on list' : ''}`,
+            `Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --set, --agent, --model, --effort, --name and --space${op === 'list' ? ', plus --json on list' : ''}`,
           )
+        // --set pairs, or a bare --set to clear them on edit; parse before the agent flags it can also name
+        const sets = (op === 'add' || op === 'edit') && (p.flags.has('set') || p.opts.set?.length) ? automationSet(p, ctx.local) : undefined
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()
@@ -5593,12 +5600,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
         if (op === 'add') {
           if (!name || !one(p, 'task') || (!one(p, 'when') && !one(p, 'on')))
-            throw new Error('shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"] (one or both)')
-          const x = this.automation(place, 'add', undefined, { name, when: one(p, 'when'), on: one(p, 'on'), title: one(p, 'task')!, brief, agent }) as Automation
+            throw new Error('shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"] [--set KEY=VALUE …] (one or both)')
+          const x = this.automation(place, 'add', undefined, { name, when: one(p, 'when'), on: one(p, 'on'), title: one(p, 'task')!, brief, agent, set: sets }) as Automation
           return `Automation “${x.name}” is on: ${told(x)}. It adds the task “${x.task.title}” to ${this.places.shownName(pr!.name)}, with a fresh agent. Tell the human when it runs in these words.`
         }
         if (op === 'edit') {
-          if (!name) throw new Error('shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when "<time rule>" | off] [--on "<events>" | none] [--agent …]')
+          if (!name)
+            throw new Error(
+              'shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when "<time rule>" | off] [--on "<events>" | none] [--set KEY=VALUE …] [--agent …] (a bare --set clears it)',
+            )
           const when = one(p, 'when')
           const on = one(p, 'on')
           const x = this.automations.edit(place, name, {
@@ -5606,6 +5616,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             time: when !== undefined ? timeRule(when) : undefined,
             on: on !== undefined ? eventRules(on) : undefined,
             task: { ...(one(p, 'task') ? { title: checkTitle(one(p, 'task')!) } : {}), ...(brief !== undefined ? { desc: brief || undefined } : {}), ...(agent ? { agent } : {}) },
+            set: sets,
           })
           this.emit('snapshot')
           return `Automation “${x.name}” changed: ${told(x)}.`
@@ -6376,6 +6387,26 @@ const HM = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit'
 
 function clock(t: number) {
   return HM.format(new Date(t))
+}
+
+/** an automation's --set pairs: task add's parser, so its keys, values and refusals are the same. An agent key names
+ *  the template's own agent (its --agent/--model/--effort); a reviewer is not part of an automation's template. */
+function automationSet(p: Parsed, local?: boolean): Record<string, string> {
+  const set: Record<string, string> = {}
+  for (const pair of p.opts.set ?? []) {
+    const r = setForTask(pair)
+    if ('error' in r) throw new Error(r.error)
+    // a per-task merge gate runs through sh too: a browser page (Origin present, local false) cannot plant one
+    // through automation add, while a shell on this machine still can (SEC-04)
+    if ('key' in r && EXECUTABLE_KEYS.has(r.key) && !local) throw new Error('Set it in Settings: a command here can only be changed from the Settings page.')
+    if ('flag' in r) {
+      if (r.flag.startsWith('reviewer')) throw new Error(`An automation's --set takes task ways, not ${r.flag}: its tasks use the space's reviewer.`)
+      const flags = p.opts[r.flag] ?? []
+      flags.push(r.value)
+      p.opts[r.flag] = flags
+    } else set[r.key] = r.value
+  }
+  return set
 }
 
 /** task add's --agent, --model and --effort: what it sets for this one task, refused when it makes no sense */

@@ -13,6 +13,8 @@ export interface Template {
   desc?: string
   /** the agent, model and effort its task starts with; none: Settings' */
   agent?: { kind?: string; model?: string; effort?: string }
+  /** task ways for each task it adds (automation add/edit --set); none: the space's defaults */
+  set?: Record<string, string>
 }
 
 export interface Automation {
@@ -81,8 +83,9 @@ export class Automations {
     return x
   }
 
-  /** change some of what it is: a new time rule or new event rules take the old ones' place */
-  edit(place: string, name: string, c: { name?: string; time?: string; on?: EventRule[]; task?: Partial<Template> }, now = Date.now()) {
+  /** change some of what it is: a new time rule or new event rules take the old ones' place; --set replaces the
+   *  template's whole set, an empty one clears it */
+  edit(place: string, name: string, c: { name?: string; time?: string; on?: EventRule[]; task?: Partial<Template>; set?: Record<string, string> }, now = Date.now()) {
     const a = this.find(place, name)
     if (!a) throw new Error(`No automation “${name}” here`)
     if (c.name && c.name !== name && this.find(place, c.name)) throw new Error(`There is an automation “${c.name}” already`)
@@ -95,7 +98,12 @@ export class Automations {
       if (c.on.length) trigger.on = c.on
       else delete trigger.on
     }
-    const next: Automation = { ...a, ...(c.name ? { name: c.name } : {}), trigger, task: { ...a.task, ...c.task } }
+    const task: Template = { ...a.task, ...c.task }
+    if (c.set !== undefined) {
+      if (Object.keys(c.set).length) task.set = c.set
+      else delete task.set
+    }
+    const next: Automation = { ...a, ...(c.name ? { name: c.name } : {}), trigger, task }
     check(next)
     Object.assign(a, next)
     // a new time rule counts from now: a once that ran, given a new time, runs again
