@@ -855,4 +855,8 @@ when that database cannot tell, on idle or done panes. The same pass also fixes 
 `sh -c "bash x.sh"` that execs into the script and loses its `-c`: `Procs.scan` now counts any direct child of an
 `opencode-pty` daemon carrying the chat as that chat's shell, whatever its argv (POL-495), before caching it as plain;
 `servesCommand` still parts servers from shells. The agent skill's review step also says to wait for a fallback subagent
-in the same turn.
+in the same turn. The other CLIs were checked for the same shape: Claude Code's session file, hooks and screen and agy's
+screen already count it; Codex is not installed on this host (removed 2026-10-15) and keeps a command past its turn but
+is never woken by it, so its end still waits on you (upstream's SHEP-207/SHEP-267 guardian work is herdr children, not
+an in-app subagent that outlives the turn); pi 1.5.2's help lists read, bash, edit and write with no background or task
+tool, so its bash waits inside the turn and only a herdr child it spawned can wake it. Neither has an equivalent here.
