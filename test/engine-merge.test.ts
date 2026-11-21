@@ -91,6 +91,33 @@ describe('shepherdr merge', () => {
     }
   })
 
+  test('a merge waiting in line behind a slow one says so when its caller waits past the deadline', async () => {
+    const w = world()
+    const dir = repo()
+    const { p, t, key } = await started(w, dir, 'inline')
+    // the next merge into this repo, ready before the first is asked for
+    const b = w.engine.add({ project: p.name, title: 'Second', desc: 'Second change', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
+    if (!t.worktree || !b.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(t.worktree, 'one.txt'), 'one\n')
+    writeFileSync(join(b.worktree, 'two.txt'), 'two\n')
+    w.agentIs(key, 'idle')
+    w.agentIs(`${b.id}/Agent`, 'idle')
+    // a gate that takes its time: the second merge waits in line while the first runs it
+    expect(w.settings.set('merge.gate', 'sleep 1', { space: p.name }).ok).toBe(true)
+    const first = w.engine.merge(t.id, { self: true })
+    await until(() => t.landing?.step === 'gate', 10_000)
+    w.engine.mergeDeadline = 200
+    const second = await w.engine.merge(b.id, { self: true })
+    // its caller hears whose merge it waits behind, and goes on by itself
+    expect(second.ok).toBe(false)
+    expect(second.error).toContain(`waits in line behind ${t.id}'s`)
+    expect((await first).ok).toBe(true)
+    const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
+    await until(() => !merging.has(dir) && !!b.merged, 20_000)
+    expect(sh('git log --format=%s -n 2', dir).split('\n')).toEqual([`${b.id}: Second`, `${t.id}: Say hello`])
+  })
+
   test('merged by you while its agent waits: cleaned up at once', async () => {
     const w = world()
     const dir = repo()
