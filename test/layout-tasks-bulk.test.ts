@@ -127,7 +127,7 @@ describe.skipIf(!browser)('selecting rows for a bulk action', () => {
       await bar(page).getByRole('button', { name: 'Stop' }).click()
       const ask = page.getByRole('alertdialog', { name: 'Stop 2 tasks?' })
       await ask.waitFor()
-      expect(await ask.textContent()).toContain('HP-202 is at work; stop stops it first')
+      expect(await ask.textContent()).toContain('HP-202 is at work; its agent is stopped first')
       await ask.getByRole('button', { name: 'Stop' }).click()
       const result = page.getByRole('alertdialog', { name: '1 task could not be stopped' })
       await result.waitFor()
@@ -211,6 +211,26 @@ describe.skipIf(!browser)('selecting rows for a bulk action', () => {
       emit()
       rec.restore()
     }
+  }, 30_000)
+
+  test('Pin of a working task never claims to stop it, and Done selecting exits an empty selection', async () => {
+    const page = await newPage()
+    await page.goto(url())
+    await row(page, 'HP-202').waitFor()
+    await select(page)
+    await tick(page, 'HP-202')
+    await bar(page).getByRole('button', { name: 'Pin' }).click()
+    const ask = page.getByRole('alertdialog', { name: 'Pin 1 task?' })
+    await ask.waitFor()
+    expect(await ask.textContent()).not.toContain('at work')
+    await ask.getByRole('button', { name: 'Cancel' }).click()
+    // unticking the last row hides the bar; the header still offers a way out on a phone with no Esc
+    await tick(page, 'HP-202')
+    await bar(page).waitFor({ state: 'detached' })
+    await page.getByRole('button', { name: 'Group tasks' }).click()
+    await page.getByRole('menuitem', { name: 'Done selecting' }).click()
+    expect(await row(page, 'HP-202').getAttribute('data-selected')).toBe(null)
+    await page.close()
   }, 30_000)
 
   test('Delete stays on one row: the bar has no Delete', async () => {

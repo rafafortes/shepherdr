@@ -318,7 +318,7 @@ function ConfirmBulk({ c }: { c: Extract<Confirming, { kind: 'bulk' }> }) {
       }
     >
       <p>
-        {c.risky.length ? `${c.risky.join(', ')} ${c.risky.length === 1 ? 'is' : 'are'} at work; ${BULK_WORD[c.op].toLowerCase()} ${c.risky.length === 1 ? 'stops it' : 'stops them'} first. ` : ''}
+        {c.risky.length ? `${c.risky.join(', ')} ${c.risky.length === 1 ? 'is' : 'are'} at work; ${c.risky.length === 1 ? 'its agent is' : 'their agents are'} stopped first. ` : ''}
         Each task gets its own line; nothing else is touched.
       </p>
     </Dialog>
@@ -483,8 +483,9 @@ function ConfirmDelete({ t }: { t: Task }) {
 function SelectionBar({ archived }: { archived: boolean }) {
   const ids = useUI((u) => u.selected)
   const tasks = useSnap()?.tasks.filter((t) => ids?.has(t.id)) ?? []
-  if (!ids?.size) return null
-  const ask = (op: BulkOp) => setConfirm({ kind: 'bulk', op, tasks, risky: tasks.filter((t) => t.status === 'work').map((t) => t.id) })
+  if (!tasks.length) return null
+  // only Stop and Archive interrupt a working agent; Pin and Unarchive never do
+  const ask = (op: BulkOp) => setConfirm({ kind: 'bulk', op, tasks, risky: op === 'stop' || op === 'archive' ? tasks.filter((t) => t.status === 'work').map((t) => t.id) : [] })
   const button = 'h-8 px-2.5 text-[0.8125rem] phone:h-11 phone:px-3 phone:text-[0.875rem]'
   return (
     <div
@@ -492,7 +493,7 @@ function SelectionBar({ archived }: { archived: boolean }) {
       aria-label="Bulk actions"
       className="sticky top-0 z-10 mb-1 flex flex-wrap items-center gap-1 rounded-row bg-bg/95 px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--line2)] backdrop-blur-sm phone:gap-1.5 phone:px-2"
     >
-      <span className="mr-auto text-[0.8125rem] font-medium tabular-nums text-fg2">{ids.size} selected</span>
+      <span className="mr-auto text-[0.8125rem] font-medium tabular-nums text-fg2">{tasks.length} selected</span>
       {archived ? (
         <Ghost className={button} onClick={() => ask('unarchive')}>
           <UnarchiveIcon className={ic} /> Unarchive
@@ -797,6 +798,7 @@ function TasksMenu(_: { place: Place }) {
   const level = view.level
   const chosen = useUI((u) => u.groups)
   const by = groupFor(chosen, level)
+  const selecting = useUI((u) => u.selected !== null)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   const choices = groupChoices(level)
@@ -812,10 +814,11 @@ function TasksMenu(_: { place: Place }) {
             icon={<CheckIcon className={ic} />}
             onClick={() => {
               setOpen(false)
-              setUI({ selected: new Set() })
+              if (selecting) clearSelection()
+              else setUI({ selected: new Set() })
             }}
           >
-            Select tasks
+            {selecting ? 'Done selecting' : 'Select tasks'}
           </MenuItem>
           {choices.length >= 2 ? (
             <>
