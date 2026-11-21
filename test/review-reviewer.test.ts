@@ -13,7 +13,7 @@ delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { REVIEW_DEADLINE, REVIEW_TIMEOUT } = await import('../server/live/engine/engine.ts')
-const { settingsBlock } = await import('../server/live/prompts.ts')
+const { reviewRunLine, settingsBlock } = await import('../server/live/prompts.ts')
 const { ASK, CODEX_WORDS, reviewerLineFor } = await import('./reviewer-line.ts')
 
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
@@ -93,7 +93,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const r = await review(t)
     expect(r.code).toBe(0)
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`${reviewRunLine({ kind: 'codex' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     // the lease counts toward the caps: the reviewer's run is on its model, of this space
@@ -106,7 +106,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     hold('advisor:busy', 'codex/gpt-5.5')
     const r = await review(t)
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'pi/unknown' })])
@@ -155,7 +155,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.unlease('advisor:b')
     const r = await pending
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
     )
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
@@ -450,6 +450,72 @@ describe('the brief and the skill say how a round asks its reviewer', () => {
     expect(skill).toContain('shepherdr review <id> --done')
     expect(skill).toContain('which reviewer')
     expect(skill).not.toContain('reviewer not counted')
+    // the round must not be lost to a timeout: diff by reference, 900 s, closed stdin, stream to a file, read it after a cut
+    expect(skill).toContain('git diff <merge-base>...HEAD')
+    expect(skill).toContain('never pasted inline')
+    expect(skill).toContain('timeout 900')
+    expect(skill).not.toContain('timeout 540 codex exec')
+    expect(skill).toContain('< /dev/null')
+    expect(skill).toContain("streams the reviewer's output there as it is")
+    expect(skill).toContain('after a timeout, read the file first')
+    expect(skill).toContain('one subagent review instead')
+  })
+})
+
+describe("the round's headless review command, one ready-to-run line per reviewer CLI", () => {
+  const streaming: Record<string, string> = {
+    claude: '--output-format stream-json --verbose --include-partial-messages',
+    codex: '--json',
+    pi: '--mode json',
+    opencode: '--format json',
+    agy: '--output-format stream-json',
+  }
+
+  const modelEffort: Record<string, string> = {
+    claude: '--model claude-sonnet-5-5 --effort high',
+    codex: '--model claude-sonnet-5-5', // codex takes its effort from its own config, not a flag
+    pi: '--model claude-sonnet-5-5 --thinking high',
+    opencode: '-m claude-sonnet-5-5#high',
+    agy: '--model claude-sonnet-5-5 --effort high',
+  }
+
+  for (const [kind, flag] of Object.entries(streaming)) {
+    test(`${kind}: 900 s, stdin closed, streamed to a file, the prompt by reference and no inline diff`, () => {
+      const line = reviewRunLine({ kind, model: 'claude-sonnet-5-5', effort: 'high' })
+      expect(line).toContain(modelEffort[kind] ?? '')
+      expect(line).toContain('timeout 900')
+      expect(line).not.toContain('timeout 540')
+      expect(line).toContain('< /dev/null')
+      expect(line).toContain('> <out>')
+      expect(line).toContain(flag)
+      expect(line).toContain('"$(cat <prompt>)"')
+      // --disallowedTools (claude) takes a list: the `--` terminator keeps it from eating the prompt
+      if (kind === 'claude') expect(line).toContain('-- "$(cat <prompt>)"')
+      // agy's -p takes the next token as the prompt: it must come right after -p, before any other flag
+      if (kind === 'agy') expect(line).toContain('agy -p "$(cat <prompt>)"')
+      // the prompt is a reference to a short file, never pasted diff text (the skill pins that rule for the prompt itself)
+      // foreground: nothing backgrounds it and no turn ends while it runs (the skill says so)
+      expect(line).not.toContain(' &')
+      expect(line).not.toContain('nohup')
+    })
+  }
+
+  test("shepherdr review names only the round's reviewer's line, with its model and effort", () => {
+    for (const kind of Object.keys(streaming)) {
+      const reviewer = { kind, model: 'claude-sonnet-5-5', effort: 'high' }
+      const round = { round: 1, rounds: 3, reviewer, n: 0, key: 'k' } as never
+      const answer = src.engine.reviewWords('RV-X', round)
+      expect(answer).toContain(`Run \`${reviewRunLine(reviewer)}\``)
+      expect(answer).toContain(modelEffort[kind] ?? '')
+      expect(answer).toContain('(fill in <prompt> and <out>)')
+    }
+  })
+
+  test('an unknown CLI still gets a closed-stdin, 900 s, streamed-to-file line', () => {
+    const line = reviewRunLine({ kind: 'other', model: 'm' })
+    expect(line).toContain('timeout 900 other --model m')
+    expect(line).toContain('< /dev/null')
+    expect(line).toContain('"$(cat <prompt>)"')
   })
 })
 
