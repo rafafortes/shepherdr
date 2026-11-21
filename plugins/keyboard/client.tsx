@@ -58,6 +58,8 @@ const typing = (e: KeyboardEvent) => {
 }
 
 function back(ui: UI, snap: Snapshot): Partial<UI> | null {
+  // Esc first leaves a task selection; nothing is acted on
+  if (ui.selected) return { selected: null }
   if (ui.adding) return { adding: false }
   if (ui.drawer) return { drawer: false }
   if (ui.settings) return { settings: null }

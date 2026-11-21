@@ -206,11 +206,14 @@ describe.skipIf(!browser)("grouping a machine's tasks", () => {
     await page.reload()
     await page.waitForSelector('section[aria-label="Tasks"] li')
     expect(await labels(page)).toEqual(['lilla-varlden'])
-    // a space's own list is by status, with no ⋯
+    // a space's own list is by status: its ⋯ offers Select but no grouping choice
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
     await page.waitForSelector('section[aria-label="Tasks"] li')
     expect(await labels(page)).toEqual(['Needs you', 'Ready', 'Merging', 'To do', 'Done'])
-    expect(await page.getByRole('button', { name: 'Group tasks' }).count()).toBe(0)
+    await page.getByRole('button', { name: 'Group tasks' }).click()
+    expect(await page.getByRole('menuitemradio').count()).toBe(0)
+    expect(await page.getByRole('menuitem', { name: 'Select tasks' }).count()).toBe(1)
+    await page.keyboard.press('Escape')
     await ctx.close()
   }, 30_000)
 
