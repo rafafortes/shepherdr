@@ -75,12 +75,14 @@ export async function api(args: string[], opts: { cwd: string; timeoutMs?: numbe
 const ASK = ['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' }))
 
 /** a new session in cwd, with OpenCode's own id (never ours: its free models refuse a session with a custom id) */
-export async function createSession(o: { cwd: string; title: string; model?: string; effort?: string; ask?: boolean; command?: string; chat?: string }): Promise<string> {
+export async function createSession(o: { cwd: string; title: string; model?: string; effort?: string; ask?: boolean; command?: string; chat?: string; deny?: string[] }): Promise<string> {
   const body: Record<string, unknown> = { title: o.title, location: { directory: o.cwd } }
   if (o.model) body.model = { ...parseModel(o.model), ...(o.effort ? { variant: o.effort } : {}) }
   // The allow rules come after the broad ask rules: OpenCode uses the last match. Without a command and chat (an older
-  // call) the session only asks, as it always did; a full-access session has no rules at all.
-  if (o.ask) body.permissions = [...ASK, ...(o.command && o.chat ? ownShellRules(o.command, o.chat) : [])]
+  // call) the session only asks, as it always did; a full-access session has no rules at all. A reviewer's session
+  // denies edit/write/patch outright (its read-only mode): the deny rules come last, so nothing can allow them later.
+  if (o.deny?.length) body.permissions = [...(o.ask ? ASK : []), ...o.deny.map((action) => ({ action, resource: '*', effect: 'deny' }))]
+  else if (o.ask) body.permissions = [...ASK, ...(o.command && o.chat ? ownShellRules(o.command, o.chat) : [])]
   const data = await api(['session.create', '--data', JSON.stringify(body)], { cwd: o.cwd })
   const id = data?.id
   if (typeof id !== 'string' || !id.startsWith('ses')) throw new Error(`opencode session.create gave no session id: ${JSON.stringify(data)?.slice(0, 200)}`)

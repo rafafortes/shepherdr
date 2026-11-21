@@ -235,7 +235,13 @@ export const TOPIC = {
                                                  it from your Reviewer line; when every reviewer is full or out it
                                                  waits, then has you end your turn (only your coordinator adds a
                                                  round: task review-more)
-  shepherdr review <id> --done                   the round's review has finished: its reviewer is free again
+  shepherdr review <id> --run <prompt-file>      count the round, run its reviewer interactive and read-only in a herdr
+                                                  pane beside your agent, wait up to 900 s, print its findings and close
+                                                  the pane (one verb for every task CLI; it frees the reviewer too). The
+                                                  prompt file names the brief, base and diff command by reference. If a
+                                                  pane cannot open, the answer says so and gives the headless line
+  shepherdr review <id> --done                   the round's headless review has finished: its reviewer is free again
+                                                  (a --run that opened a pane already released it)
   shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"]
                                                  the summary at most ${SUMMARY_MAX} characters, in plain words for the
                                                  human (longer is refused); the facts go in the PR,

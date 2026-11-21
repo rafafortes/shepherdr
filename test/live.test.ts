@@ -1534,7 +1534,7 @@ describe('a chain of backups in Settings', () => {
       'review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort), and say in your summary that you did.',
     )
     // the line asks the command first, and names it again after the review: one line, and each round asks it anew
-    expect(chain).toContain('run `shepherdr review X-1` first')
-    expect(chain).toContain('run `shepherdr review X-1 --done`.')
+    expect(chain).toContain('run `shepherdr review X-1 --run <prompt-file>` first')
+    expect(chain).toContain('run `shepherdr review X-1 --done` when that review has finished.')
   })
 })

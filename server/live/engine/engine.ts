@@ -3641,7 +3641,7 @@ export class Engine extends Emitter<Events> {
     const why = a.why
       ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : a.why.why === 'blocked' ? `${chainWords(a.why.harness.h)} is blocked (0 allowed)` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})`
       : ''
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`${reviewRunLine(a.reviewer)}\` (fill in <prompt> and <out>). Run \`shepherdr review ${id} --done\` when the round's review has finished.`
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`shepherdr review ${id} --run <prompt-file>\` first: it opens the reviewer in a herdr pane, waits and closes it. If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <prompt> and <out>) and then \`shepherdr review ${id} --done\`.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */

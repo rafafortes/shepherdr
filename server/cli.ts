@@ -42,9 +42,11 @@ const wait = merge
     ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 120_000 + 30_000)
     : args[0] === 'pr'
       ? envWait('SHEPHERDR_PR_WAIT', 2 * 120_000 + 30_000)
-      : args[0] === 'review'
-        ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
-        : envWait('SHEPHERDR_CLI_WAIT', 30_000)
+      : args[0] === 'review' && (args.includes('--run') || args.includes('--run='))
+        ? envWait('SHEPHERDR_REVIEW_RUN_WAIT', 930_000)
+        : args[0] === 'review'
+          ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
+          : envWait('SHEPHERDR_CLI_WAIT', 30_000)
 const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : (args[0] ?? '<verb>')
 
 type Answer = { out: string; code: number; secrets?: Record<string, string> }
