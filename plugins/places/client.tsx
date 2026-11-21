@@ -7,13 +7,15 @@
 // header's pill without the word); every row keeps that room, so names stay in line, and off it says nothing.
 // Machines are sections, as Slack's, each with its emoji (a server without one): a small chevron at the left edge folds
 // what is under them, a tap anywhere on one does the same, and nothing opens: they have no chat. Each space's # sits
-// under its heading's name, as a Slack channel's does. A machine's heading has a + and a ⋯ (New space, New section,
-// Rename machine: its emoji and name, section.tsx) and says when it can't be reached or struggles. Rows are Slack's: 28px
+// under its heading's name, as a Slack channel's does. A machine's heading has a + and a ⋯ (Pause machine over its
+// machine.maxTasks, New space, New section, Rename machine: its emoji and name, section.tsx) and says when it can't be
+// reached or struggles. Rows are Slack's: 28px
 // of 15px text with a mouse; a ⋯ and + take no room until the pointer is over the row, where they take the count's
 // place. Going to a space opens the sections it sits in. Each space's menu (its ⋯ or a right click; a finger holds the
-// row) sets its coordinator's Notify (All, Needs me, Off: Everywhere's is the default in Settings), marks it read, pins
-// it, moves it to a section, renames it in the row (the space rules: lowercase, no spaces) and removes it from
-// Shepherdr, as `shepherdr space remove` does: its folder stays on disk. A home space can't be removed.
+// row) sets its coordinator's Notify (All, Needs me, Off: Everywhere's is the default in Settings), marks it read,
+// pauses its new tasks (the space's Max tasks setting, with a Paused tag in its chat header), pins it, moves it to a
+// section, renames it in the row (the space rules: lowercase, no spaces) and removes it from Shepherdr, as
+// `shepherdr space remove` does: its folder stays on disk. A home space can't be removed.
 // Sections only organize spaces (shared/order.ts), as Slack's: one at the top (the header's +) holds any machine's, its
 // machine after a space's name; one in a machine (its ⋯) only that machine's, one small step in. Pinned is one at the top
 // that can't be deleted, showing while it holds any. A space moves into one (it isn't copied) from its menu's Move to
@@ -24,7 +26,27 @@
 // Alt+↑/↓ (Option on a Mac) goes to the space above or below as they show, from anywhere.
 import clsx from 'clsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
-import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
+import {
+  act,
+  counts,
+  definePlugin,
+  getState,
+  goPlace,
+  manyMachines,
+  openSplit,
+  pauseMachine,
+  pausePlace,
+  pausedMachine,
+  pausedPlace,
+  placeOf,
+  removeSpace,
+  setUI,
+  splitClick,
+  useSnap,
+  useUI,
+  type Pane,
+  type UI,
+} from '@client/kernel.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
 import {
   BackIcon,
@@ -41,8 +63,10 @@ import {
   MenuLabel,
   MenuSeparator,
   MenuSetting,
+  MenuSwitch,
   Meta,
   NextIcon,
+  PauseIcon,
   PinnedIcon,
   PinTaskIcon,
   PlusIcon,
@@ -417,6 +441,7 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
       >
         Mark as read
       </MenuItem>
+      <PauseItem p={p} snap={snap} />
       <PinItem p={p} snap={snap} menu={menu} />
       <RestartItem chat={p.chat} name={p.name} onPick={menu.close} />
       <MenuItem icon={<SectionIcon className={ic} />} hint={<NextIcon className={ic} />} aria-haspopup="menu" onClick={() => setMoving(true)}>
@@ -489,6 +514,21 @@ function MoveItems({ p, snap, menu, onBack }: { p: Place; snap: Snapshot; menu: 
         </>
       ) : null}
     </div>
+  )
+}
+
+/** Pause a space from its row's ⋯ (the same switch as in its chat's menu): new tasks wait, held, nothing already
+ *  running stops; the note is the confirm line, and Resume lets the held tasks start by themselves */
+function PauseItem({ p, snap }: { p: Place; snap: Snapshot }) {
+  const on = pausedPlace(snap, p.id)
+  return (
+    <MenuSwitch
+      name="Pause space"
+      icon={<PauseIcon className={ic} />}
+      on={on}
+      note={on ? 'New tasks wait, held; running ones keep going' : 'New tasks start as usual'}
+      onClick={() => void pausePlace(p.id, !on)}
+    />
   )
 }
 
@@ -789,6 +829,7 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
   const herdr = !m.connecting && m.herdrDown
   const over = m.health?.meters.find((x) => x.level === 'over')
   const warn = herdr ? 'herdr down' : over ? `${over.name} ${over.pct}%` : ''
+  const machinePaused = pausedMachine(snap, m.machine)
   return (
     <Heading
       id={m.id}
@@ -817,6 +858,14 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
       </span>
       {menu.open ? (
         <RowMenu menu={menu} label={m.name} className="min-w-56!">
+          <MenuSwitch
+            name="Pause machine"
+            icon={<PauseIcon className={ic} />}
+            on={machinePaused}
+            note={machinePaused ? 'No space here starts new tasks; running ones keep going' : 'Every space here starts tasks as usual'}
+            onClick={() => void pauseMachine(m.machine, !machinePaused)}
+          />
+          <MenuSeparator />
           <MenuItem
             icon={<PlusIcon className={ic} />}
             onClick={() => {

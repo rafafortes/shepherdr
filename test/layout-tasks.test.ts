@@ -557,6 +557,31 @@ describe.skipIf(!browser)('To do always shows; Automations only once there is on
     await ctx.close()
   }, 30_000)
 
+  test('a paused space says its automation still adds the task, held at once, in the run row (phone)', async () => {
+    const b = browser
+    if (!b) return
+    const act = world.act.bind(world)
+    await act({ type: 'setting', key: 'space.maxTasks', value: '0', place: 'p:vm-str:gtm' })
+    const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    try {
+      const at = new URL(url())
+      at.searchParams.set('place', 'p:vm-str:gtm')
+      at.searchParams.set('tab', 'tasks')
+      await page.goto(at.href)
+      const row = page.locator('li[aria-expanded]', { hasText: 'Flaky tests' })
+      await row.tap()
+      const detail = page.locator(`#${await row.getAttribute('aria-controls')}`)
+      // the run still has its task, and the held wording reads as a held task's own line
+      expect(await detail.getByRole('button', { name: 'GTM-41' }).count()).toBe(1)
+      expect(await detail.getByText('held: its space is set to 0 tasks').count()).toBe(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    } finally {
+      await ctx.close()
+      await act({ type: 'setting', key: 'space.maxTasks', value: '2', place: 'p:vm-str:gtm' })
+    }
+  }, 30_000)
+
   test('an automation summarizes its trigger and shows its task only when expanded; a tap shows it in full with its next and last runs; run now, pause and remove, no adding or editing (phone)', async () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'dark' })
     const page = await ctx.newPage()

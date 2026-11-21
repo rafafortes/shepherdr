@@ -440,7 +440,7 @@ describe('the shepherdr command', () => {
 
   test('a word it does not know says so, and each group names its own subcommands', async () => {
     expect((await cli(['frobnicate'])).out).toBe('No command frobnicate; shepherdr help lists them\n')
-    expect((await cli(['space', 'frob'])).out).toBe('shepherdr space add|list|rename|remove\n')
+    expect((await cli(['space', 'frob'])).out).toBe('shepherdr space add|list|rename|pause|resume|remove\n')
     expect((await cli(['secret', 'frob'])).out).toContain('shepherdr secret list | ask NAME')
   })
 

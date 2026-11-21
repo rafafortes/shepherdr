@@ -775,6 +775,11 @@
     height: 18px;
     padding: 0 7px 0 6px;
   }
+  /* a paused space's tag: the same pill, quiet grey beside Autopilot's red */
+  .mode-pill.paused-pill {
+    --m: var(--fg2);
+    --m-fg: var(--fg2);
+  }
   /* in a sidebar row, just before the name: the dot alone in its round tint (a bare red dot would read as unread).
      Every row keeps its room, so names stay in line; it tucks 4px into the gap after it */
   .mode-pill.mark {

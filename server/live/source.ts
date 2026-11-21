@@ -5243,6 +5243,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Space order here: ${list}; spaces with no priority come after.`
   }
 
+  /** the spaces held from starting new tasks (space.maxTasks 0), as they show in the status line and its json */
+  private pausedSpaces() {
+    return this.orderedSpaces()
+      .filter((x) => !!x.space && this.settings.get('space.maxTasks', x.space.name) === '0')
+      .map((x) => x.name)
+  }
+
   private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0) return HELP
@@ -5264,13 +5271,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
               openTasks: this.engine.tasks.filter((t) => !ended(t) && !t.archived).length,
               herdr: this.agents.reachable,
               parked,
+              paused: this.pausedSpaces(),
               spaceOrder: this.spaceOrderLine() || undefined,
               kept,
             },
             null,
             2,
           )
-        const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${parked ? `; ${parked} agent${parked === 1 ? '' : 's'} parked (a message to their chat starts each again)` : ''}.`
+        const paused = this.pausedSpaces()
+        const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${parked ? `; ${parked} agent${parked === 1 ? '' : 's'} parked (a message to their chat starts each again)` : ''}${paused.length ? `; paused: ${paused.join(', ')}` : ''}.`
         const text = [line, this.spaceOrderLine()].filter(Boolean).join('\n')
         return kept.length ? `${text}\nDone tasks that kept work (remove it by hand once you're sure):\n${kept.map((k) => `  ${k}`).join('\n')}` : text
       }
@@ -5318,6 +5327,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (r.ok === false) throw new Error(r.error)
           return `${x.name} is called ${this.places.nameOf(x.id)} now.`
         }
+        if (a1 === 'pause' || a1 === 'resume') {
+          const name = rest[0] ?? one(p, 'space')
+          const x = name ? this.places.find(name) : undefined
+          if (!x) throw new Error(`shepherdr space ${a1} <name> (shepherdr space list shows them)`)
+          const on = a1 === 'pause'
+          // the CLI is two lines over the setting action: the same key, value and level, so it refuses what that refuses
+          const r = (await this.act({ type: 'setting', key: 'space.maxTasks', value: on ? '0' : null, place: x.id })) as { ok?: boolean; error?: string }
+          if (r.ok === false) throw new Error(r.error ?? `Could not ${a1} ${x.name}.`)
+          const shown = this.places.nameOf(x.id) ?? x.name
+          return on
+            ? `${shown} is paused: its new tasks wait, held; tasks already running keep going. Resume with shepherdr space resume ${x.name}.`
+            : `${shown} is not paused: its held tasks start by themselves again.`
+        }
         if (a1 === 'set' && rest[0] === 'base') {
           const pr = this.projectFor(p, ctx)
           if (!rest[1]) throw new Error('shepherdr space set base <branch> --space NAME')
@@ -5331,7 +5353,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const pr = await this.removeSpace(rest[0])
           return `Removed ${shown} from Shepherdr; ${pr.path} and its code stay on disk. shepherdr space add ${pr.path} --name ${shown} brings it back with its open tasks and chat.`
         }
-        throw new Error('shepherdr space add|list|rename|remove')
+        throw new Error('shepherdr space add|list|rename|pause|resume|remove')
       }
       case 'mode': {
         const place = this.placeList().find((x) => x.name === a1 || x.id === a1)

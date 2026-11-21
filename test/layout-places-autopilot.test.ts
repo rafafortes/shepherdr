@@ -1,6 +1,7 @@
 // A place's Autopilot and Run now: the switch in the ⋯ menu, the pill beside it, and waking its coordinator, in a real
 // browser (layout.ts).
 import { describe, expect, test } from 'bun:test'
+import type { Action } from '../shared/types.ts'
 import { layout, settled } from './layout.ts'
 
 const { browser, world, server, url } = await layout()
@@ -223,4 +224,101 @@ describe.skipIf(!browser)('Autopilot Run now', () => {
     await world.act({ type: 'mode', place: p.id, mode: was })
     await page.close()
   }, 40_000)
+})
+
+describe.skipIf(!browser)('pausing a space or a machine', () => {
+  const place = () => {
+    const p = world.places.find((x) => x.id === 'p:vm-str:gtm')
+    if (!p) throw new Error('gtm is not in the demo')
+    return p
+  }
+  const at = (id: string) => {
+    const u = new URL(url())
+    u.searchParams.set('place', id)
+    return u.href
+  }
+  const newPage = async () => {
+    if (!browser) throw new Error('no browser')
+    return browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' as const })
+  }
+
+  test('the chat ⋯ and the row ⋯ send the setting action, and the Paused tag shows beside Autopilot while held (desktop)', async () => {
+    const p = place()
+    const calls: Action[] = []
+    const act = world.act.bind(world)
+    world.act = async (a: Action) => {
+      calls.push(a)
+      return act(a)
+    }
+    const page = await newPage()
+    try {
+      await page.goto(at(p.id))
+      await page.locator('[data-chrome]').first().waitFor()
+      const pill = page.locator('[data-chrome] [data-mode="paused"]')
+      expect(await pill.count()).toBe(0)
+      // the chat's ⋯: a Pause switch beside Autopilot, its note saying what pause does and does not do
+      await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      const pop = page.getByRole('menu', { name: 'Menu' })
+      const sw = pop.getByRole('menuitemcheckbox', { name: 'Pause space' })
+      await sw.waitFor()
+      expect(await sw.getAttribute('aria-checked')).toBe('false')
+      expect(await pop.getByText('New tasks start as usual').count()).toBe(1)
+      await sw.click()
+      await pill.waitFor()
+      expect(await pill.textContent()).toBe('Paused')
+      expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'space.maxTasks', value: '0', place: p.id })
+      expect(await sw.getAttribute('aria-checked')).toBe('true')
+      expect(await pop.getByText('New tasks wait, held; running ones keep going').count()).toBe(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      // close the chat's menu, then the sidebar row's ⋯ has the same switch: resume sends the unset at that same place
+      await page.keyboard.press('Escape')
+      const row = page.locator('#places li', { hasText: 'gtm' })
+      await row.hover()
+      await row.getByRole('button', { name: 'More for gtm' }).click()
+      const rowSw = page.getByRole('menu').getByRole('menuitemcheckbox', { name: 'Pause space' })
+      await rowSw.waitFor()
+      expect(await rowSw.getAttribute('aria-checked')).toBe('true')
+      await rowSw.click()
+      await page.waitForFunction(() => !document.querySelector('[data-chrome] [data-mode="paused"]'))
+      expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'space.maxTasks', value: null, place: p.id })
+      expect(await rowSw.getAttribute('aria-checked')).toBe('false')
+    } finally {
+      world.act = act
+      await page.close()
+      // gtm keeps its own cap for the tests after this one
+      await act({ type: 'setting', key: 'space.maxTasks', value: '2', place: p.id })
+    }
+  }, 30_000)
+
+  test("the machine's ⋯ has a Pause machine switch over its own machine.maxTasks (desktop)", async () => {
+    const calls: Action[] = []
+    const act = world.act.bind(world)
+    world.act = async (a: Action) => {
+      calls.push(a)
+      return act(a)
+    }
+    const page = await newPage()
+    try {
+      await page.goto(url())
+      const heading = page.locator('li[data-heading="m:vm-str"]')
+      await heading.hover()
+      await heading.getByRole('button', { name: 'More for vm-str' }).click()
+      const sw = page.getByRole('menu').getByRole('menuitemcheckbox', { name: 'Pause machine' })
+      await sw.waitFor()
+      expect(await sw.getAttribute('aria-checked')).toBe('false')
+      expect(await page.getByText('Every space here starts tasks as usual').count()).toBe(1)
+      await sw.click()
+      expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'machine.maxTasks', value: '0', place: 'm:vm-str' })
+      await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitemcheckbox]')].some((b) => b.textContent?.includes('Pause machine') && b.getAttribute('aria-checked') === 'true'))
+      expect(await sw.getAttribute('aria-checked')).toBe('true')
+      expect(await page.getByText('No space here starts new tasks; running ones keep going').count()).toBe(1)
+      await sw.click()
+      expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'machine.maxTasks', value: null, place: 'm:vm-str' })
+      await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitemcheckbox]')].some((b) => b.textContent?.includes('Pause machine') && b.getAttribute('aria-checked') === 'false'))
+    } finally {
+      world.act = act
+      await page.close()
+      await act({ type: 'setting', key: 'machine.maxTasks', value: null, place: 'm:vm-str' })
+    }
+  }, 30_000)
 })
