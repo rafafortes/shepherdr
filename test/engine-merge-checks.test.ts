@@ -388,6 +388,10 @@ describe('on GitHub: a pull request per task', () => {
     const r = await w.engine.openPr(t.id)
     expect(r.ok).toBe(false)
     expect(r.text).toContain("gh can't reach GitHub")
+    // shepherdr checks says the same, in words, instead of throwing: GitHub unreachable is no answer about the checks
+    const c = await w.engine.checks(t.id)
+    expect(c.ok).toBe(false)
+    expect(c.text).toContain("gh can't reach GitHub")
     const m = await w.engine.merge(t.id, { self: true })
     expect(m.ok).toBe(false)
     expect(m.error).toContain("gh can't reach GitHub now (github.com: Failed to log in")
@@ -424,6 +428,27 @@ describe('on GitHub: a pull request per task', () => {
     expect(m.error).toContain('Conflict with main on GitHub')
     expect(t.merged).toBeFalsy()
     expect(g.gh().prs[0].state).toBe('OPEN')
+  })
+
+  test('a merge GitHub refuses for another reason than a conflict says so, and nothing merges', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghrefuse')
+    if (!t.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(t.worktree, 'q.txt'), 'q\n')
+    sh('git add -A && git commit -qm q', t.worktree)
+    await w.engine.openPr(t.id)
+    t.reported = true
+    t.said = 'Added q.'
+    const before = sh('git rev-parse main', g.dir)
+    // a refusal that names no conflict: what GitHub said is told as it is, and main here and there stay as they were
+    g.set({ mergeError: 'Pull request #1 could not be merged: the base branch policy prohibits the merge.' })
+    const m = await w.engine.merge(t.id, { self: true })
+    expect(m.ok).toBe(false)
+    expect(m.error).toContain('GitHub did not merge PR #1: Pull request #1 could not be merged: the base branch policy prohibits the merge.')
+    expect(t.merged).toBeFalsy()
+    expect(sh('git rev-parse main', g.dir)).toBe(before)
+    expect(sh('git rev-parse main', g.bare)).toBe(before)
   })
 
   test('a pull request merged on GitHub by hand: main here catches up and it is marked merged', async () => {

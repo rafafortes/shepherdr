@@ -54,6 +54,43 @@ describe('shepherdr merge', () => {
     expect(w.cards.filter((c) => c.status === 'done')).toEqual([{ task: t.id, status: 'done', sub: 'Merged' }])
   })
 
+  test('a caller that waits past its deadline hears that the merge goes on', async () => {
+    const w = world()
+    const origin = repo()
+    const dir = tmp('clone')
+    sh(`git clone -q ${origin} . && git config user.email t@t && git config user.name T`, dir)
+    const { t, key } = await started(w, dir, 'deadline')
+    if (!t.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(t.worktree, 'slow.txt'), 'slow\n')
+    w.agentIs(key, 'idle')
+    // a remote that takes the connection and never answers: the merge waits on it well past the caller's deadline
+    const sockets = new Set<Socket>()
+    const dead = createServer((s) => {
+      sockets.add(s)
+      s.on('close', () => sockets.delete(s))
+    })
+    await new Promise<void>((resolve) => dead.listen(0, '127.0.0.1', resolve))
+    const port = (dead.address() as AddressInfo).port
+    try {
+      sh(`git remote set-url origin git://127.0.0.1:${port}/repo.git`, dir)
+      w.engine.mergeFetchMs = 2_000
+      w.engine.mergeDeadline = 200
+      const began = Date.now()
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(Date.now() - began).toBeLessThan(5_000)
+      // its caller hears that it goes on, and the merge itself is not cut: it goes in from main as it is here
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain("isn't through after")
+      const merging = (w.engine as unknown as { runner: { merging: Map<string, unknown> } }).runner.merging
+      await until(() => !merging.has(dir), 20_000)
+      expect(t.merged).toBe(true)
+      expect(sh('git log --format=%s -n 1', dir)).toBe(`${t.id}: Say hello`)
+    } finally {
+      for (const s of sockets) s.destroy()
+      dead.close()
+    }
+  })
+
   test('merged by you while its agent waits: cleaned up at once', async () => {
     const w = world()
     const dir = repo()
