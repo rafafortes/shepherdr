@@ -2736,7 +2736,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const wrong = begun || pending ? undefined : await this.agents.wrong(key)
     // its screen, from the pane it started in: herdr drops a name it was never asked for, and its pane is still the
     // only witness of what it printed
-    const pane = info?.pane_id ?? r.lastPane
+    // its own record first: a hand-over can leave an older agent pane in the space, and a start screen read from that
+    // one is a false needs-you while the new agent works (SHE-185/184/182)
+    const pane = r.lastPane ?? info?.pane_id
     // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
     if (!pane && !r.startError && wrong === 'gone') return
     const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''

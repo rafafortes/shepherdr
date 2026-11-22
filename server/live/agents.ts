@@ -27,7 +27,7 @@ import { leftAtPrompt } from './commands.ts'
 import { agentWrong, type Wrong } from './revive.ts'
 import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
-import { isAgentProcess } from './agent-process.ts'
+import { barePrompt, isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 import { capture, end as endProcesses, endDeps, readTree, systemSource, type Source } from './orphans.ts'
 import { taskWorktreeKey } from './trust.ts'
@@ -162,6 +162,9 @@ export interface AgentRecord {
    *  launch herdr dropped can leave that pane behind, and a relaunch closes it rather than sit beside it */
   lastPane?: string
   pendingLaunch?: boolean
+  /** panes earlier runs of this chat opened that a newer run has taken over from, still in herdr: closed once the new
+   *  run is up and they hold nothing the person typed, ignored until then (an older pane must never read Needs you) */
+  superseded?: string[]
   /** this run was told to resume the session it had (start.ts: a session that is gone is the one case a start without
    *  one is the way on) */
   resumed?: boolean
@@ -316,6 +319,9 @@ export class Agents extends Emitter<Events> {
   records: Record<string, AgentRecord> = readJson('agents.json', {})
   outbox: OutItem[] = readJson('outbox.json', [])
   live = new Map<string, AgentInfo>()
+  /** every agent herdr lists under a name, including the older pane a hand-over can leave beside the new one. `live`
+   *  keeps one per name for the rest of the registry; this keeps all of them so the recorded pane can be picked */
+  private liveAll = new Map<string, AgentInfo[]>()
   private byName = new Map<string, string>()
   private timer: ReturnType<typeof setInterval> | null = null
   private sub: Subscription
@@ -563,9 +569,22 @@ export class Agents extends Emitter<Events> {
     this.save()
   }
 
+  /**
+   * The agent this chat's last launch started, and only that one. A hand-over can leave two herdr agents under one name
+   * (the new CLI in a new pane, the old pane a plain shell after its CLI exited), and herdr's list order is no guarantee
+   * which one `live` would keep: status, menus, screens and process checks must never read an older pane, or a task
+   * whose new agent works reads Needs you (SHE-185, SHE-184, SHE-182). While a launch is under way the run it takes
+   * over from still counts, so the brief window before herdr lists the new agent shows no false wait either.
+   */
   info(key: string) {
     const r = this.records[key]
-    return r ? this.live.get(r.name) : undefined
+    if (!r) return undefined
+    const under = this.liveAll.get(r.name) ?? []
+    if (!under.length) return this.live.get(r.name)
+    const launched = r.lastPane ? under.find((a) => a.pane_id === r.lastPane) : undefined
+    if (launched) return launched
+    if (!r.lastPane || this.starting.has(key) || this.stopping.has(key)) return under[0]
+    return undefined
   }
 
   /** The cwds where this chat's agent may write its logs: what Shepherdr remembers, its real path (a symlinked space),
@@ -605,7 +624,12 @@ export class Agents extends Emitter<Events> {
   }
 
   status(key: string): AgentStatus | 'gone' {
-    return statusFrom(this.said(key), this.info(key)?.agent_status ?? 'gone')
+    const a = this.info(key)
+    // herdr calls a pane whose program it cannot name 'unknown': a CLI that exited left its shell there. It is not an
+    // agent at work or asking, so nothing may read Needs you from it (SHE-185/184/182). A launch herdr still has
+    // pending is not that: it has no status yet and must stay 'unknown' until it goes ready
+    const seen = !a || (a.agent_status === 'unknown' && !a.launch_pending) ? 'gone' : a.agent_status
+    return statusFrom(this.said(key), seen)
   }
 
   private codexState = new Map<string, AgentRuntime>()
@@ -701,6 +725,13 @@ export class Agents extends Emitter<Events> {
           void this.pruneRoutes()
         }
         this.live = new Map(list.filter((a) => a.name).map((a) => [a.name!, a]))
+        this.liveAll = new Map()
+        for (const a of list) {
+          if (!a.name) continue
+          const under = this.liveAll.get(a.name) ?? []
+          under.push(a)
+          this.liveAll.set(a.name, under)
+        }
         for (const key of this.byName.values()) {
           const now = this.status(key)
           const was = this.told.get(key) ?? 'gone'
@@ -820,6 +851,32 @@ export class Agents extends Emitter<Events> {
     if (!dropped || !pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
     if (!(await herdr.paneIdle(pane).catch(() => false))) return
     await herdr.closePane(pane).catch(() => undefined)
+  }
+
+  /**
+   * Close the panes earlier runs of this chat left behind, once the new run is up. Only a pane this chat launched, now
+   * an idle shell with nothing typed at its prompt and no agent in it, is closed: another chat's or the person's own
+   * pane is never touched, and a half-typed command stays theirs. What cannot be proved safe is left in herdr, ignored
+   * for status and alerts by `info`'s lastPane rule — an old pane must never read Needs you (SHE-185/184/182).
+   */
+  private async retire(key: string, panes: string[], keep: string) {
+    const r = this.records[key]
+    const gone: string[] = []
+    for (const pane of panes) {
+      if (!pane || pane === keep || gone.includes(pane)) continue
+      // idle means herdr sees only the shell in the foreground, not an agent process another chat could own
+      if (!(await herdr.paneIdle(pane).catch(() => false))) continue
+      if (!barePrompt(await herdr.visible(pane).catch(() => ''))) continue
+      await this.reapPane(pane)
+      gone.push(pane)
+    }
+    if (gone.length) {
+      if (this.records[key] === r) {
+        r.superseded = []
+        this.save()
+      }
+      await this.refresh()
+    }
   }
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). `own`: the start
@@ -1157,7 +1214,7 @@ export class Agents extends Emitter<Events> {
       // an output_matched subscription sends the pane's current text as soon as it opens: that is not a print
       if ((type === 'pane.output_matched' || type === 'pane_output_matched') && Date.now() < this.outputQuietUntil) return
       const pane = String(e.data.pane_id ?? '')
-      for (const [name, key] of this.byName) if (this.live.get(name)?.pane_id === pane) this.emit('output', key)
+      for (const key of this.byName.values()) if (this.info(key)?.pane_id === pane) this.emit('output', key)
       // a pane whose screen we read printed: read it now, however old its turn is
       let due = false
       for (const [key, s] of this.screenState)
@@ -1442,39 +1499,73 @@ export class Agents extends Emitter<Events> {
     // made (the worktree's space, the pane) is found again, never made twice (herdr.ts changing). Only when those tries
     // run out does the start fail, with the error
     const pane = await this.again(r, () => (place ? place() : this.paneFor(r, was)))
+    // the pane this run takes over from, kept before closeLeftPane clears it: a new run retires it once it is up, and a
+    // failed one leaves the record pointing at the run it abandoned, never at a pane with no agent in it
+    const prior = [...new Set([r.lastPane, ...(r.superseded ?? [])].filter((p): p is string => !!p && p !== pane))]
     await this.closeLeftPane(r, pane)
     r.lastPane = pane
-    await this.prepareOpencode(r, !!resume, changedPrompt)
-    const args = this.args(r, !!resume)
-    this.save()
-    this.flushRecords()
-    await this.again(r, () =>
-      // a new pane needs a moment before its shell is at the prompt; the waits live with the reviewer's launch too
-      startInPane(herdr, r.name, r.kind, pane, args, { giveUp: (e) => console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`) }),
-    )
-    await this.refresh()
+    r.superseded = undefined
+    let ran = false
     try {
-      // this launch owns the agent it just started: a restart's or a relaunch's stopping flag (held for what you send)
-      // does not cancel its own bind, so the route is provisioned here, not left for the repair pass
-      await this.bindRoute(r, pane, true)
+      await this.prepareOpencode(r, !!resume, changedPrompt)
+      const args = this.args(r, !!resume)
+      this.save()
+      this.flushRecords()
+      await this.again(r, () =>
+        // a new pane needs a moment before its shell is at the prompt; the waits live with the reviewer's launch too
+        startInPane(herdr, r.name, r.kind, pane, args, { giveUp: (e) => console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`) }),
+      )
+      ran = true
+      await this.refresh()
+      try {
+        // this launch owns the agent it just started: a restart's or a relaunch's stopping flag (held for what you send)
+        // does not cancel its own bind, so the route is provisioned here, not left for the repair pass
+        await this.bindRoute(r, pane, true)
+      } catch (e) {
+        // The CLI is up but Shepherdr cannot own it: an idle agent with no brief is worse than no agent. Take it down so
+        // the next attempt starts clean, rather than leaving a pane that reads Working and never got its brief — also
+        // inside a restart or a recovery, whose finally only delivers what you sent, never starts or stops. The pane
+        // itself, not the live map finish() reads (which a concurrent refresh can leave stale under a stall): this
+        // launch knows the pane it opened. A stop that raced the write already finished the record: never twice.
+        if (!this.records[spec.key]?.finished) await this.finish(spec.key)
+        await herdr.closePane(pane).catch(() => undefined)
+        // the run that was up is down again and this launch's pane closed with it: leave no record pointing at a pane
+        // with no agent, and keep the pane it took over from for the next launch to retire
+        if (this.records[spec.key] === r) {
+          r.lastPane = undefined
+          r.superseded = prior
+          this.save()
+        }
+        throw e
+      }
+      // CLIs without an option for extra instructions get them first, hidden from the chat: Claude Code and pi take them as
+      // a flag, OpenCode in its session (prepareOpencode). Both wait until the CLI is ready, ahead of what you sent
+      // meanwhile (a restart)
+      this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && r.kind !== 'opencode' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
+      setTimeout(() => this.deliver(r.key), 1000)
+      setTimeout(() => this.discoverLog(r.key), 3000)
+      setTimeout(() => this.discoverLog(r.key), 15000)
+      // a hand-over leaves two agents under one name: keep only the one in the pane just started, and retire the older
+      // panes in this chat's herdr space. What the new run up there cannot prove safe is left, ignored by info's lastPane
+      const current = this.info(spec.key)
+      const older = (this.liveAll.get(r.name) ?? []).filter((a) => a.pane_id !== pane && (!current?.workspace_id || a.workspace_id === current.workspace_id)).map((a) => a.pane_id)
+      await this.retire(spec.key, [...prior, ...older], pane)
+      return this.info(spec.key) ?? null
     } catch (e) {
-      // The CLI is up but Shepherdr cannot own it: an idle agent with no brief is worse than no agent. Take it down so
-      // the next attempt starts clean, rather than leaving a pane that reads Working and never got its brief — also
-      // inside a restart or a recovery, whose finally only delivers what you sent, never starts or stops. The pane
-      // itself, not the live map finish() reads (which a concurrent refresh can leave stale under a stall): this
-      // launch knows the pane it opened. A stop that raced the write already finished the record: never twice.
-      if (!this.records[spec.key]?.finished) await this.finish(spec.key)
-      await herdr.closePane(pane).catch(() => undefined)
+      if (!ran) {
+        // a launch that never got its CLI up must not leave a second agent pane for a retry to find: it was ours, no
+        // brief went in, and the record goes back to the run it abandoned, never at a pane with no agent in it
+        await herdr.closePane(pane).catch(() => undefined)
+        if (this.records[spec.key] === r) {
+          r.lastPane = undefined
+          r.superseded = prior
+          this.save()
+        }
+      }
       throw e
     }
-    // CLIs without an option for extra instructions get them first, hidden from the chat: Claude Code and pi take them as
-    // a flag, OpenCode in its session (prepareOpencode). Both wait until the CLI is ready, ahead of what you sent
-    // meanwhile (a restart)
-    this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && r.kind !== 'opencode' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
-    setTimeout(() => this.deliver(r.key), 1000)
-    setTimeout(() => this.discoverLog(r.key), 3000)
-    setTimeout(() => this.discoverLog(r.key), 15000)
-    return this.live.get(r.name) ?? null
+      throw e
+    }
   }
 
   /** `f` again after each wait of startDelays() while herdr fails it in a passing way (isPassing); said in the log */
@@ -1643,11 +1734,16 @@ export class Agents extends Emitter<Events> {
     this.routes.delete(key)
     this.stopping.add(key)
     try {
-      const a = close ? this.info(key) : undefined
-      if (a) {
-        await herdr.closePane(a.pane_id).catch(() => undefined)
+      const r = this.records[key]
+      const live = close ? this.info(key)?.pane_id : undefined
+      if (live) {
+        await this.reapPane(live)
         await this.refresh()
       }
+      // a launch herdr dropped leaves its pane as a plain shell with no agent in it: info() has nothing to close, but
+      // the record remembers it. Retire it before the retry, so the task never ends up with two of its own panes
+      const stale = [r?.lastPane, ...(r?.superseded ?? [])].filter((p): p is string => !!p && p !== live)
+      if (stale.length) await this.retire(key, stale, live ?? '')
       await start()
     } finally {
       this.stopping.delete(key)
