@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { opencodeDb, opencodeLogPath } from '../server/live/opencode.ts'
 import { reviewerPaneArgs } from '../server/live/prompts.ts'
 import { claudeLogPath, piSessionDir } from '../server/live/readers/find.ts'
-import { readFindings, reviewerPrompt, runReviewInPane, type PaneHerdr } from '../server/live/review-pane.ts'
+import { readFindings, runReviewInPane, type PaneHerdr } from '../server/live/review-pane.ts'
 import { home } from '../server/store.ts'
 import { tmp } from './tmp.ts'
 
@@ -60,17 +60,7 @@ describe('the interactive pane launch is read-only for every reviewer CLI', () =
   })
 })
 
-describe("the reviewer's prompt and its own log", () => {
-  test('one prompt for every CLI: the tags, the last plain message and the privacy handoff', () => {
-    const p = reviewerPrompt('Brief and base are here. Run git diff <merge-base>...HEAD.', { id: 'SHE-9', round: 2, privacy: 'PRIVATE from default: (none)' })
-    expect(p).toContain('git diff <merge-base>...HEAD')
-    expect(p).toContain('critical')
-    expect(p).toContain('minor')
-    expect(p).toContain('LAST plain message')
-    expect(p).toContain('never a plan to approve')
-    expect(p).toContain('PRIVATE from default')
-  })
-
+describe("the reviewer's own log", () => {
   test('an unknown CLI still gets a model flag when it has one', () => {
     expect(reviewerPaneArgs({ kind: 'other', model: 'm' })).toEqual(['--model', 'm'])
   })

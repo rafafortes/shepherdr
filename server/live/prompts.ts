@@ -178,7 +178,7 @@ export function reviewerWords(r: Reviewer) {
  *  next round */
 export function reviewerLine(r: Reviewer, backup: Reviewer | Reviewer[] | undefined, id: string) {
   const all = backup === undefined ? [] : Array.isArray(backup) ? backup : [backup]
-  const ask = `Each round, run \`shepherdr review ${id} --run <prompt-file>\` first: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). If it says a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished. Plain \`shepherdr review ${id}\` still counts a round and names a reviewer without running one.`
+  const ask = `Each round, run \`shepherdr review ${id}\` first: it counts the round, writes your reviewer's prompt into this task's temp folder and names the file. Pass that file to \`shepherdr review ${id} --run <that-file>\`: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). Pass the same file to a headless run or a subagent; write no prompt of your own. If a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished.`
   if (!all.length) return `Reviewer: ${reviewerWords(r)}. ${ask}`
   // a chain of them: each in turn, where the one before it cannot run either
   const rest = all.length > 1 ? `; where that one cannot run either, the next of, in turn: ${all.slice(1).map(reviewerWords).join('; ')}` : ''

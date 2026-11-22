@@ -14,7 +14,14 @@ const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { REVIEW_DEADLINE, REVIEW_TIMEOUT } = await import('../server/live/engine/engine.ts')
 const { reviewRunLine, settingsBlock } = await import('../server/live/prompts.ts')
+const { reviewerPromptPath } = await import('../server/live/reviewer-prompt.ts')
 const { ASK, CODEX_WORDS, reviewerLineFor } = await import('./reviewer-line.ts')
+
+/** the round answer's prompt-file words, for the exact expectations below */
+const runWords = (id: string, round: number, reviewer: { kind: string; model?: string; effort?: string }) => {
+  const p = reviewerPromptPath(id, round)
+  return `Shepherdr wrote this round's reviewer prompt to ${p}: pass that file and write no prompt of your own. Run \`shepherdr review ${id} --run ${p}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`.`
+}
 
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 const PI = 'pi (default)'
@@ -92,9 +99,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const t = task()
     const r = await review(t)
     expect(r.code).toBe(0)
-    expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`shepherdr review ${t.id} --run <prompt-file>\` first: it opens the reviewer in a herdr pane, waits and closes it. If it says a pane could not open, run \`${reviewRunLine({ kind: 'codex' })}\` (fill in <prompt> and <out>) and then \`shepherdr review ${t.id} --done\`.`,
-    )
+    expect(r.out).toBe(`Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. ${runWords(t.id, 1, { kind: 'codex' })}`)
     expect(t.reviews).toBe(1)
     // the lease counts toward the caps: the reviewer's run is on its model, of this space
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'codex/unknown', space: space.name, id: `review:${t.id}` })])
@@ -106,7 +111,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     hold('advisor:busy', 'codex/gpt-5.5')
     const r = await review(t)
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --run <prompt-file>\` first: it opens the reviewer in a herdr pane, waits and closes it. If it says a pane could not open, run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>) and then \`shepherdr review ${t.id} --done\`.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). ${runWords(t.id, 1, { kind: 'pi' })}`,
     )
     expect(t.reviews).toBe(1)
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'pi/unknown' })])
@@ -116,14 +121,14 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const t = task({ 'reviewer.fallback': 'pi' })
     src.engine.outNow = (key) => (key.startsWith('codex/') ? { until: '17:00' } : undefined)
     const r = await review(t)
-    expect(r.out).toContain(`(${CODEX} is out until 17:00). Run`)
+    expect(r.out).toContain(`(${CODEX} is out until 17:00). Shepherdr wrote`)
     expect(t.reviews).toBe(1)
   })
 
   test('a primary out with no day given says only that it is out', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
     src.engine.outNow = (key) => (key.startsWith('codex/') ? {} : undefined)
-    expect((await review(t)).out).toContain(`(${CODEX} is out). Run`)
+    expect((await review(t)).out).toContain(`(${CODEX} is out). Shepherdr wrote`)
   })
 
   test('every reviewer full or out: the command waits up to its deadline, then says to end the turn, and the round is not counted yet', async () => {
@@ -155,7 +160,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.unlease('advisor:b')
     const r = await pending
     expect(r.out).toBe(
-      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --run <prompt-file>\` first: it opens the reviewer in a herdr pane, waits and closes it. If it says a pane could not open, run \`${reviewRunLine({ kind: 'pi' })}\` (fill in <prompt> and <out>) and then \`shepherdr review ${t.id} --done\`.`,
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). ${runWords(t.id, 1, { kind: 'pi' })}`,
     )
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
@@ -179,7 +184,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     expect(sent[0]).toMatchObject({ key: toBe(t) })
     const text = sent[0]!.text
     expect(text).toContain('A reviewer is free now. Round 1 of 3 counted for ' + t.id + '. Review with a headless pi or a pi subagent (its default model and effort) this round')
-    expect(text).toContain(`Run \`shepherdr review ${t.id} --run <prompt-file>\``)
+    expect(text).toContain(`Run \`shepherdr review ${t.id} --run ${reviewerPromptPath(t.id, 1)}\``)
     expect(text).toContain(`\`shepherdr review ${t.id} --done\``)
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
@@ -461,18 +466,24 @@ describe('the brief and the skill say how a round asks its reviewer', () => {
         'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless pi or a pi subagent (its default model and effort) instead for that round only, and say in your summary that you did.',
       ),
     )
-    expect(ASK('RV-9')).toContain('`shepherdr review RV-9 --run <prompt-file>` first')
+    expect(ASK('RV-9')).toContain('`shepherdr review RV-9` first')
+    expect(ASK('RV-9')).toContain('`shepherdr review RV-9 --run <that-file>`')
+    expect(ASK('RV-9')).toContain('write no prompt of your own')
     expect(ASK('RV-9')).toContain('`shepherdr review RV-9 --done`')
   })
 
   test("the task agent's skill tells it to ask the command for each round and to --done it", async () => {
     const skill = await Bun.file(join(import.meta.dir, '..', 'skill', 'shepherdr-agent', 'SKILL.md')).text()
     expect(skill).toContain('shepherdr review <id> --done')
-    expect(skill).toContain('review <id> --run <prompt-file>')
+    expect(skill).toContain('review <id> --run <that-file>')
+    expect(skill).toContain("writes the reviewer's prompt itself")
+    expect(skill).toContain('Pass that file, never a prompt of your own')
+    expect(skill).toContain('Not run in my sandbox:')
+    expect(skill).toContain('Shepherdr feedback:')
     expect(skill).not.toContain('reviewer not counted')
-    // the round must not be lost to a timeout: diff by reference, 900 s, closed stdin, stream to a file, read it after a cut
-    expect(skill).toContain('git diff <merge-base>...HEAD')
-    expect(skill).toContain('never pasted inline')
+    // the round must not be lost to a timeout: diff by reference (in the template, pinned in reviewer-prompt.test.ts),
+    // 900 s, closed stdin, stream to a file, read it after a cut
+    expect(skill).toContain('never a prompt of your own')
     expect(skill).toContain('timeout 900')
     expect(skill).not.toContain('timeout 540 codex exec')
     expect(skill).toContain('< /dev/null')
@@ -525,10 +536,10 @@ describe("the round's headless review command, one ready-to-run line per reviewe
       const reviewer = { kind, model: 'claude-sonnet-5-5', effort: 'high' }
       const round = { round: 1, rounds: 3, reviewer, n: 0, key: 'k' } as never
       const answer = src.engine.reviewWords('RV-X', round)
-      expect(answer).toContain('`shepherdr review RV-X --run <prompt-file>` first')
+      expect(answer).toContain(`shepherdr review RV-X --run ${reviewerPromptPath('RV-X', 1)}`)
       expect(answer).toContain(`run \`${reviewRunLine(reviewer)}\``)
       expect(answer).toContain(modelEffort[kind] ?? '')
-      expect(answer).toContain('(fill in <prompt> and <out>)')
+      expect(answer).toContain('(fill in <out>; <prompt> is that file)')
     }
   })
 

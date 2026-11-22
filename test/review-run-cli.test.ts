@@ -3,17 +3,16 @@
 // is mocked here; its own five-CLI tests are in review-pane.test.ts.
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const calls: { opts?: Record<string, unknown>; steps: string[] } = { steps: [] }
 let next: { findings: string; cutShort?: boolean; failed?: string; error?: string; pane?: string } = { findings: 'major: the pane works' }
 mock.module('../server/live/review-pane.ts', () => ({
-  reviewerPrompt: (base: string) => base,
   readPromptFile: (path: string) => {
     if (!existsSync(path)) throw new Error(`No prompt file ${path}`)
-    return 'Brief, base, rules, tags.'
+    return readFileSync(path, 'utf8')
   },
   runReviewInPane: async (opts: Record<string, unknown>) => {
     calls.opts = opts
@@ -146,4 +145,47 @@ describe('shepherdr review --run', () => {
     expect(r.out).toContain('No prompt file')
     expect(t.reviews).toBeUndefined()
   })
+
+  test('--run with no file uses the prompt Shepherdr wrote, counts one round and names the file', async () => {
+    const t = task()
+    const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
+    expect(r.code).toBe(0)
+    expect(t.reviews).toBe(1)
+    expect(r.out).toContain(`reviewer-${t.id}-1.md`)
+    const prompt = calls.opts?.prompt as string
+    expect(prompt).toContain(`Task: ${t.id}`)
+    expect(prompt).toContain('Paned review')
+    expect(prompt).toContain('git diff main...HEAD')
+    expect(prompt).toContain('Shepherdr feedback:')
+    expect(prompt).toContain('Not run in my sandbox:')
+    expect(prompt).not.toContain('diff --git')
+  })
+
+  test('a round asked for with plain review passes its named file to --run and is not counted twice', async () => {
+    const t = task()
+    const asked = await src.cli(['review', t.id], { chat: `${t.id}/Agent` })
+    expect(asked.code).toBe(0)
+    const named = new RegExp(`shepherdr review ${t.id} --run (\\S*reviewer-${t.id}-1\\.md)`).exec(asked.out)?.[1]
+    if (!named) throw new Error('the round answer did not name a prompt file')
+    const r = await src.cli(['review', t.id, '--run', named], { chat: `${t.id}/Agent` })
+    expect(r.code).toBe(0)
+    expect(t.reviews).toBe(1)
+    expect(calls.opts?.prompt as string).toContain(`Task: ${t.id}`)
+    expect(asked.out).toContain('write no prompt of your own')
+  })
+
+  for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) {
+    test(`${kind}: the pane round gets the same Shepherdr-written prompt file`, async () => {
+      const t = task()
+      t.reviewer = { kind }
+      const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
+      expect(r.code).toBe(0)
+      expect(calls.opts).toMatchObject({ id: t.id, reviewer: { kind } })
+      const prompt = calls.opts?.prompt as string
+      expect(prompt).toContain(`Task: ${t.id}`)
+      expect(prompt).toContain("critical (breaks or loses people's work)")
+      expect(prompt).toContain('No praise, no summary of the diff')
+      expect(prompt).toContain('LAST plain message')
+    })
+  }
 })

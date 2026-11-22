@@ -44,8 +44,9 @@ import { asMode, HOST, NAME, type Places, placeId, type Space, shortId } from '.
 import { type ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
 import { type Change, changeWords, PROFILES_ON_MAIN, type Profiles, previewWords, waitingPicks } from './profiles.ts'
 import { createSession } from './opencode.ts'
-import { privatePrompt, reviewRunLine, reviewerWords, settingsBlock } from './prompts.ts'
-import { readPromptFile, reviewerPrompt, runReviewInPane } from './review-pane.ts'
+import { reviewRunLine, reviewerWords, settingsBlock } from './prompts.ts'
+import { readPromptFile, runReviewInPane } from './review-pane.ts'
+import { reviewerPromptFile } from './reviewer-prompt.ts'
 import { trustWorktree } from './trust.ts'
 import type { RequestedNewsMailbox } from './requested-news.ts'
 import { type Resources, lines as resourceLines } from './resources.ts'
@@ -420,8 +421,9 @@ export class CliCommands {
   }
 
   /**
-   * `shepherdr review <id> --run <prompt-file>` (SHE-182): count the round, start its reviewer interactive and read-only
-   * in a tab of the task's herdr space, wait for its findings, close the pane and free the reviewer. One verb for every
+   * `shepherdr review <id> --run <prompt-file>` (SHE-182, SHE-183): run the round's reviewer interactive and read-only
+   * in a tab of the task's herdr space, wait for its findings, close the pane and free the reviewer. The prompt file is
+   * the one Shepherdr wrote when `review <id>` counted the round (or this command counts it when run alone). One verb for every
    * task CLI. A pane that cannot open (no herdr space, CLI will not start) is said plainly; the round then falls back to
    * the headless line and is left for `--done`, so a review that could not run is never passed off as one that found
    * nothing. The reviewer's findings come from its own CLI log, as every other Shepherdr agent's chat does.
@@ -432,21 +434,24 @@ export class CliCommands {
     ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean },
     onStep?: (words: string) => void,
   ): Promise<string> {
-    if (!promptFile) throw new Error(`shepherdr review ${t.id} --run <prompt-file>: write the reviewer's short prompt to a file first`)
     if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent runs its review, not ${ctx.chat ? 'this chat' : 'you at the command'}`)
-    // read the prompt before counting a round: a missing file must not burn one
-    const base = readPromptFile(promptFile)
-    const r = await this.engine.reviewRound(t.id)
+    // The prompt is Shepherdr's (SHE-183): a counted round already wrote it under this task's $SHEPHERDR_TMP and its
+    // answer named the file. --run with no file still works by counting the round itself, so the file is written first.
+    const active = this.engine.activeRound(t.id)
+    if (!promptFile && !active) {
+      const first = await this.engine.reviewRound(t.id)
+      if ('wait' in first) return this.engine.reviewWaitWords(t.id, first.wait)
+    }
+    const counted = this.engine.activeRound(t.id)
+    const file = promptFile ?? (counted ? reviewerPromptFile(t.id, counted.round) : undefined)
+    if (!file) throw new Error(`shepherdr review ${t.id} --run <prompt-file>: write the reviewer's short prompt to a file first`)
+    // read the prompt before counting a round when one is still owed: a missing file must not burn one
+    const prompt = readPromptFile(file)
+    const r = counted ?? (await this.engine.reviewRound(t.id))
     if ('wait' in r) return this.engine.reviewWaitWords(t.id, r.wait)
     const round = r.round
     const reviewer = r.reviewer
-    const space = this.places.nameOf(t.project) ?? t.project
     const env = { ...agentEnv(`${t.id}/Reviewer`, ROOT) }
-    const prompt = reviewerPrompt(base, {
-      id: t.id,
-      round,
-      privacy: privatePrompt('', this.settings.instructions('reviewer', space)),
-    })
     const step = (words: string) => {
       onStep?.(words)
       // the human watches the task's chat too: the round shows there while its pane is open
@@ -489,7 +494,7 @@ export class CliCommands {
         : `Review round ${round} finished in its reviewer pane.`
     this.chats.post(`${t.id}/Agent`, { id: cardId, card: { id: cardId, text: cardText } })
     if (got.failed) {
-      return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <prompt> and <out>), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
+      return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is ${file}), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
     }
     this.engine.reviewDone(t.id)
     // a provider error is not a timeout: say which it was, and never call an empty cut-short answer "partial findings"
@@ -498,7 +503,7 @@ export class CliCommands {
       : got.cutShort
         ? `Cut short at the 900 s timeout; these are its partial findings.\n\n`
         : ''
-    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
+    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
   }
 
   async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {

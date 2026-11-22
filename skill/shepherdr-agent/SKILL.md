@@ -59,15 +59,15 @@ build, check and review the work is your own judgment.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change — the round's
    reviewer started interactive in a herdr pane beside you (a headless run is only the fallback when a pane
    cannot open), or a subagent when the reviewer cannot run at all. It is read-only where the CLI supports it; pi and
-   OpenCode keep bash to run git, with changes forbidden by the prompt. Give the reviewer, in a short prompt file, the brief,
-   the repo's rules and the base with the command to read the change yourself (`git diff <merge-base>...HEAD`, `git log`,
-   the files): it reads them with its own read-only tools, never pasted inline — a huge pasted diff once stalled a round
-   for 540 s with no output. Then run in the foreground, with your authoritative command written out in full:
-   `SHEPHERDR_CHAT="<id>/Agent" <your-command> review <id> --run <prompt-file>`.
-   It counts the round, holds that reviewer for it (the primary, or the backup your Reviewer line names when the primary
-   is full or out, with why), opens the reviewer in a new tab of your task's herdr space labelled as its reviewer with
-   `SHEPHERDR_CHAT=<id>/Reviewer`, sends it the prompt, waits up to 900 s printing progress on stderr, then prints its
-   last plain message on stdout and closes the pane. It frees the reviewer itself: a pane round needs no `--done`.
+   OpenCode keep bash to run git, with changes forbidden by the prompt. Shepherdr writes the reviewer's prompt itself: `shepherdr review <id>` counts the round, fills its template with the task, its brief, the base and merge-base, the repo's rule files and the findings rules, writes the prompt under this task's `$SHEPHERDR_TMP` and names the file. Pass that file, never a prompt of your own — a huge pasted diff once stalled a round
+   for 540 s with no output. Run in the foreground, with your authoritative command written out in full:
+   `SHEPHERDR_CHAT="<id>/Agent" <your-command> review <id>` then
+   `SHEPHERDR_CHAT="<id>/Agent" <your-command> review <id> --run <that-file>`.
+   The first command counts the round and holds its reviewer for it (the primary, or the backup your Reviewer line names
+   when the primary is full or out, with why). The second opens the reviewer in a new tab of your task's herdr space
+   labelled as its reviewer with `SHEPHERDR_CHAT=<id>/Reviewer`, sends it that prompt, waits up to 900 s printing progress
+   on stderr, then prints its last plain message on stdout and closes the pane. It frees the reviewer itself: a pane
+   round needs no `--done`.
    Raise your shell tool's timeout to at least 1020 s (17 min) for this one command — a round can first wait 90 s for a
    reviewer, then run for 900 s (Claude Code and OpenCode `Bash` 600000 ms
    per call moves it to the background rather than stopping — keep waiting for the answer; pi at least 960 s): a client
@@ -85,7 +85,7 @@ build, check and review the work is your own judgment.
    least 960 seconds (its cap is far higher); Antigravity: the largest its shell tool accepts, unverified here; Codex:
    no per-call tool clock, so the shell `timeout` is it. Where a CLI is not installed, its line comes from that CLI's
    documented flags; a figure that could not be verified is marked unverified. It streams the reviewer's output there as it is written.
-   Replace `<prompt>` with your short prompt file and `<out>` with the file to stream into. After a timeout, read the file first and use any findings there instead
+   Replace `<prompt>` with the prompt file Shepherdr named and `<out>` with the file to stream into. After a timeout, read the file first and use any findings there instead
    of starting over; then run `shepherdr review <id> --done`: it frees the reviewer and counts nothing. Wait in this turn
    throughout: never in the background, never end your turn while a review runs, and if it times out, wait for the
    fallback subagent in this same turn too; do not end the turn and expect to be woken when it reports.
@@ -93,12 +93,15 @@ build, check and review the work is your own judgment.
    back to one subagent review. Timed out or failed with nothing usable: one subagent review instead, the same round. pi has no enforced read-only
    mode: its reviewer needs `bash` to run git, and the prompt forbids changes. Give the reviewer the authoritative
    command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), never your
-   own reasoning; ask for what this change broke, left undone or added beyond the brief, each with proof and tagged
-   critical (breaks or loses users' work),
+   own reasoning; use the prompt file Shepherdr named, which already asks for what this change broke, left undone or added
+   beyond the brief, each with proof and tagged critical (breaks or loses users' work),
    major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style). Fix every finding at or above
    Must fix, then review again; stop once a round has none at or above it, or after Review rounds. Never agree with a
    finding just to end the loop: one you judge wrong goes in the facts with why. Findings below the bar go in the facts,
-   unfixed; an open choice no experiment can settle goes to the human as a card. Out of Review rounds with your final commit
+   unfixed. Run the checks the reviewer lists under "Not run in my sandbox:" yourself and say the results in `--facts`.
+   Copy any "Shepherdr feedback:" line from its findings into `--facts` too: the coordinator reads it in the ready line's
+   Facts; never file anything outside yourself. An open choice no experiment can settle goes to the human as a card.
+   Out of Review rounds with your final commit
    unreviewed: `shepherdr review <id>` refuses; say why in your chat and end your turn. Only your coordinator adds a round
    (`shepherdr task review-more <id>`), which arrives in your chat as one more to run. Where the reviewer your round names
    cannot run at all (out of allowance, signed out, its model is gone), review that same round with the backup your Reviewer
