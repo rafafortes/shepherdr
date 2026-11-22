@@ -161,9 +161,17 @@ export async function runReviewInPane(
   let pane: string | undefined
   let name: string | undefined
   const step = (s: string) => o.onStep?.(s)
-  // the stream the caller reads drops an idle connection after 120 s. Start the beat before the pane waits too: a
-  // shell that takes a while, or a launch asked for by name a few times, must not leave the CLI silent that long.
+  const now = o.now ?? Date.now
+  // the caller's stream drops an idle connection after 120 s. Every wait calls `heartbeat` before its next herdr call
+  // (one call can itself take 70 s), and the findings loop uses the same beat, so no phase can leave it silent.
   let beat = start + 60_000
+  const heartbeat = () => {
+    const at = now()
+    if (at >= beat) {
+      step(`Review round ${o.round} is still waiting for ${o.id}'s reviewer pane (${kind}).`)
+      beat = at + 60_000
+    }
+  }
 
   try {
     // a task's worktree has a herdr space of its own; its agent's tab is one tab in it, the reviewer's another. A space
@@ -183,20 +191,10 @@ export async function runReviewInPane(
     step(`Review round ${o.round} is opening ${o.id}'s reviewer pane (${kind}).`)
     // the same start a task's agent uses: a tab's shell may not be ready on the first call, herdr may drop a launch,
     // and it may leave the name pending until it is asked for. Only then is the pane one herdr will take a prompt for.
-    await startPaneAgent(h, name, kind, pane, args, sleep)
+    await startPaneAgent(h, name, kind, pane, args, { sleep, now, onTry: heartbeat, forMs: 180_000 })
     await completeLaunch(h, name)
     await answerStartup(h, pane, sleep)
-    await sendWhenReady(h, name, o.prompt, {
-      sleep,
-      poll: o.poll,
-      now: o.now,
-      onWait: (n) => {
-        if (n % 30 === 0) {
-          step(`Review round ${o.round}'s reviewer pane is still starting (${kind}).`)
-          beat = (o.now?.() ?? Date.now()) + 60_000
-        }
-      },
-    })
+    await sendWhenReady(h, name, o.prompt, { sleep, poll: o.poll, now, onTry: heartbeat, onWait: heartbeat, forMs: 60_000 })
     // said only once the pane really runs the reviewer: a round that fell back must never say "running in a pane"
     step(`Review round ${o.round} running in a pane: ${o.id} reviewer (${kind}).`)
 
@@ -207,7 +205,7 @@ export async function runReviewInPane(
       const got = await read(kind, o.cwd, start - 2000, session, before.file)
       text = got.text || text
       done = got.done
-      const at = o.now?.() ?? Date.now()
+      const at = now()
       if (at >= beat) {
         step(`Review round ${o.round} is still running in ${o.id}'s reviewer pane (${kind}).`)
         beat = at + 60_000
@@ -217,7 +215,7 @@ export async function runReviewInPane(
       // before `done && text`: an error event sets done too, so the old order returned a preamble as a complete review).
       if (got.error) return { pane, args, findings: text, cutShort: true, error: got.error }
       if (done && text) break
-      if ((o.now?.() ?? Date.now()) >= until) {
+      if (now() >= until) {
         step(`Review round ${o.round}'s pane timed out after ${Math.round(timeout / 1000)} s; keeping what it wrote so far.`)
         return { pane, args, findings: text, cutShort: true }
       }

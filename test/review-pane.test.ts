@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { HerdrError } from '../server/live/herdr.ts'
+import { sendWhenReady, startInPane } from '../server/live/pane-agent.ts'
 import { opencodeDb, opencodeLogPath } from '../server/live/opencode.ts'
 import { reviewerPaneArgs } from '../server/live/prompts.ts'
 import { claudeLogPath, piSessionDir } from '../server/live/readers/find.ts'
@@ -388,20 +389,42 @@ describe('a round in a pane', () => {
     expect(calls.promptTries).toBe(1)
   })
 
-  test('a long wait for the name keeps the caller stream warm without saying the pane runs', async () => {
-    const { h, calls } = fake({ notShellOnce: false, registerAfter: 31 })
+  test('a slow herdr start keeps the caller stream warm without saying the pane runs', async () => {
+    const { h, calls } = fake({ notShellOnce: false, registerAfter: 2 })
+    let clock = 0
+    const start = h.start
+    h.start = async (...a) => {
+      if (calls.startTries === 0) clock += 70_000 // one herdr.start call can take 70 s
+      return start(...a)
+    }
     const steps: string[] = []
     const got = await runReviewInPane({
       ...base,
       h,
       reviewer: { kind: 'claude' },
+      now: () => clock,
       onStep: (s) => steps.push(s),
       findings: async () => ({ text: 'no findings', done: true }),
     })
     expect(got.failed).toBeUndefined()
     expect(got.findings).toBe('no findings')
-    expect(calls.promptTries).toBe(31)
-    expect(steps.findIndex((s) => s.includes('still starting'))).toBeLessThan(steps.findIndex((s) => s.includes('running in a pane')))
+    expect(steps.findIndex((s) => s.includes('still waiting'))).toBeLessThan(steps.findIndex((s) => s.includes('running in a pane')))
+  })
+
+  test('a start herdr drops is retried by the reviewer too', async () => {
+    const { h, calls } = fake({ notShellOnce: false, registerAfter: 1 })
+    const start = h.start
+    let once = true
+    h.start = async (...a) => {
+      if (once) {
+        once = false
+        throw new HerdrError('closed', 'herdr closed the connection during start')
+      }
+      return start(...a)
+    }
+    const got = await runReviewInPane({ ...base, h, reviewer: { kind: 'claude' }, findings: async () => ({ text: 'no findings', done: true }) })
+    expect(got.failed).toBeUndefined()
+    expect(calls.startTries).toBe(1)
   })
 
   test('a name that never registers falls back, and never says the pane was running', async () => {
@@ -445,5 +468,67 @@ describe('a round in a pane', () => {
     expect(got.failed).toBeUndefined()
     expect(got.findings).toBe('no findings')
     expect(calls.promptTries).toBe(2)
+  })
+})
+
+describe('the pane waits are bounded', () => {
+  const notNamed = () => ({
+    agent: async () => undefined,
+    start: async () => undefined,
+    prompt: async () => {
+      throw new Error('agent x is not an active named agent')
+    },
+  })
+
+  test('sendWhenReady stops at its wall-clock deadline, not just after a number of tries', async () => {
+    let clock = 0
+    const a = notNamed()
+    let prompts = 0
+    a.prompt = async () => {
+      prompts++
+      throw new Error('agent x is not an active named agent')
+    }
+    await expect(
+      sendWhenReady(a, 'x', 'prompt', {
+        now: () => clock,
+        sleep: async () => {
+          clock += 30_000
+        },
+        poll: 1,
+        forMs: 60_000,
+      }),
+    ).rejects.toThrow('not an active named agent')
+    expect(prompts).toBe(3)
+  })
+
+  test('sendWhenReady also stops at its try cap when the clock does not move', async () => {
+    const a = notNamed()
+    let prompts = 0
+    a.prompt = async () => {
+      prompts++
+      throw new Error('agent x is not an active named agent')
+    }
+    await expect(sendWhenReady(a, 'x', 'prompt', { now: () => 0, sleep: async () => undefined, poll: 1, tries: 2 })).rejects.toThrow('not an active named agent')
+    expect(prompts).toBe(2)
+  })
+
+  test('startInPane gives up at its time cap and says why', async () => {
+    let clock = 0
+    const a = notNamed()
+    a.start = async () => {
+      throw new Error('agent target pane p is not an available shell')
+    }
+    const given: string[] = []
+    await expect(
+      startInPane(a, 'x', 'claude', 'p', [], {
+        now: () => clock,
+        sleep: async () => {
+          clock += 100_000
+        },
+        forMs: 60_000,
+        giveUp: (e) => given.push((e as Error).message),
+      }),
+    ).rejects.toThrow('not an available shell')
+    expect(given).toEqual(['agent target pane p is not an available shell'])
   })
 })

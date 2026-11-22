@@ -1450,7 +1450,7 @@ export class Agents extends Emitter<Events> {
     this.flushRecords()
     await this.again(r, () =>
       // a new pane needs a moment before its shell is at the prompt; the waits live with the reviewer's launch too
-      startInPane(herdr, r.name, r.kind, pane, args, undefined, (e) => console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)),
+      startInPane(herdr, r.name, r.kind, pane, args, { giveUp: (e) => console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`) }),
     )
     await this.refresh()
     try {
