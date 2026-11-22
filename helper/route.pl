@@ -8,6 +8,11 @@ use File::Path qw(make_path);
 use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
 use Cwd qw(getcwd abs_path);
 
+# Linux has /proc. Where it exists, a pid with no /proc/<pid>/stat is gone: the ps fallback below is for macOS only.
+# Without this the walk over the routes folder ran `ps` once per dead pid (a fork and exec each, 1697 of them, about
+# 100 s on 2026-11-21, SHE-185), which is what made every CLI call slow once the folder had filled with dead routes.
+my $HAS_PROC = -r '/proc/self/stat' ? 1 : 0;
+
 sub process_identity {
   my ($pid) = @_;
   return unless $pid =~ /^\d+$/ && $pid > 1;
@@ -17,6 +22,7 @@ sub process_identity {
     my @v = split /\s+/, $s;
     return ($v[1], $v[19]); # parent and start ticks, safe against pid reuse
   }
+  return if $HAS_PROC;
   # macOS has no /proc. ps reads no environment or command arguments here.
   open(my $p, '-|', 'ps', '-p', $pid, '-o', 'ppid=', '-o', 'lstart=') or return;
   my $s = <$p> // ''; close $p;
@@ -41,8 +47,18 @@ sub norm_path {
   return $p =~ m{^/} ? "/$s" : ($s eq '' ? '.' : $s);
 }
 
+# One syscall, no fork and no file read: does a process with this pid exist (any owner)? The cheap test that comes before
+# decoding a route file. A pid that exists says nothing about the route yet: its start stamp still has to match.
+sub pid_alive {
+  my ($pid) = @_;
+  return 0 unless $pid =~ /^\d+$/ && $pid > 1;
+  return 1 if kill(0, $pid);
+  return $!{EPERM} ? 1 : 0;
+}
+
 sub read_route {
   my ($file, $pid) = @_;
+  return unless pid_alive($pid); # a dead pid's file is never decoded
   open(my $f, '<', $file) or return;
   my $r = eval { local $/; JSON::PP->new->decode(<$f>) }; close $f;
   my (undef, $stamp) = process_identity($pid);
@@ -98,7 +114,11 @@ sub session_route {
   }
   my (@best, $explicit);
   my $chat = $ENV{SHEPHERDR_CHAT} // '';
-  if (length($chat) && opendir(my $d, route_dir())) {
+  # The folder scan finds two things: an `explicit` route (only when the caller's chat differs from the executor's) and
+  # the folder match, which is used only when ancestry found no route. When ancestry found one and nothing is explicit,
+  # the scan cannot change the answer, so it is skipped: the common case for a task's agent, whose CLI is an ancestor.
+  my $scan = length($chat) && !($ancestor && !($executor && $chat ne $executor->{chat}));
+  if ($scan && opendir(my $d, route_dir())) {
     my $cwd = getcwd();
     while (my $name = readdir($d)) {
       next unless $name =~ /^(\d+)\.json$/;
@@ -138,6 +158,43 @@ sub session_route {
     $r->{toolInheritedUrl} = $executor->{url} if $executor;
   }
   return $r;
+}
+
+# Remove the route files of processes that are gone: the pid does not exist, or it exists with another start stamp (the
+# pid was reused). Never a live one: a file whose process is alive with the same stamp stays, and so does one that
+# cannot be judged (unreadable, undecodable) while its pid lives. The server runs this at start and now and then; the
+# CLI never does, so a call's cost does not depend on it. Prints how many files it removed.
+sub prune_routes {
+  my $d = route_dir();
+  die "Unsafe route directory\n" if -l $d;
+  my $removed = 0;
+  opendir(my $dh, $d) or return 0;
+  my @names = readdir($dh);
+  closedir($dh);
+  for my $name (@names) {
+    my $file = "$d/$name";
+    if ($name =~ /^\d+\.\d+\.tmp$/) {
+      # the temporary file of a --bind that was killed before its rename; one being written is seconds old
+      my $age = time - ((lstat($file))[9] // time);
+      $removed++ if $age > 600 && unlink($file);
+      next;
+    }
+    next unless $name =~ /^(\d+)\.json$/;
+    my $pid = $1;
+    if (!pid_alive($pid)) { $removed++ if unlink($file); next; }
+    # alive: only a stamp that no longer matches is stale
+    my @before = lstat($file) or next;
+    my $r;
+    if (open(my $f, '<', $file)) { $r = eval { local $/; JSON::PP->new->decode(<$f>) }; close $f; }
+    next unless $r && ref($r) eq 'HASH' && defined $r->{stamp};
+    my (undef, $stamp) = process_identity($pid);
+    next unless defined $stamp && "$r->{stamp}" ne "$stamp";
+    # a bind for this pid may have replaced the file since it was read: leave one that changed
+    my @now = lstat($file) or next;
+    next unless $before[0] == $now[0] && $before[1] == $now[1] && $before[9] == $now[9];
+    $removed++ if unlink($file);
+  }
+  return $removed;
 }
 
 sub routed_chat {
@@ -225,6 +282,7 @@ sub check_route {
 
 unless (caller) {
   if (($ARGV[0] // '') eq '--bind') { shift @ARGV; bind_route(@ARGV); exit 0; }
+  if (($ARGV[0] // '') eq '--prune') { print prune_routes(), "\n"; exit 0; }
   if (($ARGV[0] // '') eq '--check') { shift @ARGV; my $pid = shift @ARGV // ''; exit(check_route($pid) ? 0 : 1); }
   my $local = shift @ARGV;
   delete $ENV{SHEPHERDR_SECRET_CAPABILITY};

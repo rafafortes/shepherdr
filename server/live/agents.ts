@@ -239,6 +239,12 @@ const ROUTE_REPAIR_CHUNK = 6
 /** how often a repair pass runs. The first one runs at the first look at herdr that lists an agent to bind (routesAt
  *  starts at 0), so a restart repairs its routes at once instead of waiting this out. */
 const ROUTE_REPAIR_EVERY = 30_000
+/** how often the routes folder is pruned of dead processes' files: at the first refresh after the server starts that
+ *  reaches herdr (pruneAt
+ *  starts at 0), then this often. A route file is written for every launch and nothing else removes it, so the folder
+ *  grew without end (1707 files on 2026-11-21) and slowed every CLI call (SHE-185). */
+const ROUTE_PRUNE_EVERY = 10 * 60_000
+const ROUTE_PRUNE_MS = 10_000
 
 /** An idle agent's screen is read on the refresh that ends its turn, then on each refresh for the first minute
  *  (background work is announced as the turn ends and ends soon after), and after that only every 30 s. While a read
@@ -328,6 +334,7 @@ export class Agents extends Emitter<Events> {
   private retryAt = 0
   private recovery = new LinkBackoff()
   private routesAt = 0
+  private pruneAt = 0
   private routing = false
   private routes = new Map<string, string>()
   /** whether its own event loop is keeping up: source.ts sets this from the stall watch. A loop that stalls answers its
@@ -688,6 +695,11 @@ export class Agents extends Emitter<Events> {
         this.retryAt = 0
         this.reachable = true
         this.lastReach = Date.now()
+        // once herdr answers, so a worker whose link is down does not spend an ssh call on it
+        if (Date.now() - this.pruneAt > ROUTE_PRUNE_EVERY) {
+          this.pruneAt = Date.now()
+          void this.pruneRoutes()
+        }
         this.live = new Map(list.filter((a) => a.name).map((a) => [a.name!, a]))
         for (const key of this.byName.values()) {
           const now = this.status(key)
@@ -901,6 +913,17 @@ export class Agents extends Emitter<Events> {
     } finally {
       this.routing = false
     }
+  }
+
+  /** Remove the route files of processes that are gone (helper/route.pl --prune: a pid that no longer exists, or whose
+   *  start stamp no longer matches; never a live one). A server that binds no routes prunes none. Its failure is the
+   *  folder staying as it was, which only costs the CLI the cheap liveness test per file: never raised. */
+  private async pruneRoutes() {
+    if (!launchesAgents()) return
+    const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
+    const r = await run(['perl', router, '--prune'], { timeoutMs: ROUTE_PRUNE_MS }).catch(() => undefined)
+    const n = Number(r?.out.toString().trim())
+    if (n > 0) console.info(`shepherdr: removed ${n} route file${n === 1 ? '' : 's'} of processes that are gone`)
   }
 
   /** the live agents a repair pass has to bind: the ones no launch is binding itself right now */
