@@ -346,7 +346,7 @@ describe('the brief helpers', () => {
   test('the line says the backup reviewers only where the block has Review on', () => {
     const fallback = [{ kind: 'claude' }]
     const on = rebriefReviewer(brief, { id: 'HB-1', reviewer: { kind: 'pi' }, fallback, review: false })
-    expect(on).toContain('a headless pi or a pi subagent (its default model and effort). Each round, run `shepherdr review HB-1 --run <prompt-file>` first')
+    expect(on).toContain("a headless pi or a pi subagent (its default model and effort). Each round, run `shepherdr review HB-1` first: it counts the round, writes your reviewer's prompt")
     expect(on).toContain('If that reviewer cannot run at all')
     const off = rebriefReviewer(brief.replace('- Review: on.', '- Review: off.'), { id: 'HB-1', reviewer: { kind: 'pi' }, fallback, review: true })
     expect(off).toContain(`${piLine('HB-1', '')}\n`)

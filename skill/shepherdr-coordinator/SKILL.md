@@ -82,6 +82,9 @@ How to do the work inside a task is its agent's judgment, not yours.
    what comes next, and whether the human needs to know or do anything ("Letter garden is live. TG-30 (sticker book)
    starts next, nothing needed from you."). Several pieces of news at once get one reply. Only news with no card in
    your chat may get `<no-reply>` when nothing matters.
+   A ready task's Facts may carry a "Shepherdr feedback:" line its agent copied from a reviewer: that is about Shepherdr
+   itself, not the task's code. Read it there, pass it to the human in your reply or, on their word, add a task for it
+   through you; never file it outside yourself.
    Stalled news (a working task quiet for 20m, or far past its own time left) is only time and liveness: look at its
    chat, then nudge it (`shepherdr task tell`), stop it, or tell the human.
    A task out of Review rounds with its final commit unreviewed: `shepherdr task review-more <id>` gives it exactly one

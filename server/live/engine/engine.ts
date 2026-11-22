@@ -70,6 +70,7 @@ import {
   reviewerWords,
   reviewRunLine,
 } from '../prompts.ts'
+import { reviewerPromptPath, writeReviewerPrompt } from '../reviewer-prompt.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -909,7 +910,7 @@ export class Engine extends Emitter<Events> {
    *  moment it is chosen, before its agent shows it, so two starts in a row never both take the last slot (claim) */
   private claims = new Map<string, Run>()
   /** the rounds running now: when each was counted, and since when its agent's turn has not been working */
-  private reviewing = new Map<string, { since: number; idle?: number }>()
+  private reviewing = new Map<string, { since: number; idle?: number; round?: Round }>()
   /** tasks whose `shepherdr review` is waiting for a reviewer now (retryReviews leaves them to it) */
   private reviewLive = new Set<string>()
   /** how long `shepherdr review` waits for a free reviewer (tests shorten it), how often it looks, and how long a round
@@ -3563,6 +3564,13 @@ export class Engine extends Emitter<Events> {
     }
   }
 
+  /** the round already counted and still leased for this task, when its agent asks `review --run` after `review`.
+   *  Running the pane for that round must not count a second one; without this (an agent that went straight to --run)
+   *  the command counts the round itself as before. */
+  activeRound(id: string): Round | undefined {
+    return this.reviewing.get(id)?.round
+  }
+
   /** one try at a round: the first reviewer of its chain with room under the caps and not out is leased and the round
    *  counted, or the wait names each reviewer that cannot run (choose.ts). A round that replaces an unreleased one ends it */
   private attemptRound(t: TaskRec): Round | { wait: Blocked<ReviewStep>[] } {
@@ -3575,9 +3583,23 @@ export class Engine extends Emitter<Events> {
     t.reviewWait = undefined
     this.saveNow()
     this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
-    this.reviewing.set(t.id, { since: Date.now() })
     const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
-    return { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
+    const round: Round = { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
+    this.reviewing.set(t.id, { since: Date.now(), round })
+    // The prompt is Shepherdr's now (SHE-183): write it when the round is counted, so a round woken later when a
+    // reviewer frees has its prompt ready too, and every CLI (and a subagent fallback) gets the same file.
+    writeReviewerPrompt({
+      id: t.id,
+      round: round.round,
+      title: t.title,
+      // only the coordinator's words, not the Settings block a brief ends with: that is the task agent's orders, and
+      // telling a read-only reviewer to run `shepherdr review` or switch reviewers is worse than useless
+      brief: splitBrief(t.desc ?? '')[0] || t.title,
+      base: t.base ?? 'main',
+      worktree: t.worktree ?? '',
+      privacy: privatePrompt('', this.settings.instructions('reviewer', this.nameOf(t) ?? '')),
+    })
+    return round
   }
 
   /** the reviewers a task's rounds may use, in order: its own (task add's reviewer, else Settings'), then its backups in
@@ -3641,7 +3663,8 @@ export class Engine extends Emitter<Events> {
     const why = a.why
       ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : a.why.why === 'blocked' ? `${chainWords(a.why.harness.h)} is blocked (0 allowed)` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})`
       : ''
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`shepherdr review ${id} --run <prompt-file>\` first: it opens the reviewer in a herdr pane, waits and closes it. If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <prompt> and <out>) and then \`shepherdr review ${id} --done\`.`
+    const prompt = reviewerPromptPath(id, a.round)
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */

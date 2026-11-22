@@ -1,7 +1,8 @@
-// The Reviewer line of a brief, as the tests expect it: the reviewer's words, how a round runs it in a herdr pane
-// (`shepherdr review <id> --run`), the headless fallback with `--done`, the backup's sentence when one is set, and who set it.
+// The Reviewer line of a brief, as the tests expect it: the reviewer's words, how a round asks Shepherdr for its prompt
+// (`shepherdr review <id>`) and passes that file to the pane (`--run`), the headless fallback with `--done`, the backup's
+// sentence when one is set, and who set it.
 export const ASK = (id: string) =>
-  `Each round, run \`shepherdr review ${id} --run <prompt-file>\` first: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). If it says a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished. Plain \`shepherdr review ${id}\` still counts a round and names a reviewer without running one.`
+  `Each round, run \`shepherdr review ${id}\` first: it counts the round, writes your reviewer's prompt into this task's temp folder and names the file. Pass that file to \`shepherdr review ${id} --run <that-file>\`: it opens this round's reviewer in a herdr pane beside you, waits for its findings and closes the pane (it releases the reviewer itself). Pass the same file to a headless run or a subagent; write no prompt of your own. If a pane could not open, use the headless line it prints instead and run \`shepherdr review ${id} --done\` when that review has finished.`
 
 /** a Reviewer line: `- Reviewer: <words> <ask>`, then the backup's sentence, then the mark of who set it, when they are given */
 export const reviewerLineFor = (words: string, id: string, backup = '', mark = '') => `- Reviewer: ${words} ${ASK(id)}${backup ? ` ${backup}` : ''}${mark ? ` ${mark}` : ''}`

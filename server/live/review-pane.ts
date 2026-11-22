@@ -214,21 +214,8 @@ export async function runReviewInPane(
   }
 }
 
-/** a reviewer's prompt: Shepherdr's own reminders are added to the short prompt file the task agent wrote, so every
- *  CLI sees the same severity tags and the same "last plain message" rule, whatever the round's harness. */
-export function reviewerPrompt(base: string, o: { id: string; round: number; privacy: string }): string {
-  return [
-    base.trim(),
-    `You are ${o.id}'s reviewer, round ${o.round}. Read only: never edit, commit or push. Read the change yourself with git diff <merge-base>...HEAD, git log and the files; the brief and the base are below in the prompt above.`,
-    "Report what this change broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work), major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style).",
-    'Write your findings as your LAST plain message: never a plan to approve, never ExitPlanMode, never a question, never a summary that ends the task. Start no other agents. Say "no findings" plainly when there are none.',
-    o.privacy,
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-/** caller's convenience: a short prompt file the task agent wrote, read by reference (never pasted into a shell word) */
+/** read the round's prompt file by reference (never pasted into a shell word): Shepherdr wrote it when the round was
+ *  counted, and the task agent passes its name */
 export function readPromptFile(path: string): string {
   if (!existsSync(path)) throw new Error(`No prompt file ${path}; write the reviewer's short prompt to a file first`)
   return readFileSync(path, 'utf8')

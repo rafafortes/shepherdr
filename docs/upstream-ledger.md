@@ -887,3 +887,24 @@ itself, the headless one still uses `--done`. The reviewer is a tab in the task'
 Shepherdr's terminal view, and holds a reviewer slot under `models.maxAtOnce` exactly as before. The skill's Review step
 and the round answer point to `--run` first, headless second. Cost: one interactive TUI per round uses more memory than a
 headless run; measured RSS is in the task's facts, not repeated here.
+
+## Shepherdr owns the reviewer prompt (SHE-183)
+
+Checked 2026-11-21 (SHE-183) on `upstream/main` and `upstream/v2.0`, their code, history and public issues and pull
+requests (read only). Upstream's `templates/reviewer.md` (`4b5b978c` SHEP-288, `86ce7d52` SHEP-78 and `2b1b41b7`
+SHEP-54 before it) already says most of what a good reviewer prompt says: read only, read the task and its diff against
+the base, report each finding with a level, be concrete with file, line and fix with no praise or diff summary, findings
+as the last plain message and no other agents, a "Shepherdr feedback:" line for Shepherdr misbehaving, and a "Not run in
+my sandbox:" list where a read-only sandbox cannot run a check. Its worker (`templates/worker.md`) composes the prompt
+from the brief, the diff against the base and that template file; the worker writes the prompt.
+
+**port** (ours, SHE-183): the differences are who writes the prompt and how the change is read. `skill/shepherdr-reviewer/PROMPT.md`
+is ours, filled by the server from the round's facts and written to `reviewer-<id>-<round>.md` under the task's
+`$SHEPHERDR_TMP` when the round is counted — including a round a health look wakes when a reviewer frees. The answer of
+`shepherdr review <id>` names that file; the task agent passes it to the pane round (`--run`), a headless run or a
+subagent and writes no prompt of its own. The brief, base, merge-base, worktree and the AGENTS.md/CLAUDE.md/REVIEW.md files
+that exist go in; the diff does not — one 854-line pasted diff (POL-492, SHE-180) stalled a round, so the reviewer reads
+`git diff <merge-base>...HEAD` and `git log` itself. Our severity tags are critical/major/minor/trivial with the
+skill's meanings, not upstream's blocker/major/minor. "Not run in my sandbox:" checks are run by the worker and reported
+in `--facts`; a "Shepherdr feedback:" line is copied there too, where the coordinator reads it in the ready line's Facts.
+One prompt serves all five reviewer CLIs and the subagent fallback; each CLI's own tests show it gets the file.

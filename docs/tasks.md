@@ -271,10 +271,11 @@
   Settings → How tasks work → Reviewer → Backups → Backup (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
-  say in your summary that you did." Every round runs `shepherdr review <id> --run <prompt-file>`: it counts the round,
-  the caps decide the reviewer (the primary when it has room and is not out, else the first backup that has; its answer
-  says why, e.g. "Codex is at its limit, 4 of 4 at once"), and Shepherdr opens that reviewer interactive in
-  a new tab of the task's herdr space, beside the task's agent, labelled as its reviewer and with
+  say in your summary that you did." Every round runs `shepherdr review <id>` then passes the prompt file its answer
+  names to `shepherdr review <id> --run <that-file>`: the first counts the round (the caps decide the reviewer, the
+  primary when it has room and is not out, else the first backup that has; its answer says why, e.g. "Codex is at its
+  limit, 4 of 4 at once") and writes the reviewer's prompt under the task's `$SHEPHERDR_TMP`; the second opens that
+  reviewer interactive in a new tab of the task's herdr space, beside the task's agent, labelled as its reviewer and with
   `SHEPHERDR_CHAT=<id>/Reviewer`. It is read-only where the CLI supports it (Claude plan mode, Codex sandbox, agy plan
   mode); pi and OpenCode keep bash to run git, with changes forbidden by the prompt. The human watches it in herdr and in
   the task's terminal view. The agent raises its
@@ -288,10 +289,12 @@
   after its agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
   agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
-  always has. Each round the agent gives the reviewer a short prompt — the brief, the repo's rules and the base with
-  `git diff <merge-base>...HEAD` to read the change itself, never a pasted diff (a huge one once stalled a round for
-  540 s with no output) — and `--run` sends it to the pane, waits up to 900 s with progress on stderr, reads the
-  reviewer's last plain message from its own CLI log (not the screen) and closes the pane. A round cut by the timeout
+  always has. The prompt is Shepherdr's own, from `skill/shepherdr-reviewer/PROMPT.md`, filled with the task, its brief,
+  the base and merge-base, the repo's rule files that exist and one findings format for all five CLIs and a subagent:
+  the reviewer reads `git diff <merge-base>...HEAD` and `git log` itself, never a pasted diff (a huge one once stalled a
+  round for 540 s with no output). The agent writes no prompt of its own. `--run` sends that file to the pane, waits up
+  to 900 s with progress on stderr, reads the reviewer's last plain message from its own CLI log (not the screen) and
+  closes the pane. A round cut by the timeout
   prints what the reviewer had written so far, marked cut short, so the agent can use it or fall back to one subagent
   review instead of starting over. Headless is only the fallback when a pane cannot open (no herdr space, or the CLI
   will not start interactively): the answer says so and gives the CLI's line to run in the foreground, stdin closed,
@@ -299,7 +302,10 @@
   Code and OpenCode, where the call then backgrounds rather than stops; at least 960 s in pi), followed by `--done`.
   That run streams its output to a file as it is written; after a timeout the agent reads the file first and uses
   findings already there instead of starting over. The reviewer itself holds no slot longer than the 45-minute lease
-  above.
+  above. The template asks for one finding per item with a tag, file:line and the fix; a reviewer that cannot run a
+  check in its read-only sandbox lists it under "Not run in my sandbox:" for the agent to run and report in `--facts`,
+  and a "Shepherdr feedback:" line about Shepherdr itself is copied there too, where the coordinator reads it in the
+  ready line's Facts.
   Shepherdr does not nudge an agent towards that backup, because it has no exact way to tell a reviewer that cannot run
   from one that is merely full: the only failure it reads as a provider's is a cut-off turn of an agent it started
   itself (`retry.ts` on that chat's own `error` event, and `checkCut` needs the agent's record), and a round it opened
