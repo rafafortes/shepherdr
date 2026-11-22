@@ -31,6 +31,7 @@ import { isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 import { capture, end as endProcesses, endDeps, readTree, systemSource, type Source } from './orphans.ts'
 import { taskWorktreeKey } from './trust.ts'
+import { startInPane } from './pane-agent.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -1447,23 +1448,10 @@ export class Agents extends Emitter<Events> {
     const args = this.args(r, !!resume)
     this.save()
     this.flushRecords()
-    await this.again(r, async () => {
-      // a new pane needs a moment before its shell is at the prompt
-      for (let i = 0; ; i++) {
-        try {
-          await herdr.start(r.name, r.kind, pane, args)
-          return
-        } catch (e) {
-          const code = (e as { code?: string }).code
-          if (code === 'agent_not_ready') return
-          if (i >= 8 || dropped(e)) {
-            console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)
-            throw e
-          }
-          await new Promise((res) => setTimeout(res, 750))
-        }
-      }
-    })
+    await this.again(r, () =>
+      // a new pane needs a moment before its shell is at the prompt; the waits live with the reviewer's launch too
+      startInPane(herdr, r.name, r.kind, pane, args, undefined, (e) => console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)),
+    )
     await this.refresh()
     try {
       // this launch owns the agent it just started: a restart's or a relaunch's stopping flag (held for what you send)

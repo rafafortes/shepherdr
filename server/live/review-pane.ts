@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { mirrorSession, opencodeLogPath } from './opencode.ts'
 import { herdr } from './herdr.ts'
+import { completeLaunch, sendWhenReady, startInPane } from './pane-agent.ts'
 import { REVIEW_RUN_TIMEOUT, reviewerPaneArgs, type Reviewer } from './prompts.ts'
 import { claudeLogPath, findLog, piSessionDir } from './readers/find.ts'
 import { LogTail, readerFor } from './readers/index.ts'
@@ -18,6 +19,7 @@ import { home } from '../store.ts'
 export interface PaneHerdr {
   workspaces(): Promise<{ workspace_id: string; label: string }[]>
   createTab(workspace_id: string, label: string, cwd: string, env?: Record<string, string>): Promise<{ root_pane: { pane_id: string } }>
+  agent(target: string): Promise<unknown>
   start(name: string, kind: string, pane_id: string, args?: string[]): Promise<unknown>
   prompt(target: string, text: string): Promise<unknown>
   visible(pane_id: string): Promise<string>
@@ -175,10 +177,14 @@ export async function runReviewInPane(
     // the reviewer's. codex and agy name their sessions themselves, so this is how those two are told apart.
     const before = await read(kind, o.cwd, 0)
     const args = [...reviewerPaneArgs(o.reviewer, { ...prepared, cwd: o.cwd }), ...(prepared.extra ?? [])]
-    await h.start(name, kind, pane, args)
+    // the same start a task's agent uses: a tab's shell may not be ready on the first call, and herdr may leave the
+    // launch pending until it is asked for by name. Only then is the pane one herdr will take a prompt for.
+    await startInPane(h, name, kind, pane, args, sleep)
+    await completeLaunch(h, name)
     await answerStartup(h, pane, sleep)
+    await sendWhenReady(h, name, o.prompt, { sleep, poll: o.poll })
+    // said only once the pane really runs the reviewer: a round that fell back must never say "running in a pane"
     step(`Review round ${o.round} running in a pane: ${o.id} reviewer (${kind}).`)
-    await h.prompt(name, o.prompt)
 
     let text = ''
     let done = false
