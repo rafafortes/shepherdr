@@ -4,6 +4,13 @@ import { layout, settled } from './layout.ts'
 
 const { browser, world, server } = await layout({ everything: true })
 
+/** Start now posts its action without opening a sheet, so the click returns before the action lands in world.act: wait
+ *  for the capture before reading what was sent. */
+const waitForSent = async (sent: unknown[], n: number) => {
+  for (let i = 0; i < 100 && sent.length < n; i++) await Bun.sleep(50)
+  expect(sent.length).toBeGreaterThanOrEqual(n)
+}
+
 describe.skipIf(!browser)('restarting an agent', () => {
   test('Settings mismatches show no banner and do not restart either role', async () => {
     const p = world.snapshot().places.find((x) => !x.home)!
@@ -387,6 +394,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
       }
       await open()
       await page.getByRole('menuitem', { name: 'Start now', exact: true }).click()
+      await waitForSent(sent, 1)
       expect(sent.at(-1)).toEqual({ type: 'start-now', chat: 'HP-203/Agent' })
       await open()
       await page.getByRole('menuitem', { name: 'Start now with…' }).click()
