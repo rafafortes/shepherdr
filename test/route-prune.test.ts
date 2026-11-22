@@ -6,7 +6,7 @@
 //
 // Every CLI: the helper serves claude, codex, pi, opencode and agy alike. The ancestry walk is not per CLI: it reads
 // /proc/<pid>/stat for each ancestor, and `cli_environment` takes a process by its executable name or npm entry point
-// (`agent_executable`, covered per CLI in route-executable.test.ts). The tests here bind a plain process, since neither
+// (`agent_executable`, covered per CLI's process shape in route-executable.test.ts: the native binaries, and the node entry points of claude, codex and pi). The tests here bind a plain process, since neither
 // the prune nor the dead-pid shortcut looks at which CLI a route belongs to.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'

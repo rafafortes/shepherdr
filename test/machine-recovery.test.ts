@@ -81,7 +81,7 @@ try {
  clock += 4000
  await a.refresh()
  if(!a.reachable) throw Error('did not reconnect')
- const calls = readFileSync(${JSON.stringify(join(dir, 'calls'))}, 'utf8').trim().split('\\n').map(x=>JSON.parse(x)).filter(x=>!x.join(' ').includes('--prune'))
+ const calls = readFileSync(${JSON.stringify(join(dir, 'calls'))}, 'utf8').trim().split('\\n').map(x=>JSON.parse(x))
  if(calls.length !== 2) throw Error('duplicate bridge attempts: '+calls.length)
  if(calls.some(x=>!x.includes('ControlPath=none'))) throw Error('reused cached SSH master')
  let release!: () => void

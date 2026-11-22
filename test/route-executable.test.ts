@@ -35,6 +35,7 @@ describe('route.pl: which executables are agent CLIs', () => {
   test('npm entry points still count by their package or file name', () => {
     expect(agentExecutable('/usr/bin/node', '/opt/node_modules/@mariozechner/pi-coding-agent/dist/cli.js')).toBe(true)
     expect(agentExecutable('/usr/bin/node', '/usr/lib/node_modules/@openai/codex/bin/codex.js')).toBe(true)
+    expect(agentExecutable('/usr/bin/node', '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js')).toBe(true)
     expect(agentExecutable('/usr/bin/node', '/some/app.js')).toBe(false)
   })
 })

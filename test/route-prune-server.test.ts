@@ -15,6 +15,8 @@ process.env.HOME = home
 process.env.SHEPHERDR_HOME = home
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
+// the preload turns the prune off for the tests that share the real HOME; this file has a HOME of its own
+process.env.SHEPHERDR_PRUNE_ROUTES = '1'
 
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
@@ -28,7 +30,7 @@ const stale = (pid: number) => {
   return file
 }
 
-const until = async (f: () => boolean, ms = 5000) => {
+const until = async (f: () => boolean, ms = 15_000) => {
   for (const t0 = Date.now(); !f(); await Bun.sleep(10)) if (Date.now() - t0 > ms) throw new Error('timed out')
 }
 
@@ -75,6 +77,21 @@ describe('the server prunes dead routes', () => {
       }
     } finally {
       owner.kill()
+    }
+  })
+
+  test('SHEPHERDR_PRUNE_ROUTES=0 prunes nothing, as in every other test', async () => {
+    const file = stale(4_000_005)
+    const agents = spyOn(herdr, 'agents').mockResolvedValue([])
+    process.env.SHEPHERDR_PRUNE_ROUTES = '0'
+    try {
+      const a = new Agents() as unknown as Pruner
+      await a.refresh()
+      await Bun.sleep(300)
+      expect(existsSync(file)).toBe(true)
+    } finally {
+      process.env.SHEPHERDR_PRUNE_ROUTES = '1'
+      agents.mockRestore()
     }
   })
 

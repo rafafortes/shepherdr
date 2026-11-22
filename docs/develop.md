@@ -269,7 +269,7 @@ agents. Your data lives in `~/.shepherdr` (`SHEPHERDR_HOME` to move it).
 A server with a home of its own (`SHEPHERDR_HOME`) starts no agent in herdr unless `SHEPHERDR_LAUNCH_AGENTS=1` says it
 may, and logs each one it skips: its agents would be real CLIs in the herdr it inherits, so a task that came due there
 would open one in the human's own herdr. A worker for another machine (`SHEPHERDR_BOX`) starts them there as long as its
-main server's home is the real one, or was told to with that variable. A proof uses the demo source, or
+main server's home is the real one, or was told to with that variable. The server also removes the route files of dead processes from `~/.shepherdr/helper/routes` (`route.pl --prune`, at its first look at herdr and every ten minutes; only where it may start agents, and `SHEPHERDR_PRUNE_ROUTES=0` turns it off, as the tests do). A proof uses the demo source, or
 `HERDR_SOCKET_PATH` at a socket that isn't there, a home under `/tmp`, a `SHEPHERDR_PORT` other than 7787, no task that
 can come due, and stops the server by its own pid (`$!`, or `server.json` in a live home) — never
 `pkill -f server/main.ts`, which also matches the live one.

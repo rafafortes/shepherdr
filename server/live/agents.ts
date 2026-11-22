@@ -240,9 +240,8 @@ const ROUTE_REPAIR_CHUNK = 6
  *  starts at 0), so a restart repairs its routes at once instead of waiting this out. */
 const ROUTE_REPAIR_EVERY = 30_000
 /** how often the routes folder is pruned of dead processes' files: at the first refresh after the server starts that
- *  reaches herdr (pruneAt
- *  starts at 0), then this often. A route file is written for every launch and nothing else removes it, so the folder
- *  grew without end (1707 files on 2026-11-21) and slowed every CLI call (SHE-185). */
+ *  reaches herdr (pruneAt starts at 0), then this often. A route file is written for every launch and nothing else
+ *  removed one, so the folder grew without end (1707 files on 2026-11-21) and slowed every CLI call (SHE-185). */
 const ROUTE_PRUNE_EVERY = 10 * 60_000
 const ROUTE_PRUNE_MS = 10_000
 
@@ -919,7 +918,8 @@ export class Agents extends Emitter<Events> {
    *  start stamp no longer matches; never a live one). A server that binds no routes prunes none. Its failure is the
    *  folder staying as it was, which only costs the CLI the cheap liveness test per file: never raised. */
   private async pruneRoutes() {
-    if (!launchesAgents()) return
+    // the tests (test/preload.ts) say no: they run with the real HOME, where route.pl looks, and touch nothing of this machine's
+    if (!launchesAgents() || process.env.SHEPHERDR_PRUNE_ROUTES === '0') return
     const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
     const r = await run(['perl', router, '--prune'], { timeoutMs: ROUTE_PRUNE_MS }).catch(() => undefined)
     const n = Number(r?.out.toString().trim())
