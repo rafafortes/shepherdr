@@ -439,10 +439,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('--run counts the round and, with no herdr space open, says so and gives the headless line and --done', async () => {
     const t = task({ reviewer: 'codex' })
-    const dir = tmp('review-prompt')
-    const file = join(dir, 'prompt.md')
-    execSync(`printf 'Review the change. git diff <merge-base>...HEAD\\n' > ${file}`, { shell: '/bin/sh' })
-    const r = await said(['review', t.id, '--run', file], toBe(t))
+    const r = await said(['review', t.id, '--run'], toBe(t))
     expect(r.code).toBe(0)
     expect(r.out).toContain('pane could not open')
     expect(r.out).toContain('fell back to headless')

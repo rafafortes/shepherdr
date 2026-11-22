@@ -67,9 +67,11 @@ export function fillReviewerPrompt(o: PromptFacts, template = readFileSync(REVIE
     RULES: rules,
     PRIVACY: o.privacy.trim(),
   }
-  const out = template.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => words[key] ?? whole)
-  if (/\{\{\w+\}\}/.test(out)) throw new Error(`The reviewer prompt template has an unfilled placeholder: ${out.match(/\{\{\w+\}\}/)?.[0]}`)
-  return out
+  // Look for unfilled keys in the *template*, never in the filled text: a brief about Handlebars may itself say
+  // `{{BRIEF}}`, which is content, not a gap in the template.
+  const missing = [...template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).find((key) => key !== undefined && !(key in words))
+  if (missing) throw new Error(`The reviewer prompt template has an unfilled placeholder: {{${missing}}}`)
+  return template.replace(/\{\{(\w+)\}\}/g, (_whole, key: string) => words[key] ?? _whole)
 }
 
 /** write the round's prompt under the task's temp folder and name the file; called where the round is counted */

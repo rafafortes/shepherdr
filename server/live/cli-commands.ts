@@ -46,7 +46,7 @@ import { type Change, changeWords, PROFILES_ON_MAIN, type Profiles, previewWords
 import { createSession } from './opencode.ts'
 import { reviewRunLine, reviewerWords, settingsBlock } from './prompts.ts'
 import { readPromptFile, runReviewInPane } from './review-pane.ts'
-import { reviewerPromptFile } from './reviewer-prompt.ts'
+import { reviewerPromptFile, reviewerPromptPath } from './reviewer-prompt.ts'
 import { trustWorktree } from './trust.ts'
 import type { RequestedNewsMailbox } from './requested-news.ts'
 import { type Resources, lines as resourceLines } from './resources.ts'
@@ -435,20 +435,16 @@ export class CliCommands {
     onStep?: (words: string) => void,
   ): Promise<string> {
     if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent runs its review, not ${ctx.chat ? 'this chat' : 'you at the command'}`)
-    // The prompt is Shepherdr's (SHE-183): a counted round already wrote it under this task's $SHEPHERDR_TMP and its
-    // answer named the file. --run with no file still works by counting the round itself, so the file is written first.
+    // Every round gets Shepherdr's prompt (SHE-183): the agent names the file `review <id>` wrote, it never supplies
+    // one of its own. Reuse the open round only for that file; any other name (a stale file after a restart, a headless
+    // fallback left unreleased, or an agent-written prompt) counts a fresh round and is sent that round's own file, so
+    // the prompt's round number stays true and no foreign words reach the reviewer.
     const active = this.engine.activeRound(t.id)
-    if (!promptFile && !active) {
-      const first = await this.engine.reviewRound(t.id)
-      if ('wait' in first) return this.engine.reviewWaitWords(t.id, first.wait)
-    }
-    const counted = this.engine.activeRound(t.id)
-    const file = promptFile ?? (counted ? reviewerPromptFile(t.id, counted.round) : undefined)
-    if (!file) throw new Error(`shepherdr review ${t.id} --run <prompt-file>: write the reviewer's short prompt to a file first`)
-    // read the prompt before counting a round when one is still owed: a missing file must not burn one
-    const prompt = readPromptFile(file)
-    const r = counted ?? (await this.engine.reviewRound(t.id))
+    const reuse = !!active && (!promptFile || promptFile === reviewerPromptPath(t.id, active.round))
+    const r = reuse && active ? active : await this.engine.reviewRound(t.id)
     if ('wait' in r) return this.engine.reviewWaitWords(t.id, r.wait)
+    const file = reviewerPromptFile(t.id, r.round)
+    const prompt = readPromptFile(file)
     const round = r.round
     const reviewer = r.reviewer
     const env = { ...agentEnv(`${t.id}/Reviewer`, ROOT) }

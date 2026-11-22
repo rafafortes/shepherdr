@@ -81,7 +81,7 @@ const promptFile = () => {
 describe('shepherdr review --run', () => {
   test('a pane round prints its findings, frees the reviewer and posts a card while it runs', async () => {
     const t = task()
-    const r = await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` }, (s) => calls.steps.push(s))
+    const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` }, (s) => calls.steps.push(s))
     expect(r.code).toBe(0)
     expect(r.out).toContain('major: the pane works')
     expect(r.out).toContain('ran in a herdr pane')
@@ -99,7 +99,7 @@ describe('shepherdr review --run', () => {
   test('a cut-short round says its findings are partial', async () => {
     const t = task()
     next = { findings: 'minor: unfinished thought', cutShort: true, pane: 'w1:p2' }
-    const r = await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
     expect(r.out).toContain('Cut short at the 900 s timeout')
     expect(r.out).toContain('minor: unfinished thought')
     expect(t.reviews).toBe(1)
@@ -108,7 +108,7 @@ describe('shepherdr review --run', () => {
   test('a reviewer error keeps partial findings, marks them cut short and posts an error card', async () => {
     const t = task()
     next = { findings: 'Let me read the diff', error: '402 Insufficient funds', cutShort: true }
-    const r = await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
     expect(r.out).toContain('The reviewer gave an error (402 Insufficient funds)')
     expect(r.out).toContain('these are its partial findings')
     expect(r.out).toContain('Let me read the diff')
@@ -120,7 +120,7 @@ describe('shepherdr review --run', () => {
 
   test('the setup callback gives codex its tool environment and does not pass agy a conflicting effort', async () => {
     const t = task()
-    await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
     const prepare = calls.opts?.prepare as ((k: string, c: string, r: { kind: string; model?: string; effort?: string }) => Promise<Record<string, unknown>>) | undefined
     if (!prepare) throw new Error('the round had no setup callback')
     const codex = await prepare('codex', `${t.id}/Reviewer`, { kind: 'codex', model: 'gpt-5.5', effort: 'high' })
@@ -138,12 +138,13 @@ describe('shepherdr review --run', () => {
     expect(typeof named.modelId).toBe('string')
   })
 
-  test('a missing prompt file refuses before a round is counted', async () => {
+  test("a foreign prompt file is ignored: the round gets Shepherdr's prompt instead", async () => {
     const t = task()
     const r = await src.cli(['review', t.id, '--run', join(tmp('missing-prompt'), 'none.md')], { chat: `${t.id}/Agent` })
-    expect(r.code).toBe(1)
-    expect(r.out).toContain('No prompt file')
-    expect(t.reviews).toBeUndefined()
+    expect(r.code).toBe(0)
+    expect(t.reviews).toBe(1)
+    expect(calls.opts?.prompt).toContain(`Task: ${t.id}`)
+    expect(calls.opts?.prompt).not.toContain('No prompt file')
   })
 
   test('--run with no file uses the prompt Shepherdr wrote, counts one round and names the file', async () => {
@@ -172,6 +173,29 @@ describe('shepherdr review --run', () => {
     expect(t.reviews).toBe(1)
     expect(calls.opts?.prompt as string).toContain(`Task: ${t.id}`)
     expect(asked.out).toContain('write no prompt of your own')
+  })
+
+  test('a brief with a Settings block gives the reviewer only the coordinator words', async () => {
+    const t = task()
+    t.desc = `${t.desc}\n\nSettings: (from shepherdr show; where the brief above says otherwise, it wins)\n- Reviewer: a headless Codex or a Codex subagent. Each round, run \`shepherdr review ${t.id}\` first`
+    const r = await src.cli(['review', t.id, '--run'], { chat: `${t.id}/Agent` })
+    expect(r.code).toBe(0)
+    const prompt = calls.opts?.prompt as string
+    expect(prompt).toContain('Add b.txt.')
+    expect(prompt).not.toContain('Settings:')
+    expect(prompt).not.toContain('a headless Codex')
+  })
+
+  test('--run with a stale prompt file while a round is open counts a fresh round and sends its prompt', async () => {
+    const t = task()
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).code).toBe(0)
+    expect(t.reviews).toBe(1)
+    const r = await src.cli(['review', t.id, '--run', promptFile()], { chat: `${t.id}/Agent` })
+    expect(r.code).toBe(0)
+    expect(t.reviews).toBe(2)
+    // never the stale file's 'brief': the fresh round's own file, with the right round number
+    expect(calls.opts?.prompt).toContain('Review round: 2')
+    expect(calls.opts?.prompt).toContain(`Task: ${t.id}`)
   })
 
   for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) {

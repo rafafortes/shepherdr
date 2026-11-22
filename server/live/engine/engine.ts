@@ -3592,7 +3592,9 @@ export class Engine extends Emitter<Events> {
       id: t.id,
       round: round.round,
       title: t.title,
-      brief: t.desc ?? '',
+      // only the coordinator's words, not the Settings block a brief ends with: that is the task agent's orders, and
+      // telling a read-only reviewer to run `shepherdr review` or switch reviewers is worse than useless
+      brief: splitBrief(t.desc ?? '')[0] || t.title,
       base: t.base ?? 'main',
       worktree: t.worktree ?? '',
       privacy: privatePrompt('', this.settings.instructions('reviewer', this.nameOf(t) ?? '')),

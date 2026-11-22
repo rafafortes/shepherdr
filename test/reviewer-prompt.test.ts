@@ -58,6 +58,11 @@ describe('the template Shepherdr owns', () => {
     expect(() => fillReviewerPrompt(facts, 'Task {{TASK_ID}} {{OTHER}}')).toThrow('unfilled placeholder: {{OTHER}}')
   })
 
+  test('placeholder-looking text in the brief is content, not a gap in the template', () => {
+    const p = fillReviewerPrompt({ ...facts, brief: 'render `{{BRIEF}}` in the page' })
+    expect(p).toContain('render `{{BRIEF}}` in the page')
+  })
+
   test('the round writes its prompt under the task temp folder and names the same path', () => {
     const file = writeReviewerPrompt({ ...facts, template: 'Task {{TASK_ID}} round {{ROUND}}: {{BRIEF}}' })
     expect(file).toBe(reviewerPromptFile('RV-9', 2))
