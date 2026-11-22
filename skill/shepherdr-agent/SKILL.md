@@ -102,11 +102,13 @@ build, check and review the work is your own judgment.
    unfixed. A round after the first looks first at what changed since the last reviewed commit (`git diff <last-reviewed>..HEAD`,
    including any merge's conflict resolutions), with the whole change still read for context; Shepherdr writes both
    ranges into the prompt and names them in the round's answer.
-   `shepherdr review <id> --done` records the commit that round reviewed — the commit, the round and the reviewer — on
-   the task (`--commit` names an earlier commit if you fixed and committed after the review). Your final commit must be
-   reviewed before `shepherdr ready` or `shepherdr merge`: a refusal names the last reviewed commit and what came after
-   it. No new round is needed for a clean merge of the base onto a reviewed commit, for a tree identical to one
-   reviewed, or when your brief says no review; we compare trees, so a rebase onto a moved base needs a round.
+   `shepherdr review <id> --done` records the commit that round reviewed — the commit the round was counted on, the
+   round and the reviewer — on the task (`--commit <rev>` names another commit of the branch, for a round that read an
+   earlier one). Your final commit must be reviewed before `shepherdr ready` or `shepherdr merge`: a refusal names the
+   last reviewed commit and what came after it. Anything you commit after a round needs its own round, so commit your
+   fixes and review again rather than fixing after the last `--done`. No new round is needed for a clean merge of the
+   base onto a reviewed commit, for a tree identical to a reviewed one, for the same change of your own against a moved
+   base (a clean rebase), or when your brief says no review; a conflict resolution that moves your own lines needs one.
    Run the checks the reviewer lists under "Not run in my sandbox:" yourself and say the results in `--facts`.
    Copy any "Shepherdr feedback:" line from its findings into `--facts` too: the coordinator reads it in the ready line's
    Facts; never file anything outside yourself. An open choice no experiment can settle goes to the human as a card.

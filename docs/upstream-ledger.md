@@ -921,15 +921,18 @@ own diff is unchanged keeps its review), and the "since round on <commit>, only 
 `302218ca` (SHEP-283, 3.1.46, #1116). CHANGELOG 3.1.45: "A reviewed task that only took in a newer main keeps its review
 and spends no extra round"; 3.1.46: "A review that's needed names what changed since the last reviewed commit".
 
-**port** (ours, SHE-184): `shepherdr review <id> --done` records the worktree HEAD (or `--commit`) with the round and its
-reviewer in `task.reviewed`; the first round counted also marks the task, so old tasks with no rounds are left as today.
-`engine.reviewGate` refuses an unreviewed final commit in both `done()` (ready) and `mergeNow()` (merge), naming the last
-reviewed commit, the commits after it and the `git diff` range; out of rounds, only the task's coordinator can add one with
-`review-more`. No round is spent on a clean base merge (first-parent walk, each other parent in the base and the merge's
-tree equal to git's own merge), on an identical tree, or when the brief says no review. We compare **trees, not patch-ids**:
-a rebase onto a moved base changes the tree and needs a round, and a conflict resolution needs one too; upstream's
-"same own changes" (#1178) would carry a review across such a rebase, but here the reviewer should see the whole new tree.
+**port** (ours, SHE-184): `shepherdr review <id> --done` records the commit the round was counted on (the worktree HEAD
+then, what its reviewer read) with the round and its reviewer in `task.reviewed`, kept past the lease; `--commit <rev>`
+names another commit of the branch, resolved to its full sha. The first round counted also marks the task, so old tasks
+with no rounds are left as today. `engine.reviewGate` refuses an unreviewed final commit in both `done()` (ready) and
+`mergeNow()` (merge), naming the last reviewed commit, the commits after it and the `git diff` range; out of rounds, only
+the task's coordinator can add one with `review-more`. No round is spent when HEAD's tree is a reviewed tree, on a clean
+base merge (first-parent walk, each other parent in the base and the merge's tree equal to git's own merge), on the same
+own change against a moved base (upstream's `own_diff`/`same_own_changes`, #1178: a clean rebase, ours or the agent's,
+keeps its review), or when the brief says no review. A conflict resolution that moves the task's own lines, or anything
+committed since a round, needs one. A pane round that errored or was cut short with nothing written records no commit.
+Upstream's folder-in-place mode, `--report` findings text, its `review_gate` taught by the brief and Assistant-driven
+`review-more` news have no 2.0 equivalent: our reviewers run in a pane or headless, findings go in the agent's reply, the
+marker comes with the task's first round, and the coordinator's `review-more` wakes the agent as before.
 The prompt template and `shepherdr review`'s answer name both `git diff <merge-base>...HEAD` and, from the second round,
-`git diff <last-reviewed>..HEAD`, with the focus on the latter. Upstream's folder-in-place mode, `--report` findings text
-and Assistant-driven `review-more` news have no 2.0 equivalent: our reviewers run in a pane or headless, findings go in
-the agent's reply, and the coordinator's `review-more` wakes the agent as before.
+`git diff <last-reviewed>..HEAD`, with the focus on the latter.

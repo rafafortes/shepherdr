@@ -66,6 +66,13 @@ export const oneline = (cwd: string, range: string, max = 8) => {
   const r = syncGit(cwd, 'log', '--oneline', '-n', String(max), range)
   return r.status === 0 ? r.stdout.split('\n').filter(Boolean) : []
 }
+/** a commit named on the command (`--commit HEAD~1`): its full sha, or nothing when it is no commit on this branch */
+export const resolveCommit = (cwd: string, ref: string, head: string) => {
+  if (!cwd || !head) return undefined
+  const r = syncGit(cwd, 'rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`)
+  const sha = r.status === 0 ? r.stdout.trim() : ''
+  return sha && (sha === head || isAncestor(cwd, sha, head)) ? sha : undefined
+}
 
 /** a line that names what was found, and one that names where: the row prefers these over git's own wrapper */
 const HEADLINE = /\b(gitleaks|findings?|fatal|error|leak|violation|fail(?:ed)?|rejected|non-fast-forward|denied)\b/i

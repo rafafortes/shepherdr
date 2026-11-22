@@ -492,14 +492,17 @@ export class CliCommands {
     if (got.failed) {
       return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is ${file}), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
     }
-    this.engine.reviewDone(t.id)
+    // an answer, even "no findings", is the round's review of its commit; a round that errored or was cut with nothing
+    // written reviewed nothing, so it frees the reviewer and records no commit
+    this.engine.reviewDone(t.id, undefined, !!got.findings)
     // a provider error is not a timeout: say which it was, and never call an empty cut-short answer "partial findings"
     const cut = got.error
       ? `The reviewer gave an error (${got.error}); ${got.findings ? 'these are its partial findings' : 'it wrote no findings before the error'}.\n\n`
       : got.cutShort
         ? `Cut short at the 900 s timeout; these are its partial findings.\n\n`
         : ''
-    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
+    const unrecorded = got.findings ? '' : `\n\nThis round is not recorded as a review of ${t.id}'s commit: \`shepherdr ready\` asks for one this commit was reviewed on.`
+    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}${unrecorded}`
   }
 
   async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {

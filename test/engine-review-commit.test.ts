@@ -156,14 +156,87 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(await w.engine.reviewGate(t)).toBeUndefined()
   })
 
-  test('a rebase onto a moved base changes the tree and needs a round', async () => {
+  test('a clean rebase onto a moved base keeps its review, and a resolution that moved its own lines needs one', async () => {
     const w = world()
     const { t, dir } = await withCommit(w, 'rebase')
     await round(w, t)
     writeFileSync(join(dir, 'other.txt'), 'other\n')
     sh('git add -A && git commit -qm other', dir)
     sh('git rebase main', t.worktree!)
+    // its own change is the one the round read, however git replayed it: no round is spent on Shepherdr's or the agent's rebase
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+
+    // a rebase whose conflict resolution moved the task's own lines is work the review did not see
+    const w2 = world()
+    const { t: t2, dir: dir2 } = await withCommit(w2, 'rebase-resolution')
+    writeFileSync(join(t2.worktree!, 'README.md'), 'mine\n')
+    sh('git add -A && git commit -qm "edit readme"', t2.worktree!)
+    await round(w2, t2)
+    writeFileSync(join(dir2, 'README.md'), 'theirs\n')
+    sh('git add -A && git commit -qm "base readme"', dir2)
+    sh('git rebase main || true', t2.worktree!)
+    writeFileSync(join(t2.worktree!, 'README.md'), 'both\n')
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', t2.worktree!)
+    expect(await w2.engine.reviewGate(t2)).toBeDefined()
+  })
+
+  test('--done records the commit the round was counted on, not a fix committed before it', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'count-time-head')
+    await w.engine.reviewRound(t.id)
+    const reviewed = head(t)
+    writeFileSync(join(t.worktree!, 'fix.txt'), 'fix\n')
+    sh('git add -A && git commit -qm "fix after the review started"', t.worktree!)
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(t.reviewed).toMatchObject([{ round: 1, commit: reviewed }])
+    // the fix committed before --done never reached that reviewer
     expect(await w.engine.reviewGate(t)).toBeDefined()
+  })
+
+  test('--commit is resolved to its full sha, and only a commit on this branch is taken', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'named-commit')
+    const first = head(t)
+    writeFileSync(join(t.worktree!, 'fix.txt'), 'fix\n')
+    sh('git add -A && git commit -qm fix', t.worktree!)
+    // a revision, not just a sha: HEAD~1 and a short sha name this branch's earlier commit, stored as its full sha
+    for (const ref of ['HEAD~1', first.slice(0, 7)]) {
+      await w.engine.reviewRound(t.id)
+      expect(w.engine.reviewDone(t.id, ref)).toBe(true)
+      expect(t.reviewed!.at(-1)).toMatchObject({ commit: first })
+    }
+    // anything that is no commit of this branch is refused, before it can be stored as a review of something else
+    for (const ref of ['--force', 'deadbeef', 'HEAD~9']) expect(() => w.engine.reviewDone(t.id, ref)).toThrow('not a commit on')
+    expect(t.reviewed).toHaveLength(2)
+  })
+
+  test('a tree identical to any reviewed one, not only the last, needs no round', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'older-tree')
+    const first = await round(w, t)
+    writeFileSync(join(t.worktree!, 'fix.txt'), 'fix\n')
+    sh('git add -A && git commit -qm fix', t.worktree!)
+    const second = await round(w, t)
+    expect(second.commit).not.toBe(first.commit)
+    // B's change undone: HEAD's tree is A's, which a round reviewed
+    sh('git rm -q fix.txt && git commit -qm "take the fix out"', t.worktree!)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+  })
+
+  test('a task that never counted a round is left as it was (the rule starts with its first round)', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'never-reviewed')
+    expect(t.reviews).toBeUndefined()
+    expect(await w.engine.done(t.id, 'done', 'facts')).toMatchObject({ state: 'ready' })
+  })
+
+  test('a branch whose own work is gone has nothing to review or merge', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'net-zero')
+    await round(w, t)
+    // its own change undone: HEAD's tree is the base's, so no round is asked for work that adds nothing
+    sh('git revert --no-edit HEAD', t.worktree!)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
   })
 
   test('a second round names the change since the last reviewed commit and the whole change', async () => {

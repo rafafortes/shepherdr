@@ -44,17 +44,21 @@
   commit still unreviewed says so in its chat; its coordinator gives it exactly one more with `shepherdr task
   review-more <id>`, once, only once they are all used, and its agent is woken with the round to run. `task show`
   records it.
-- A review belongs to the commit it reviewed. `shepherdr review <id> --done` records that commit, the round and the reviewer
-  on the task (`--commit` names an earlier one when fixes were committed since; `shepherdr task show` then names the last
-  reviewed commit). From the first round on, `shepherdr ready`
+- A review belongs to the commit it reviewed. `shepherdr review <id> --done` records the commit the round was counted
+  on — the branch's HEAD then, which is what its reviewer was sent to read, never a fix committed after it — with the round
+  and the reviewer, on the task. `--commit <rev>` names another commit of the branch instead (resolved to its full sha);
+  `shepherdr task show` then names the last reviewed commit. From the first round on, `shepherdr ready`
   and `shepherdr merge` refuse a final commit no round was recorded on; the refusal names the last reviewed commit and
-  what came after it (`git diff <last-reviewed>..HEAD`). No new round is needed when the final commit is the reviewed one,
-  when only clean merges of the base came after it, when its tree is identical to a reviewed tree, or when the brief says
-  no review; we compare trees, not patch-ids, so a rebase onto a moved base needs a round. A merge with a conflict
-  resolution is new work and needs one. Tasks from before these records have none, and are left as they were. A round after
+  what came after it (`git diff <last-reviewed>..HEAD`). No new round is needed when the final commit is one a round was
+  recorded on, when its tree is identical to a reviewed tree, when only clean merges of the base came after it, when its
+  own change against the moved base is the one a round read (a clean rebase, Shepherdr's own included), or when the brief
+  says no review. A conflict resolution that moves the task's own lines, or anything committed since a round, needs one.
+  Tasks from before these records have none, and are left as they were; so is a task whose agent never counted a round
+  (the rule starts with its first). A round after
   the first gets the change since the last reviewed commit as its focus, with the whole diff still read for context: both
   ranges are named in the reviewer prompt and in the round's answer. Out of rounds with the final commit unreviewed, the
-  agent says why in its chat and stops; only its coordinator adds one.
+  agent says why in its chat and stops; only its coordinator adds one. A pane review that errored, or was cut short with
+  nothing written, frees its reviewer and records no commit: it reviewed nothing.
 - Want something noted but not started? Ask for it "for later": the coordinator adds it with `--later`, and its agent
   starts all the same, with "don't start yet, wait for a go" in its brief. It says in one line that it has it and the task shows To do (`shepherdr todo`).
   Tap it and you are in its chat, like any other: say go when you are ready, or say what to change. The agent decides
