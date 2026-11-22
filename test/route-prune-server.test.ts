@@ -17,6 +17,9 @@ process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
 // the preload turns the prune off for the tests that share the real HOME; this file has a HOME of its own
 process.env.SHEPHERDR_PRUNE_ROUTES = '1'
+// the merge gate runs from the live server's environment, whose SHEPHERDR_ROOT is the installed checkout: its route.pl is
+// the old one, with no --prune. This test is about this tree's helper.
+process.env.SHEPHERDR_ROOT = join(import.meta.dir, '..')
 
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
