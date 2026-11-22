@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { mirrorSession, opencodeLogPath } from './opencode.ts'
 import { herdr } from './herdr.ts'
+import { completeLaunch, sendWhenReady, startPaneAgent } from './pane-agent.ts'
 import { REVIEW_RUN_TIMEOUT, reviewerPaneArgs, type Reviewer } from './prompts.ts'
 import { claudeLogPath, findLog, piSessionDir } from './readers/find.ts'
 import { LogTail, readerFor } from './readers/index.ts'
@@ -18,6 +19,7 @@ import { home } from '../store.ts'
 export interface PaneHerdr {
   workspaces(): Promise<{ workspace_id: string; label: string }[]>
   createTab(workspace_id: string, label: string, cwd: string, env?: Record<string, string>): Promise<{ root_pane: { pane_id: string } }>
+  agent(target: string): Promise<unknown>
   start(name: string, kind: string, pane_id: string, args?: string[]): Promise<unknown>
   prompt(target: string, text: string): Promise<unknown>
   visible(pane_id: string): Promise<string>
@@ -159,6 +161,17 @@ export async function runReviewInPane(
   let pane: string | undefined
   let name: string | undefined
   const step = (s: string) => o.onStep?.(s)
+  const now = o.now ?? Date.now
+  // the caller's stream drops an idle connection after 120 s. Every wait calls `heartbeat` before its next herdr call
+  // (one call can itself take 70 s), and the findings loop uses the same beat, so no phase can leave it silent.
+  let beat = start + 60_000
+  const heartbeat = () => {
+    const at = now()
+    if (at >= beat) {
+      step(`Review round ${o.round} is still waiting for ${o.id}'s reviewer pane (${kind}).`)
+      beat = at + 60_000
+    }
+  }
 
   try {
     // a task's worktree has a herdr space of its own; its agent's tab is one tab in it, the reviewer's another. A space
@@ -175,22 +188,24 @@ export async function runReviewInPane(
     // the reviewer's. codex and agy name their sessions themselves, so this is how those two are told apart.
     const before = await read(kind, o.cwd, 0)
     const args = [...reviewerPaneArgs(o.reviewer, { ...prepared, cwd: o.cwd }), ...(prepared.extra ?? [])]
-    await h.start(name, kind, pane, args)
+    step(`Review round ${o.round} is opening ${o.id}'s reviewer pane (${kind}).`)
+    // the same start a task's agent uses: a tab's shell may not be ready on the first call, herdr may drop a launch,
+    // and it may leave the name pending until it is asked for. Only then is the pane one herdr will take a prompt for.
+    await startPaneAgent(h, name, kind, pane, args, { sleep, now, onTry: heartbeat, forMs: 180_000 })
+    await completeLaunch(h, name)
     await answerStartup(h, pane, sleep)
+    await sendWhenReady(h, name, o.prompt, { sleep, poll: o.poll, now, onTry: heartbeat, onWait: heartbeat, forMs: 60_000 })
+    // said only once the pane really runs the reviewer: a round that fell back must never say "running in a pane"
     step(`Review round ${o.round} running in a pane: ${o.id} reviewer (${kind}).`)
-    await h.prompt(name, o.prompt)
 
     let text = ''
     let done = false
     const until = start + timeout
-    // the /api/cli answer is a stream, and the live server drops an idle one (120 s): a line every minute keeps the
-    // calling agent's connection (and its shell timeout) alive across a review that takes several minutes.
-    let beat = (o.now?.() ?? Date.now()) + 60_000
     for (;;) {
       const got = await read(kind, o.cwd, start - 2000, session, before.file)
       text = got.text || text
       done = got.done
-      const at = o.now?.() ?? Date.now()
+      const at = now()
       if (at >= beat) {
         step(`Review round ${o.round} is still running in ${o.id}'s reviewer pane (${kind}).`)
         beat = at + 60_000
@@ -200,7 +215,7 @@ export async function runReviewInPane(
       // before `done && text`: an error event sets done too, so the old order returned a preamble as a complete review).
       if (got.error) return { pane, args, findings: text, cutShort: true, error: got.error }
       if (done && text) break
-      if ((o.now?.() ?? Date.now()) >= until) {
+      if (now() >= until) {
         step(`Review round ${o.round}'s pane timed out after ${Math.round(timeout / 1000)} s; keeping what it wrote so far.`)
         return { pane, args, findings: text, cutShort: true }
       }
