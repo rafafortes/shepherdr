@@ -36,6 +36,9 @@ process.env.XDG_CONFIG_HOME = join(home, 'xdg-config')
 afterAll(cleanup)
 // Tests are a server with a home of its own that does start agents: a fake herdr, or something spied on (launch-policy.ts)
 process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
+// The server prunes the helper's routes folder, which route.pl finds under the real $HOME, not under a test's home: a test that
+// wants the prune says so itself (test/route-prune-server.test.ts)
+process.env.SHEPHERDR_PRUNE_ROUTES = '0'
 // Nor do they reach the herdr of the machine they run on, or say they are panes of it: the socket is a path that isn't
 // there (a test that wants a herdr listens on one of its own, as test/launch-pending.test.ts does), and no inherited
 // pane, tab or workspace id says otherwise.

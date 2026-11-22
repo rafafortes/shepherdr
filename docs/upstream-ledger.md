@@ -937,3 +937,19 @@ Upstream's folder-in-place mode, `--report` findings text, its `review_gate` tau
 marker comes with the task's first round, and the coordinator's `review-more` wakes the agent as before.
 The prompt template and `shepherdr review`'s answer name both `git diff <merge-base>...HEAD` and, from the second round,
 `git diff <last-reviewed>..HEAD`, with the focus on the latter.
+
+## A CLI call stays fast however many routes there are (SHE-185)
+
+Checked 2026-11-21 (SHE-185) on `upstream/main` and `upstream/v2.0`, their code, history and public issues and pull
+requests (read only). Upstream: nothing for this. `upstream/v2.0`'s `helper/route.pl` has the same shape as ours (the
+same `readdir` over `helper/routes` with a decode and a stamp check per file, and the same `ps` fallback for a pid with
+no `/proc` entry) and removes no route file anywhere; 3.x has no such helper (its routing is in `core/`).
+
+**ours** (SHE-185): measured first. 1710 files, 1697 of dead processes: 103 s in the walk, 102 s of it in
+`process_identity` (the `ps` fallback written for macOS, which also ran on Linux for every dead pid: a fork and exec each,
+sys time 1m26s), 0.85 s decoding the JSON. The fix: no `ps` where `/proc` exists (a missing `/proc/<pid>/stat` is a dead
+pid), `kill 0` before a file is read or decoded, no folder scan when ancestry already found the route and nothing is
+explicit, and `route.pl --prune`, which the server runs at its first refresh and every ten minutes: a file whose pid is
+gone or whose start stamp no longer matches, plus a temporary file of a killed `--bind` over ten minutes old; never a live
+route, and a file it cannot read for a live pid stays. Credential files are left alone: a relaunched chat reuses its
+file, so removing one with an old route could remove the live agent's.
