@@ -56,14 +56,17 @@ describe('the template Shepherdr owns', () => {
   })
 
   test('a later round names both the whole change and what changed since the last reviewed commit', () => {
-    const first = fillReviewerPrompt(facts)
+    const first = fillReviewerPrompt({ ...facts, round: 1 })
     expect(first).toContain('First round: review the whole change above.')
     const later = fillReviewerPrompt({ ...facts, round: 2, since: 'abc123def456' })
     expect(later).toContain('git diff abc123def456..HEAD')
     expect(later).toContain('git log --oneline abc123def456..HEAD')
     expect(later).toContain('git diff abc123...HEAD') // the whole change stays for context
     expect(later).not.toContain('{{')
-    expect(focusWords('abc123def456')).toContain('Round after an earlier one')
+    expect(focusWords('abc123def456', 2)).toContain('Round after an earlier one')
+    // a later round whose reviewed commit a rebase left behind has no range to name: it says so, never "First round"
+    expect(focusWords(undefined, 3)).toContain('Round 3: the commit the last round reviewed is no longer on this branch')
+    expect(focusWords(undefined, 1)).toBe('First round: review the whole change above.')
   })
 
   test('with no rule files it says so, and an unfilled placeholder is a loud failure', () => {

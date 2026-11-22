@@ -52,7 +52,9 @@
   what came after it (`git diff <last-reviewed>..HEAD`). No new round is needed when the final commit is one a round was
   recorded on, when its tree is identical to a reviewed tree, when only clean merges of the base came after it, when its
   own change against the moved base is the one a round read (a clean rebase, Shepherdr's own included), or when the brief
-  says no review. A conflict resolution that moves the task's own lines, or anything committed since a round, needs one.
+  says no review. A conflict resolution that changes the task's own lines (what it adds or takes away), or anything committed since a
+  round, needs one. A merge train's riders are held to it too: a rider whose head is unreviewed stays out and its own turn
+  refuses it.
   Tasks from before these records have none, and are left as they were; so is a task whose agent never counted a round
   (the rule starts with its first). A round after
   the first gets the change since the last reviewed commit as its focus, with the whole diff still read for context: both
@@ -309,7 +311,8 @@
   the base and merge-base, the repo's rule files that exist and one findings format for all five CLIs and a subagent:
   the reviewer reads `git diff <merge-base>...HEAD` and `git log` itself, never a pasted diff (a huge one once stalled a
   round for 540 s with no output). A round after the first also gets `git diff <last-reviewed>..HEAD` as its focus, with
-  the whole change still read for context. The agent writes no prompt of its own. `--run` sends that file to the pane, waits up
+  the whole change still read for context; where a rebase left that commit off the branch, it says so and asks for the whole
+  change again instead of calling itself the first round. The agent writes no prompt of its own. `--run` sends that file to the pane, waits up
   to 900 s with progress on stderr, reads the reviewer's last plain message from its own CLI log (not the screen) and
   closes the pane. A round cut by the timeout
   prints what the reviewer had written so far, marked cut short, so the agent can use it or fall back to one subagent

@@ -60,11 +60,17 @@ export function lastReviewedOf<T extends { commit: string }>(reviewed: T[] | und
   return at ? [...(reviewed ?? [])].reverse().find((r) => r.commit === at || isAncestor(wt, r.commit, at)) : undefined
 }
 
-/** both ranges a reviewer is told to read: the whole change for context, and this round's change since the last review */
-export const focusWords = (since?: string) =>
+/**
+ * Both ranges a reviewer is told to read: the whole change for context, and this round's change since the last review.
+ * A later round whose reviewed commit a rebase left off the branch has no range to name, and says so: the whole change
+ * is what it must read again.
+ */
+export const focusWords = (since: string | undefined, round = 1) =>
   since
     ? `Round after an earlier one: look first at what changed since the last reviewed commit ${since.slice(0, 7)} (git diff ${since}..HEAD and git log --oneline ${since}..HEAD, including any merge's conflict resolutions), then read the whole change above for context.`
-    : 'First round: review the whole change above.'
+    : round > 1
+      ? `Round ${round}: the commit the last round reviewed is no longer on this branch (it was rebased), so review the whole change above again, and look for what the rebase changed in it.`
+      : 'First round: review the whole change above.'
 
 /** fill the template with one round's facts. Pure: the template is passed in so a test can pin its key lines and a
  *  missing placeholder is a loud failure, not a prompt with a gap in it. */
@@ -78,7 +84,7 @@ export function fillReviewerPrompt(o: PromptFacts, template = readFileSync(REVIE
     BASE: o.base,
     MERGE_BASE: o.mergeBase,
     WORKTREE: o.worktree,
-    FOCUS: focusWords(o.since),
+    FOCUS: focusWords(o.since, o.round),
     RULES: rules,
     PRIVACY: o.privacy.trim(),
   }

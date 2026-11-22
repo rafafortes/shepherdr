@@ -178,6 +178,12 @@ describe('a review is tied to the commit it reviewed', () => {
     writeFileSync(join(t2.worktree!, 'README.md'), 'both\n')
     sh('git add -A && GIT_EDITOR=true git rebase --continue', t2.worktree!)
     expect(await w2.engine.reviewGate(t2)).toBeDefined()
+    // the round that fixes it says the reviewed commit is no longer on the branch, never that it is the first round
+    const again = await w2.engine.reviewRound(t2.id)
+    if ('wait' in again) throw new Error('no reviewer free')
+    expect(w2.engine.reviewWords(t2.id, again)).toContain('the commit the last round reviewed is no longer on this branch')
+    expect(readFileSync(reviewerPromptPath(t2.id, again.round), 'utf8')).toContain('is no longer on this branch (it was rebased)')
+    expect(w2.engine.reviewWords(t2.id, again)).not.toContain('First round')
   })
 
   test('--done records the commit the round was counted on, not a fix committed before it', async () => {
@@ -207,6 +213,12 @@ describe('a review is tied to the commit it reviewed', () => {
     }
     // anything that is no commit of this branch is refused, before it can be stored as a review of something else
     for (const ref of ['--force', 'deadbeef', 'HEAD~9']) expect(() => w.engine.reviewDone(t.id, ref)).toThrow('not a commit on')
+    expect(t.reviewed).toHaveLength(2)
+    // and a fix committed after the round was counted is not what that round read: HEAD does not pass as its commit
+    await w.engine.reviewRound(t.id)
+    writeFileSync(join(t.worktree!, 'late.txt'), 'late\n')
+    sh('git add -A && git commit -qm late', t.worktree!)
+    expect(() => w.engine.reviewDone(t.id, 'HEAD')).toThrow('is not the commit')
     expect(t.reviewed).toHaveLength(2)
   })
 

@@ -3666,6 +3666,9 @@ export class Engine extends Emitter<Events> {
     // the round its lease held, or the newest one it counted before the lease ended (a restart, REVIEW_TIMEOUT): either
     // way the commit that round read is recorded, once per round
     const done = open?.round ? { round: open.round.round, reviewer: open.round.reviewer, since: open.since, commit: open.commit } : t.reviewLast
+    // a named commit is the one the round read, or one before it: never a fix committed after the reviewer started
+    if (named && done?.commit && named !== done.commit && !G.isAncestor(t.worktree ?? '', named, done.commit))
+      throw new Error(`--commit ${commit} is not the commit ${t.id}'s round reviewed (${done.commit.slice(0, 7)}) or one before it`)
     const at = named ?? done?.commit
     if (record && at && done && !(t.reviewed ?? []).some((r) => r.round === done.round)) {
       ;(t.reviewed ??= []).push({ round: done.round, commit: at, reviewer: done.reviewer, at: done.since })
@@ -3812,7 +3815,7 @@ export class Engine extends Emitter<Events> {
     const prompt = reviewerPromptPath(id, a.round)
     const t = this.task(id)
     const since = lastReviewedOf(t?.reviewed, t?.worktree ?? '')?.commit
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. ${focusWords(since)} Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. It names both the whole change against the base and ${since ? `this round's change since ${since.slice(0, 7)} (git diff ${since.slice(0, 7)}..HEAD)` : 'what changed since the base'}. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. ${focusWords(since, a.round)} Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. It names both the whole change against the base and ${since ? `this round's change since ${since.slice(0, 7)} (git diff ${since.slice(0, 7)}..HEAD)` : 'what changed since the base'}. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
@@ -4275,7 +4278,15 @@ export class Engine extends Emitter<Events> {
         for (const r of riders.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
         break
       }
-      if (x !== t) await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+      if (x !== t) {
+        await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+        // a rider's commit goes into the base too: it must be one a round was recorded on, as the head's is (mergeNow)
+        const unreviewed = await this.reviewGate(x)
+        if (unreviewed) {
+          why.set(x, unreviewed)
+          continue
+        }
+      }
       const merged = await G.git(p.path, 'merge-tree', '--write-tree', '--no-messages', '--name-only', top, x.branch!)
       const tree = merged.out.split('\n')[0]
       // the head stacks on main, every other on those before it

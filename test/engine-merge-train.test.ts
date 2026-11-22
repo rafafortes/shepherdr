@@ -130,6 +130,29 @@ describe('shepherdr merge', () => {
         ])
       })
 
+      test('a rider whose commit a round was not recorded on stays out, and its own turn refuses it', async () => {
+        const { w, dir, ts, go, ran } = await train('train-review', 3, '3')
+        const [x, a, b] = ts
+        // b recorded a round on its first commit, then committed again: that head is not reviewed, so it cannot ride
+        expect(await w.engine.reviewRound(b.id)).toMatchObject({ round: 1 })
+        expect(w.engine.reviewDone(b.id)).toBe(true)
+        const wt = b.worktree
+        if (!wt) throw new Error(`${b.id} got no worktree`)
+        writeFileSync(join(wt, 'late.txt'), 'late\n')
+        sh('git add -A && git commit -qm late', wt)
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        runs.push(w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }))
+        for (const t of [x, a]) go(t)
+        const [rx, ra, rb] = await Promise.all(runs)
+        expect([rx.ok, ra.ok]).toEqual([true, true])
+        // it went in with nobody: on its own turn the gate refuses it, naming what it must review
+        expect(rb.ok).toBe(false)
+        expect(rb.error).toContain('is not reviewed')
+        expect(sh('git log --format=%s -n 4', dir).split('\n')).not.toContain(`${b.id}: Task 3`)
+        expect(ran()).toEqual([x.id, a.id])
+      })
+
       test('one that conflicts stays out for its own turn; a refusal goes back to one at a time', async () => {
         // the gate refuses whenever 4.txt (the last task's) is in the tree it checks
         const { w, dir, ts, go, ran, heads } = await train('train-red', 4, '4', 'test -f 4.txt && { echo "4.txt is not wanted"; exit 1; }; ')

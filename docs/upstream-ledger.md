@@ -929,8 +929,9 @@ with no rounds are left as today. `engine.reviewGate` refuses an unreviewed fina
 the task's coordinator can add one with `review-more`. No round is spent when HEAD's tree is a reviewed tree, on a clean
 base merge (first-parent walk, each other parent in the base and the merge's tree equal to git's own merge), on the same
 own change against a moved base (upstream's `own_diff`/`same_own_changes`, #1178: a clean rebase, ours or the agent's,
-keeps its review), or when the brief says no review. A conflict resolution that moves the task's own lines, or anything
-committed since a round, needs one. A pane round that errored or was cut short with nothing written records no commit.
+keeps its review), or when the brief says no review. A conflict resolution that changes the task's own lines, or
+anything committed since a round, needs one. A merge train's riders are held to the same gate as its head. A pane round
+that errored or was cut short with nothing written records no commit.
 Upstream's folder-in-place mode, `--report` findings text, its `review_gate` taught by the brief and Assistant-driven
 `review-more` news have no 2.0 equivalent: our reviewers run in a pane or headless, findings go in the agent's reply, the
 marker comes with the task's first round, and the coordinator's `review-more` wakes the agent as before.
