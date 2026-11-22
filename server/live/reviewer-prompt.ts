@@ -5,11 +5,11 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SKILLS } from './prompts.ts'
 import { ensureTaskTmp, taskTmpDir } from './task-tmp.ts'
 
-/** the template, copied to another machine's helper with the rest of skill/ (install.ts), so a remote round has it too */
-export const REVIEWER_TEMPLATE = join(SKILLS, 'shepherdr-reviewer', 'PROMPT.md')
+/** the template beside this server file, in the checkout the code runs from (a release, a worktree, or a gate run whose
+ *  SHEPHERDR_ROOT names the live install): ROOT would point at that other install, which has no template yet. */
+export const REVIEWER_TEMPLATE = join(import.meta.dir, '..', '..', 'skill', 'shepherdr-reviewer', 'PROMPT.md')
 
 /** the rule files a reviewer is pointed at, when the worktree has them */
 export const RULES = ['AGENTS.md', 'CLAUDE.md', 'REVIEW.md']
