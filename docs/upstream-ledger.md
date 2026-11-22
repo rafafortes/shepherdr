@@ -953,3 +953,25 @@ explicit, and `route.pl --prune`, which the server runs at its first refresh and
 gone or whose start stamp no longer matches, plus a temporary file of a killed `--bind` over ten minutes old; never a live
 route, and a file it cannot read for a live pid stays. Credential files are left alone: a relaunched chat reuses its
 file, so removing one with an old route could remove the live agent's.
+## No needs-you on agent handover (SHE-186)
+
+Checked 2026-11-21 (SHE-186) on `upstream/main` (`3.1.46`, `ce88c51f`) and `upstream/v2.0` (`ebb17d58`), their code,
+history and public issues and pull requests (read only). The related 3.1.46 release line is "a task a restart left in a
+plain shell says it needs a resume": `mods/tasks/bin/herdr_task/revive.py` (#1080) detects a terminal the core gave a
+plain shell after a restart and marks the task `NEEDS_RESUME` instead of Working; `agents.py`'s `mid_turn_agents` (#1022)
+drops a dead agent whose plain shell kept `hc`'s "working" status, and `commands.py`'s `resume` kills the old terminal
+after the new agent starts so it stops counting as the task's agent. `9ae90619` (SHEP-211, already weighed above) ends
+the old agent before resuming for the same reason. The SHEP-230 row above called a dead agent `gone` in herdr with no
+leftover shell able to hold a task; SHE-185/184/182 disprove that on the herdr we run: a CLI that exited leaves its pane
+as a shell, and herdr can list that pane and the new run under the same name, so `statusOf` read an older pane and raised
+Needs you while the new agent worked.
+
+**port** (ours, SHE-186): 2.0 has no herdr-core `hc` and no `needs_resume` state to take. The idea is written against our
+own registry: `Agents.info` returns only the agent in the pane the record says this chat last launched (a shell herdr
+calls `unknown` is gone, except a still-pending launch), so status, screens, menus, start reads and alerts never come from
+an older pane. A launch retires the panes it took over from, closing only an idle shell with nothing typed at its prompt;
+a launch that fails closes its own pane and clears the recorded one, so a retry cannot leave two agents. The same path
+runs for all five CLIs; `test/agent-handover-pane.test.ts` covers a restart, a takeover and a failed launch/relaunch for
+each, and the safety of what may be closed. Upstream's "needs a resume" card is not taken: our failed start already has
+its own honest card and revive loop, and here a plain shell is retired or ignored rather than shown to the person as a
+new ask.
