@@ -3,7 +3,7 @@
 // `launch_pending` until a client asks for that agent by name (issue #491). The launch path (agents.ts) learned both the
 // hard way; a reviewer used to start a pane with one `start` and one `prompt`, so those two passing moments fell its
 // round back to headless. One path, used by both, instead of a second one with the waits left out.
-import { dropped } from './herdr.ts'
+import { dropped, retrying, startDelays } from './herdr.ts'
 
 /** the herdr calls needed to put an agent in a pane and talk to it (the real `herdr` and the tests' fakes both fit) */
 export interface PaneAgent {
@@ -40,6 +40,12 @@ export async function startInPane(h: PaneAgent, name: string, kind: string, pane
   }
 }
 
+/** The launch's whole start: the pane wait above plus the caller's retry of calls herdr drops (agents.ts `again`). A
+ *  reviewer used to call `start` once, so a dropped launch fell straight back to headless. */
+export async function startPaneAgent(h: PaneAgent, name: string, kind: string, pane: string, args: string[], sleep: (ms: number) => Promise<void> = nap, giveUp?: (e: unknown) => void) {
+  return retrying(() => startInPane(h, name, kind, pane, args, sleep, giveUp), startDelays(), dropped)
+}
+
 /** herdr 0.9.5 finishes a pending launch only when a client asks for that agent by name (issue #491). A name it already
  *  registered, or one it dropped, answers at once or not found; neither is a failure of the round. */
 export async function completeLaunch(h: PaneAgent, name: string) {
@@ -49,20 +55,29 @@ export async function completeLaunch(h: PaneAgent, name: string) {
 /**
  * Send the first message to a named agent the way the outbox does (agents.ts holdFrom + deliver): while herdr says the
  * name is not its agent yet (or its pane is not a shell yet), ask for it by name to finish the launch, wait, and send
- * again. `tries` at the poll interval is the same minute the launch gives an unready agent (agents.ts unreadyFor). A
- * failure that is not one of those passing moments is thrown at once, so a real provider error is never hidden.
+ * again. `forMs` is the same minute the launch gives an unready agent (agents.ts unreadyFor); `tries` also bounds it so
+ * a fake with an instant clock cannot spin for ever. `onWait` lets a long wait say it is still going. A failure that is
+ * not one of those passing moments is thrown at once, so a real provider error is never hidden.
  */
-export async function sendWhenReady(h: PaneAgent, name: string, text: string, o: { sleep?: (ms: number) => Promise<void>; poll?: number; tries?: number } = {}) {
+export async function sendWhenReady(
+  h: PaneAgent,
+  name: string,
+  text: string,
+  o: { sleep?: (ms: number) => Promise<void>; poll?: number; tries?: number; now?: () => number; forMs?: number; onWait?: (n: number) => void } = {},
+) {
   const sleep = o.sleep ?? nap
+  const now = o.now ?? Date.now
   const poll = o.poll ?? 1000
   const tries = o.tries ?? 60
+  const until = now() + (o.forMs ?? 60_000)
   for (let i = 0; ; i++) {
     try {
       await h.prompt(name, text)
       return
     } catch (e) {
-      if (!waitingForAgent(e) || i >= tries - 1) throw e
+      if (!waitingForAgent(e) || i >= tries - 1 || now() >= until) throw e
       await completeLaunch(h, name)
+      o.onWait?.(i + 1)
       await sleep(poll)
     }
   }

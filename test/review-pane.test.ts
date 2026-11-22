@@ -208,11 +208,12 @@ function fake(o: { notShellOnce?: boolean; registerAfter?: number } = {}) {
     },
     start: async (name, kind, pane, args) => {
       calls.start = [name, kind, pane, args]
-      if (++calls.startTries === 1 && notShellOnce) throw new HerdrError('pane_not_shell', `agent target pane ${pane} is not an available shell`)
+      if (++calls.startTries === 1 && notShellOnce) throw new Error(`agent target pane ${pane} is not an available shell`)
     },
     prompt: async (name, text) => {
       calls.prompt = [name, text]
-      if (++calls.promptTries === 1 && !registered.has(name)) throw new HerdrError('agent_not_found', `agent ${name} is not an active named agent`)
+      calls.promptTries++
+      if (!registered.has(name)) throw new HerdrError('agent_not_found', `agent ${name} is not an active named agent`)
     },
     visible: async () => calls.visible.shift() ?? '',
     paneKeys: async (_pane, keys) => {
@@ -347,8 +348,48 @@ describe('a round in a pane', () => {
     expect(calls.closed).toEqual(['w1:p9'])
   })
 
-  test('a pane that is not a shell yet and a name herdr registers late still run the round', async () => {
-    const { h, calls } = fake({ notShellOnce: true, registerAfter: 2 })
+  for (const kind of KINDS) {
+    test(`${kind}: a pane that is not a shell yet and a name herdr registers late still run the round`, async () => {
+      const { h, calls } = fake({ notShellOnce: true, registerAfter: 2 })
+      const steps: string[] = []
+      const got = await runReviewInPane({
+        ...base,
+        h,
+        reviewer: { kind },
+        onStep: (s) => steps.push(s),
+        findings: async () => ({ text: 'no findings', done: true }),
+      })
+      expect(got.failed).toBeUndefined()
+      expect(got.findings).toBe('no findings')
+      expect(calls.startTries).toBe(2)
+      expect(calls.promptTries).toBe(2)
+      expect(calls.agentAsks.length).toBeGreaterThanOrEqual(2)
+      expect(steps.join('\n')).toContain('running in a pane')
+      expect(calls.closed).toEqual(['w1:p9'])
+    })
+  }
+
+  test('a start herdr leaves pending (agent_not_ready) is accepted, not a failed round', async () => {
+    const { h, calls } = fake({ notShellOnce: false, registerAfter: 1 })
+    let once = true
+    const start = h.start
+    h.start = async (...a) => {
+      const result = await start(...a)
+      if (once) {
+        once = false
+        throw new HerdrError('agent_not_ready', 'agent shep-she-9-review is not an active named agent yet')
+      }
+      return result
+    }
+    const got = await runReviewInPane({ ...base, h, reviewer: { kind: 'claude' }, findings: async () => ({ text: 'no findings', done: true }) })
+    expect(got.failed).toBeUndefined()
+    expect(got.findings).toBe('no findings')
+    expect(calls.startTries).toBe(1)
+    expect(calls.promptTries).toBe(1)
+  })
+
+  test('a long wait for the name keeps the caller stream warm without saying the pane runs', async () => {
+    const { h, calls } = fake({ notShellOnce: false, registerAfter: 31 })
     const steps: string[] = []
     const got = await runReviewInPane({
       ...base,
@@ -359,11 +400,8 @@ describe('a round in a pane', () => {
     })
     expect(got.failed).toBeUndefined()
     expect(got.findings).toBe('no findings')
-    expect(calls.startTries).toBe(2)
-    expect(calls.promptTries).toBe(2)
-    expect(calls.agentAsks.length).toBeGreaterThanOrEqual(2)
-    expect(steps.join('\n')).toContain('running in a pane')
-    expect(calls.closed).toEqual(['w1:p9'])
+    expect(calls.promptTries).toBe(31)
+    expect(steps.findIndex((s) => s.includes('still starting'))).toBeLessThan(steps.findIndex((s) => s.includes('running in a pane')))
   })
 
   test('a name that never registers falls back, and never says the pane was running', async () => {
