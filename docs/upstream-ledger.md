@@ -908,3 +908,28 @@ that exist go in; the diff does not — one 854-line pasted diff (POL-492, SHE-1
 skill's meanings, not upstream's blocker/major/minor. "Not run in my sandbox:" checks are run by the worker and reported
 in `--facts`; a "Shepherdr feedback:" line is copied there too, where the coordinator reads it in the ready line's Facts.
 One prompt serves all five reviewer CLIs and the subagent fallback; each CLI's own tests show it gets the file.
+
+## Reviews tied to the commit (SHE-184)
+
+Checked 2026-11-21 on `upstream/main` (`3.1.46`) and `upstream/v2.0`, their code, history and the public issues and pull
+requests (read only). Upstream's `templates/worker.md` Review step says: record each round on the commit it reviewed with
+`herdr-task reviewed`, `ready` refuses a final commit no round was recorded on, and a clean merge of the base onto a
+reviewed commit needs no new round. The implementation is `mods/tasks/bin/herdr_task/commands.py`: `review_refusal`,
+`base_merges_only` (#741: each commit after the review is a clean merge of the base, checked with `merge-tree --write-tree`),
+`carried_over`/`same_own_changes`/`own_diff` (`3deecca5`, SHEP-277, 3.1.45, #1178: a rebase or merge onto a newer base whose
+own diff is unchanged keeps its review), and the "since round on <commit>, only what changed (git diff …)" wording added by
+`302218ca` (SHEP-283, 3.1.46, #1116). CHANGELOG 3.1.45: "A reviewed task that only took in a newer main keeps its review
+and spends no extra round"; 3.1.46: "A review that's needed names what changed since the last reviewed commit".
+
+**port** (ours, SHE-184): `shepherdr review <id> --done` records the worktree HEAD (or `--commit`) with the round and its
+reviewer in `task.reviewed`; the first round counted also marks the task, so old tasks with no rounds are left as today.
+`engine.reviewGate` refuses an unreviewed final commit in both `done()` (ready) and `mergeNow()` (merge), naming the last
+reviewed commit, the commits after it and the `git diff` range; out of rounds, only the task's coordinator can add one with
+`review-more`. No round is spent on a clean base merge (first-parent walk, each other parent in the base and the merge's
+tree equal to git's own merge), on an identical tree, or when the brief says no review. We compare **trees, not patch-ids**:
+a rebase onto a moved base changes the tree and needs a round, and a conflict resolution needs one too; upstream's
+"same own changes" (#1178) would carry a review across such a rebase, but here the reviewer should see the whole new tree.
+The prompt template and `shepherdr review`'s answer name both `git diff <merge-base>...HEAD` and, from the second round,
+`git diff <last-reviewed>..HEAD`, with the focus on the latter. Upstream's folder-in-place mode, `--report` findings text
+and Assistant-driven `review-more` news have no 2.0 equivalent: our reviewers run in a pane or headless, findings go in
+the agent's reply, and the coordinator's `review-more` wakes the agent as before.

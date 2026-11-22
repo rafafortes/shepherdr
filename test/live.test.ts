@@ -1535,6 +1535,6 @@ describe('a chain of backups in Settings', () => {
     )
     // the line asks the command first, and names it again after the review: one line, and each round asks it anew
     expect(chain).toContain("run `shepherdr review X-1` first: it counts the round, writes your reviewer's prompt")
-    expect(chain).toContain('run `shepherdr review X-1 --done` when that review has finished.')
+    expect(chain).toContain('run `shepherdr review X-1 --done` when that review has finished: it records the commit this round reviewed')
   })
 })

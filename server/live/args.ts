@@ -241,7 +241,9 @@ export const TOPIC = {
                                                   prompt file names the brief, base and diff command by reference. If a
                                                   pane cannot open, the answer says so and gives the headless line
   shepherdr review <id> --done                   the round's headless review has finished: its reviewer is free again
-                                                  (a --run that opened a pane already released it)
+                                                  and the commit it reviewed is recorded on the task (--commit names it
+                                                  when fixes were committed since); ready and merge refuse an
+                                                  unreviewed final commit (a --run pane already released its reviewer)
   shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"]
                                                  the summary at most ${SUMMARY_MAX} characters, in plain words for the
                                                  human (longer is refused); the facts go in the PR,

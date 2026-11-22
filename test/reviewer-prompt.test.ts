@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fillReviewerPrompt, mergeBaseOf, REVIEWER_TEMPLATE, reviewerPromptFile, reviewerPromptPath, rulesIn, writeReviewerPrompt } from '../server/live/reviewer-prompt.ts'
+import { fillReviewerPrompt, focusWords, lastReviewedOf, mergeBaseOf, REVIEWER_TEMPLATE, reviewerPromptFile, reviewerPromptPath, rulesIn, writeReviewerPrompt } from '../server/live/reviewer-prompt.ts'
 import { tmp } from './tmp.ts'
 
 describe('the template Shepherdr owns', () => {
@@ -15,6 +15,8 @@ describe('the template Shepherdr owns', () => {
     expect(t).toContain('Read only: never edit files, commit or push')
     expect(t).toContain('git diff {{MERGE_BASE}}...HEAD')
     expect(t).toContain('git log --oneline {{MERGE_BASE}}..HEAD')
+    expect(t).toContain("This round's focus")
+    expect(t).toContain('{{FOCUS}}')
     expect(t).toContain('Never a diff pasted into this prompt or your answer')
     expect(t).toContain('{{RULES}}')
     expect(t).toContain("critical (breaks or loses people's work)")
@@ -53,6 +55,17 @@ describe('the template Shepherdr owns', () => {
     expect(p).not.toContain('{{')
   })
 
+  test('a later round names both the whole change and what changed since the last reviewed commit', () => {
+    const first = fillReviewerPrompt(facts)
+    expect(first).toContain('First round: review the whole change above.')
+    const later = fillReviewerPrompt({ ...facts, round: 2, since: 'abc123def456' })
+    expect(later).toContain('git diff abc123def456..HEAD')
+    expect(later).toContain('git log --oneline abc123def456..HEAD')
+    expect(later).toContain('git diff abc123...HEAD') // the whole change stays for context
+    expect(later).not.toContain('{{')
+    expect(focusWords('abc123def456')).toContain('Round after an earlier one')
+  })
+
   test('with no rule files it says so, and an unfilled placeholder is a loud failure', () => {
     expect(fillReviewerPrompt(facts)).toContain('No AGENTS.md, CLAUDE.md or REVIEW.md at the root of this worktree.')
     expect(() => fillReviewerPrompt(facts, 'Task {{TASK_ID}} {{OTHER}}')).toThrow('unfilled placeholder: {{OTHER}}')
@@ -86,6 +99,22 @@ describe('the change is read by reference, not pasted', () => {
     // a worktree with no git still gets a prompt, with the base name and the command to resolve it
     expect(mergeBaseOf(tmp('review-prompt-no-repo'), 'main')).toBe('main')
     expect(mergeBaseOf('', 'main')).toBe('main')
+  })
+
+  test('the last reviewed commit is the newest one still on the branch', () => {
+    const dir = tmp('review-prompt-ancestor')
+    mkdirSync(dir, { recursive: true })
+    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    const a = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim()
+    execSync('echo more >> README.md && git commit -qam more', { cwd: dir, shell: '/bin/sh' })
+    const b = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim()
+    execSync('echo last >> README.md && git commit -qam last', { cwd: dir, shell: '/bin/sh' })
+    const c = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim()
+    expect(lastReviewedOf([{ commit: a }, { commit: b }], dir, c)).toEqual({ commit: b })
+    expect(lastReviewedOf([{ commit: a }], dir, a)).toEqual({ commit: a })
+    // a commit a rebase left behind is no longer an ancestor: no old round is named
+    expect(lastReviewedOf([{ commit: '0'.repeat(40) }], dir, c)).toBeUndefined()
+    expect(lastReviewedOf([{ commit: a }], '', c)).toBeUndefined()
   })
 
   test('only the rule files the worktree has are pointed at', () => {

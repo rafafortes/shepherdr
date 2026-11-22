@@ -20,7 +20,7 @@ const { ASK, CODEX_WORDS, reviewerLineFor } = await import('./reviewer-line.ts')
 /** the round answer's prompt-file words, for the exact expectations below */
 const runWords = (id: string, round: number, reviewer: { kind: string; model?: string; effort?: string }) => {
   const p = reviewerPromptPath(id, round)
-  return `Shepherdr wrote this round's reviewer prompt to ${p}: pass that file and write no prompt of your own. Run \`shepherdr review ${id} --run ${p}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`.`
+  return `First round: review the whole change above. Shepherdr wrote this round's reviewer prompt to ${p}: pass that file and write no prompt of your own. It names both the whole change against the base and what changed since the base. Run \`shepherdr review ${id} --run ${p}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
 }
 
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
@@ -121,14 +121,15 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const t = task({ 'reviewer.fallback': 'pi' })
     src.engine.outNow = (key) => (key.startsWith('codex/') ? { until: '17:00' } : undefined)
     const r = await review(t)
-    expect(r.out).toContain(`(${CODEX} is out until 17:00). Shepherdr wrote`)
+    expect(r.out).toContain(`(${CODEX} is out until 17:00)`)
+    expect(r.out).toContain('Shepherdr wrote')
     expect(t.reviews).toBe(1)
   })
 
   test('a primary out with no day given says only that it is out', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
     src.engine.outNow = (key) => (key.startsWith('codex/') ? {} : undefined)
-    expect((await review(t)).out).toContain(`(${CODEX} is out). Shepherdr wrote`)
+    expect((await review(t)).out).toContain(`(${CODEX} is out)`)
   })
 
   test('every reviewer full or out: the command waits up to its deadline, then says to end the turn, and the round is not counted yet', async () => {
