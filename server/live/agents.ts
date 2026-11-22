@@ -1574,8 +1574,6 @@ export class Agents extends Emitter<Events> {
       }
       throw e
     }
-      throw e
-    }
   }
 
   /** `f` again after each wait of startDelays() while herdr fails it in a passing way (isPassing); said in the log */

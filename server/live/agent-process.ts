@@ -21,10 +21,11 @@ export function barePrompt(text: string) {
     .filter(Boolean)
     .at(-1)
   if (!last) return false
+  // the prompt's mark must be the last thing on the line: `user@host:~$ echo $` has words the person typed after it
+  const at = last.search(/[$#%>❯➜]/)
+  if (at < 0 || last.slice(at + 1).trim()) return false
   // a bare shell's own prompt, with nothing before it
   if (/^[$#%>]$/.test(last)) return true
-  // a prompt names a user, host, folder or arrow (user@host:~$, ~/work ❯). A typed command that happens to end in a
-  // redirection (`echo hi >`) is not one, and neither is any other line without that shape
-  if (!/[@:~/❯➜]/.test(last)) return false
-  return /(?:[$#%>]|❯|➜)$/.test(last) && !/\s[<>|&]$/.test(last)
+  // a prompt names a user, host, folder or arrow (user@host:~$, ~/work ❯); a typed command ending in `>` does not
+  return /[@:~/❯➜]/.test(last.slice(0, at))
 }

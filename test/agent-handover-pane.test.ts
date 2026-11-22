@@ -119,6 +119,8 @@ describe('a shell screen with nothing typed at its prompt', () => {
     expect(barePrompt('$ ')).toBe(true)
     expect(barePrompt('user@host:~$ echo hi >')).toBe(false)
     expect(barePrompt('echo hi >')).toBe(false)
+    expect(barePrompt('user@host:~$ echo $')).toBe(false)
+    expect(barePrompt('user@host:~$ ls #')).toBe(false)
     expect(barePrompt('user@host:~$ git status')).toBe(false)
     expect(barePrompt('Do you want to continue? [y/n]')).toBe(false)
     expect(barePrompt('')).toBe(false)
@@ -283,6 +285,34 @@ describe('an older pane is never read, and is only closed when it is provably ou
       expect(a.record(KEY)?.lastPane).toBe(NEW)
       expect(listed).toHaveLength(1)
     } finally {
+      a.stop()
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('a route that cannot be bound keeps the old pane for the next launch to retire', async () => {
+    const s = fake()
+    record('pi')
+    const a = new Agents()
+    let failBind = false
+    const bind = spyOn(a as unknown as { bindRoute(): Promise<unknown> }, 'bindRoute').mockImplementation(async () => {
+      if (failBind) throw new Error('routing failed')
+    })
+    try {
+      await a.refresh()
+      failBind = true
+      await expect(a.ensure(spec('pi'))).rejects.toThrow('routing failed')
+      failBind = false
+      expect(a.record(KEY)?.lastPane).toBeUndefined()
+      expect(a.record(KEY)?.superseded).toEqual([OLD])
+      // its own pane was closed, and the next launch retires the one it took over from
+      expect(events).toContain(`close ${NEW}`)
+      events.length = 0
+      await a.ensure(spec('pi'))
+      expect(events).toContain(`close ${OLD}`)
+      expect(a.info(KEY)?.pane_id).toBe(a.record(KEY)?.lastPane)
+    } finally {
+      bind.mockRestore()
       a.stop()
       for (const spy of Object.values(s)) spy.mockRestore()
     }
