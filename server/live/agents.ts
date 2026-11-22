@@ -724,13 +724,23 @@ export class Agents extends Emitter<Events> {
           this.pruneAt = Date.now()
           void this.pruneRoutes()
         }
-        this.live = new Map(list.filter((a) => a.name).map((a) => [a.name!, a]))
         this.liveAll = new Map()
         for (const a of list) {
           if (!a.name) continue
           const under = this.liveAll.get(a.name) ?? []
           under.push(a)
           this.liveAll.set(a.name, under)
+        }
+        // one name can be in two panes during a hand-over. Every reader of `live` (route repair, an ensure that finds
+        // an agent already running, session follow, pending launches) must see the same pane as status and screens: the
+        // one this chat's record says it last launched. An older shell is no agent at all, so it is left out entirely
+        this.live = new Map()
+        for (const [name, under] of this.liveAll) {
+          const key = this.byName.get(name)
+          const want = key ? this.records[key]?.lastPane : undefined
+          const launching = key && (this.starting.has(key) || this.stopping.has(key))
+          const chosen = want ? (under.find((a) => a.pane_id === want) ?? (launching ? under[0] : undefined)) : under[0]
+          if (chosen) this.live.set(name, chosen)
         }
         for (const key of this.byName.values()) {
           const now = this.status(key)
@@ -870,13 +880,13 @@ export class Agents extends Emitter<Events> {
       await this.reapPane(pane)
       gone.push(pane)
     }
-    if (gone.length) {
-      if (this.records[key] === r) {
-        r.superseded = []
-        this.save()
-      }
-      await this.refresh()
+    // a pass has considered every pane it was given: a pane with a program in it, or with words at its prompt, is left
+    // for its owner and not probed again on every later launch. The ignore rule is `lastPane`, not this list
+    if (this.records[key] === r) {
+      r.superseded = []
+      this.save()
     }
+    if (gone.length) await this.refresh()
   }
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). `own`: the start
@@ -1422,7 +1432,7 @@ export class Agents extends Emitter<Events> {
     if (!this.allowed(spec.key)) return Promise.reject(new Error(skippedLaunch(spec.key)))
     const problem = chatProblem(spec.kind)
     if (problem) return Promise.reject(new Error(problem))
-    const running = this.live.get(spec.name)
+    const running = this.records[spec.key] ? this.info(spec.key) : this.live.get(spec.name)
     if (running) return this.bindRoute({ ...this.records[spec.key], ...spec } as AgentRecord, running.pane_id).then(() => running)
     const p0 = this.starting.get(spec.key)
     if (p0) return p0

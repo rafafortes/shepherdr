@@ -116,6 +116,9 @@ describe('a shell screen with nothing typed at its prompt', () => {
     expect(barePrompt('last command\nmaybe@example:~$ ')).toBe(true)
     expect(barePrompt('~/work ❯ ')).toBe(true)
     expect(barePrompt('root@host#')).toBe(true)
+    expect(barePrompt('$ ')).toBe(true)
+    expect(barePrompt('user@host:~$ echo hi >')).toBe(false)
+    expect(barePrompt('echo hi >')).toBe(false)
     expect(barePrompt('user@host:~$ git status')).toBe(false)
     expect(barePrompt('Do you want to continue? [y/n]')).toBe(false)
     expect(barePrompt('')).toBe(false)
@@ -240,6 +243,28 @@ describe('an older pane is never read, and is only closed when it is provably ou
       await a.refresh()
       expect(a.info(KEY)?.pane_id).toBe(OLD)
       expect(a.status(KEY)).toBe('gone')
+    } finally {
+      a.stop()
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('an ensure beside a same-name shell launches, never binding the route to the shell', async () => {
+    const s = fake()
+    record('pi', NEW)
+    // herdr still lists the old pane under this chat's name, but the record says its run was in the new one
+    listed.push(info(OLD, 'pi', 'unknown'))
+    const a = new Agents()
+    try {
+      await a.refresh()
+      expect(a.info(KEY)).toBeUndefined()
+      await a.ensure(spec('pi'))
+      expect(started).toHaveLength(1)
+      expect(started[0].pane).toBe(NEW)
+      expect(a.info(KEY)?.pane_id).toBe(NEW)
+      expect(a.status(KEY)).toBe('working')
+      expect(events).toContain(`close ${OLD}`)
+      expect(listed).toHaveLength(1)
     } finally {
       a.stop()
       for (const spy of Object.values(s)) spy.mockRestore()

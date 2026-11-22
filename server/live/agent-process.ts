@@ -20,5 +20,11 @@ export function barePrompt(text: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .at(-1)
-  return !!last && /(?:[$#%>]|❯|➜)\s*$/.test(last)
+  if (!last) return false
+  // a bare shell's own prompt, with nothing before it
+  if (/^[$#%>]$/.test(last)) return true
+  // a prompt names a user, host, folder or arrow (user@host:~$, ~/work ❯). A typed command that happens to end in a
+  // redirection (`echo hi >`) is not one, and neither is any other line without that shape
+  if (!/[@:~/❯➜]/.test(last)) return false
+  return /(?:[$#%>]|❯|➜)$/.test(last) && !/\s[<>|&]$/.test(last)
 }
