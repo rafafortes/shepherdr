@@ -241,6 +241,12 @@ describe.skipIf(!browser)('pausing a space or a machine', () => {
     if (!browser) throw new Error('no browser')
     return browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' as const })
   }
+  /** A click posts its action to the server and returns before that action lands in world.act: wait for the call itself,
+   *  not for another click, before reading what was sent. */
+  const waitForCall = async (calls: Action[], n: number) => {
+    for (let i = 0; i < 100 && calls.length < n; i++) await Bun.sleep(50)
+    expect(calls.length).toBeGreaterThanOrEqual(n)
+  }
 
   test('the chat ⋯ and the row ⋯ send the setting action, and the Paused tag shows beside Autopilot while held (desktop)', async () => {
     const p = place()
@@ -313,11 +319,13 @@ describe.skipIf(!browser)('pausing a space or a machine', () => {
       expect(await sw.getAttribute('aria-checked')).toBe('false')
       expect(await page.getByText('Every space here starts tasks as usual').count()).toBe(1)
       await sw.click()
+      await waitForCall(calls, 1)
       expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'machine.maxTasks', value: '0', place: 'm:vm-str' })
       await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitemcheckbox]')].some((b) => b.textContent?.includes('Pause machine') && b.getAttribute('aria-checked') === 'true'))
       expect(await sw.getAttribute('aria-checked')).toBe('true')
       expect(await page.getByText('No space here starts new tasks; running ones keep going').count()).toBe(1)
       await sw.click()
+      await waitForCall(calls, 2)
       expect(calls.at(-1)).toMatchObject({ type: 'setting', key: 'machine.maxTasks', value: null, place: 'm:vm-str' })
       await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitemcheckbox]')].some((b) => b.textContent?.includes('Pause machine') && b.getAttribute('aria-checked') === 'false'))
     } finally {
