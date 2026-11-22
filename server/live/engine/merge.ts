@@ -88,6 +88,8 @@ export interface MergeHost {
   cleanup(t: TaskRec): Promise<unknown>
   /** its work is in its base already, merged on GitHub or by hand: why, or null */
   mergedAlready(t: TaskRec): Promise<string | null>
+  /** why its final commit is not reviewed and the merge must wait, or undefined (the engine's review gate) */
+  reviewGate(t: TaskRec): Promise<string | undefined>
   /** the space's merge gate (merge.gate), run on the branch as it would go in (the engine's own gate) */
   gate(
     t: TaskRec,
@@ -676,6 +678,9 @@ export class MergeRunner {
     // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first
     if (!(await G.git(wt, 'branch', '--show-current')).out) await G.git(wt, 'checkout', '--quiet', t.branch)
     await G.commitAll(wt, `${t.id}: ${t.title}`)
+    // the commit that would go in must be one a review round was recorded on (a clean base merge needs none)
+    const unreviewed = await this.e.reviewGate(t)
+    if (unreviewed) return { ok: false, error: `Can't merge ${t.id}: ${unreviewed}` }
     const g = await this.hub(p)
     if (g) return this.mergeOnGitHub(t, p, g, self)
     // its pull request is open, but gh can't use GitHub here now: it is never merged around it

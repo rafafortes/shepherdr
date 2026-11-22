@@ -939,6 +939,26 @@ describe('review rounds from the command', () => {
     expect((await src.cli(['task', 'show', t.id], {})).out).toContain(`Review rounds: ${rounds} of ${rounds + 1} used, one added by its coordinator`)
     expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain('already added its one more review round')
   })
+
+  test('review --done records the commit it reviewed, and task show names it', async () => {
+    const { t } = await workedTask('review-record')
+    if (!t.worktree) throw new Error(`${t.id} got no worktree`)
+    const head = run('git rev-parse HEAD', t.worktree).trim()
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).code).toBe(0)
+    expect((await src.cli(['review', t.id, '--done'], { chat: `${t.id}/Agent` })).out).toContain('the round is recorded')
+    expect(t.reviewed).toMatchObject([{ round: 1, commit: head }])
+    expect((await src.cli(['task', 'show', t.id], {})).out).toContain(`Reviewed: round 1 on ${head.slice(0, 7)}`)
+    // a lease Shepherdr dropped (a restart, its 45 minutes) loses no round: --done still records the commit it reviewed
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).code).toBe(0)
+    src.engine.release(Date.now() + 60 * 60_000)
+    const late = await src.cli(['review', t.id, '--done'], { chat: `${t.id}/Agent` })
+    expect(late.out).toContain(`nothing was leased to release; the round is recorded on ${head.slice(0, 7)}`)
+    expect(t.reviewed).toMatchObject([
+      { round: 1, commit: head },
+      { round: 2, commit: head },
+    ])
+    expect((await src.cli(['review', t.id, '--done'], { chat: `${t.id}/Agent` })).out).toContain('nothing to release')
+  })
 })
 
 describe('pinned models, from the screen', () => {

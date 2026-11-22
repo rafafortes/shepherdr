@@ -105,6 +105,29 @@ describe('shepherdr review --run', () => {
     expect(t.reviews).toBe(1)
   })
 
+  test('a pane round records the commit it reviewed, and one that errored with nothing written records none', async () => {
+    const withRepo = () => {
+      const t = task()
+      const wt = t.worktree as string
+      mkdirSync(wt, { recursive: true })
+      execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > a.txt && git add -A && git commit -qm init', { cwd: wt, shell: '/bin/sh' })
+      return { t, head: execSync('git rev-parse HEAD', { cwd: wt, encoding: 'utf8' }).trim() }
+    }
+    const first = withRepo()
+    expect((await src.cli(['review', first.t.id, '--run'], { chat: `${first.t.id}/Agent` })).code).toBe(0)
+    expect(first.t.reviewed).toMatchObject([{ round: 1, commit: first.head }])
+
+    // a provider error with no words written: the reviewer is freed, and no commit is recorded as reviewed
+    const second = withRepo()
+    next = { findings: '', error: '402 Insufficient funds' }
+    const r = await src.cli(['review', second.t.id, '--run'], { chat: `${second.t.id}/Agent` })
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('it wrote no findings before the error')
+    expect(r.out).toContain('not recorded as a review')
+    expect(second.t.reviewed).toBeUndefined()
+    expect(src.engine.runs().filter((x) => x.role === 'reviewer')).toHaveLength(0)
+  })
+
   test('a reviewer error keeps partial findings, marks them cut short and posts an error card', async () => {
     const t = task()
     next = { findings: 'Let me read the diff', error: '402 Insufficient funds', cutShort: true }

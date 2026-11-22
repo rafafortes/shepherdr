@@ -1,5 +1,6 @@
 // git for tasks: what a fresh worktree starts from and gets copied in, whether its work is in main, commits, rebasing
 // on main and merging into it. herdr itself makes and removes task worktrees (worktrees.ts).
+import { spawnSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { BOX, run } from '../box.ts'
 import { cpSync, existsSync, readFileSync } from '../mfs.ts'
@@ -55,6 +56,23 @@ export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number;
 }
 
 export const git = (cwd: string, ...args: string[]) => sh(['git', ...args], cwd)
+
+/** the local, synchronous reads a review round needs while it is counted or ended in one turn: no repo, no answer */
+const syncGit = (cwd: string, ...args: string[]) => spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+export const head = (cwd: string) => (!cwd ? undefined : syncGit(cwd, 'rev-parse', 'HEAD').stdout?.trim() || undefined)
+export const isAncestor = (cwd: string, older: string, newer: string) => !!cwd && syncGit(cwd, 'merge-base', '--is-ancestor', older, newer).status === 0
+/** the commits since a reviewed one, as the refusal says what came after it */
+export const oneline = (cwd: string, range: string, max = 8) => {
+  const r = syncGit(cwd, 'log', '--oneline', '-n', String(max), range)
+  return r.status === 0 ? r.stdout.split('\n').filter(Boolean) : []
+}
+/** a commit named on the command (`--commit HEAD~1`): its full sha, or nothing when it is no commit on this branch */
+export const resolveCommit = (cwd: string, ref: string, head: string) => {
+  if (!cwd || !head) return undefined
+  const r = syncGit(cwd, 'rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`)
+  const sha = r.status === 0 ? r.stdout.trim() : ''
+  return sha && (sha === head || isAncestor(cwd, sha, head)) ? sha : undefined
+}
 
 /** a line that names what was found, and one that names where: the row prefers these over git's own wrapper */
 const HEADLINE = /\b(gitleaks|findings?|fatal|error|leak|violation|fail(?:ed)?|rejected|non-fast-forward|denied)\b/i

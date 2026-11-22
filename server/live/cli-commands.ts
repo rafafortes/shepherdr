@@ -492,14 +492,17 @@ export class CliCommands {
     if (got.failed) {
       return `Round ${round} of ${r.rounds} counted for ${t.id}. Its reviewer pane could not open (${got.failed}), so this round fell back to headless. Review with ${reviewerWords(reviewer)}: run \`${reviewRunLine(reviewer)}\` (fill in <out>; <prompt> is ${file}), then \`shepherdr review ${t.id} --done\` when the round's review has finished.`
     }
-    this.engine.reviewDone(t.id)
+    // an answer, even "no findings", is the round's review of its commit; a round that errored or was cut with nothing
+    // written reviewed nothing, so it frees the reviewer and records no commit
+    this.engine.reviewDone(t.id, undefined, !!got.findings)
     // a provider error is not a timeout: say which it was, and never call an empty cut-short answer "partial findings"
     const cut = got.error
       ? `The reviewer gave an error (${got.error}); ${got.findings ? 'these are its partial findings' : 'it wrote no findings before the error'}.\n\n`
       : got.cutShort
         ? `Cut short at the 900 s timeout; these are its partial findings.\n\n`
         : ''
-    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}`
+    const unrecorded = got.findings ? '' : `\n\nThis round is not recorded as a review of ${t.id}'s commit: \`shepherdr ready\` asks for one this commit was reviewed on.`
+    return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}${unrecorded}`
   }
 
   async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
@@ -625,7 +628,14 @@ export class CliCommands {
         if (!t) throw new Error(`No task ${a1 ?? ''}; shepherdr review <id>`)
         if (ctx.chat !== `${t.id}/Agent`)
           throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
-        if (p.flags.has('done')) return this.engine.reviewDone(t.id) ? `Review of ${t.id} is done: its reviewer is free again.` : `No review of ${t.id} is running: nothing to release.`
+        if (p.flags.has('done')) {
+          const before = t.reviewed?.length ?? 0
+          const had = this.engine.reviewDone(t.id, one(p, 'commit'))
+          const rec = (t.reviewed?.length ?? 0) > before ? t.reviewed?.at(-1) : undefined
+          const on = rec ? `; the round is recorded on ${rec.commit.slice(0, 7)}` : ''
+          if (had) return `Review of ${t.id} is done: its reviewer is free again${on}.`
+          return rec ? `Review of ${t.id} is done: nothing was leased to release${on}.` : `No review of ${t.id} is running: nothing to release.`
+        }
         if (one(p, 'run') !== undefined || p.flags.has('run')) return this.reviewRunCommand(t, one(p, 'run') ?? rest[0], ctx, onStep)
         const r = await this.engine.reviewRound(t.id)
         return 'wait' in r ? this.engine.reviewWaitWords(t.id, r.wait) : this.engine.reviewWords(t.id, r)
@@ -1362,8 +1372,10 @@ export class CliCommands {
       case 'show': {
         const v = this.engine.view(t)
         if (p.flags.has('json')) return JSON.stringify(v, null, 2)
-        // the rounds its agent counted, and the one its coordinator may have added
+        // the rounds its agent counted, the one its coordinator may have added, and the commit the last one reviewed
         const rounds = t.reviews === undefined ? undefined : `Review rounds: ${t.reviews} of ${this.engine.roundsOf(t)} used${t.reviewsAdded ? ', one added by its coordinator' : ''}`
+        const last = t.reviewed?.at(-1)
+        const reviewed = last ? `Reviewed: round ${last.round} on ${last.commit.slice(0, 7)} (${last.reviewer.kind}${last.reviewer.model ? `/${last.reviewer.model}` : ''})` : undefined
         return [
           `${v.id} ${v.name}`,
           `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`,
@@ -1371,6 +1383,7 @@ export class CliCommands {
           v.branch ? `Branch: ${v.branch}` : '',
           v.base ? `Merges into: ${v.base}` : '',
           rounds,
+          reviewed,
           v.desc ? `\n${v.desc}` : '',
         ]
           .filter(Boolean)

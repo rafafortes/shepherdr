@@ -70,7 +70,7 @@ import {
   reviewerWords,
   reviewRunLine,
 } from '../prompts.ts'
-import { reviewerPromptPath, writeReviewerPrompt } from '../reviewer-prompt.ts'
+import { focusWords, lastReviewedOf, reviewerPromptPath, writeReviewerPrompt } from '../reviewer-prompt.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -199,6 +199,15 @@ export interface TaskRec {
   reviewWait?: { since: number }
   /** rounds its coordinator added past those (shepherdr task review-more): one at most, and never by its own agent */
   reviewsAdded?: number
+  /** a review round was counted on this task: its final commit must carry a recorded review before ready or merge.
+   *  Tasks from before this rule never counted one here, and are left as they were */
+  reviewGate?: true
+  /** each round recorded on the commit it reviewed (shepherdr review --done): the commit, round and reviewer */
+  reviewed?: Reviewed[]
+  /** the newest round counted, kept past its lease (a restart, or REVIEW_TIMEOUT): `--done` still records the commit it
+   *  reviewed, so a whole round of a task's own allowance is never lost to a lease ending first. Its commit is the
+   *  branch's HEAD when the round was counted: what the reviewer was sent to read, not what came after it */
+  reviewLast?: { round: number; reviewer: Harness; since: number; commit?: string }
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
@@ -606,6 +615,14 @@ export interface Round {
   why?: Blocked<ReviewStep>
 }
 
+/** a round finished and recorded on the commit it reviewed, so what merges was seen by fresh eyes */
+export interface Reviewed {
+  round: number
+  commit: string
+  reviewer: Harness
+  at: number
+}
+
 export const HELD = {
   slots: 'Waiting for a free slot',
   turn: 'Waiting for its turn',
@@ -909,8 +926,9 @@ export class Engine extends Emitter<Events> {
   /** the starts and switches on their way (a chat's key → the run it goes to): counted on the model they go to from the
    *  moment it is chosen, before its agent shows it, so two starts in a row never both take the last slot (claim) */
   private claims = new Map<string, Run>()
-  /** the rounds running now: when each was counted, and since when its agent's turn has not been working */
-  private reviewing = new Map<string, { since: number; idle?: number; round?: Round }>()
+  /** the rounds running now: when each was counted, since when its agent's turn has not been working, and the commit
+   *  its reviewer was sent to read */
+  private reviewing = new Map<string, { since: number; idle?: number; round?: Round; commit?: string }>()
   /** tasks whose `shepherdr review` is waiting for a reviewer now (retryReviews leaves them to it) */
   private reviewLive = new Set<string>()
   /** how long `shepherdr review` waits for a free reviewer (tests shorten it), how often it looks, and how long a round
@@ -975,6 +993,7 @@ export class Engine extends Emitter<Events> {
       sendBack: (t, text) => engine.sendBack(t, text),
       cleanup: (t) => engine.cleanup(t),
       mergedAlready: (t) => engine.mergedAlready(t),
+      reviewGate: (t) => engine.reviewGate(t),
       gate: (t, repo, space, wt, on, refresh) => engine.gate(t, repo, space, wt, on, refresh),
       train: (t, p, wt) => engine.train(t, p, wt),
       trainSize: (space) => engine.trainSize(space),
@@ -3579,13 +3598,20 @@ export class Engine extends Emitter<Events> {
     if ('wait' in c) return { wait: c.wait }
     const { n, h } = c.harness
     const key = keyOf(h.kind, h.model)
+    const since = Date.now()
     t.reviews = (t.reviews ?? 0) + 1
     t.reviewWait = undefined
+    // from the first round on, the final commit must be one a round was recorded on (shepherdr review --done), and this
+    // round is kept past its lease, so a --done after a restart still records the commit it reviewed. The commit is
+    // HEAD now, before the reviewer starts: a fix committed later in the turn is not what it read
+    const commit = t.worktree ? G.head(t.worktree) : undefined
+    t.reviewGate = true
+    t.reviewLast = { round: t.reviews, reviewer: h, since, ...(commit ? { commit } : {}) }
     this.saveNow()
     this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
     const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
     const round: Round = { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
-    this.reviewing.set(t.id, { since: Date.now(), round })
+    this.reviewing.set(t.id, { since, round, ...(commit ? { commit } : {}) })
     // The prompt is Shepherdr's now (SHE-183): write it when the round is counted, so a round woken later when a
     // reviewer frees has its prompt ready too, and every CLI (and a subagent fallback) gets the same file.
     writeReviewerPrompt({
@@ -3597,6 +3623,8 @@ export class Engine extends Emitter<Events> {
       brief: splitBrief(t.desc ?? '')[0] || t.title,
       base: t.base ?? 'main',
       worktree: t.worktree ?? '',
+      // a later round reads what changed since the last reviewed commit first, with the whole change for context
+      since: lastReviewedOf(t.reviewed, t.worktree ?? '')?.commit,
       privacy: privatePrompt('', this.settings.instructions('reviewer', this.nameOf(t) ?? '')),
     })
     return round
@@ -3621,14 +3649,135 @@ export class Engine extends Emitter<Events> {
     return !ended(t) && !t.reported && !t.stopped && !t.archived
   }
 
-  /** `shepherdr review <id> --done`: the round's review has finished, so its reviewer is free again (no round is counted).
-   *  A round that waits for a reviewer is counted when one frees, as before */
-  reviewDone(id: string): boolean {
+  /** `shepherdr review <id> --done`: the round's review has finished, so its reviewer is free again (no round is counted),
+   *  and the commit it reviewed is recorded on the task: round, commit and reviewer. That is the branch's HEAD when the
+   *  round was counted, which is what its reviewer was sent to read, never a fix committed after it; `--commit` names
+   *  another commit when the round read an earlier one. `record: false` frees the reviewer and records nothing (a round
+   *  that gave no findings because it errored reviewed nothing). A round that waits for a reviewer is counted when one
+   *  frees, as before */
+  reviewDone(id: string, commit?: string, record = true): boolean {
     const t = this.req(id)
-    const had = this.reviewing.has(t.id)
+    const open = this.reviewing.get(t.id)
+    const had = !!open
+    const head = t.worktree ? G.head(t.worktree) : undefined
+    const named = commit ? G.resolveCommit(t.worktree ?? '', commit, head ?? '') : undefined
+    if (commit && !named) throw new Error(`--commit ${commit} is not a commit on ${t.id}'s branch (HEAD or before it)`)
     this.endReview(t.id)
+    // the round its lease held, or the newest one it counted before the lease ended (a restart, REVIEW_TIMEOUT): either
+    // way the commit that round read is recorded, once per round
+    const done = open?.round ? { round: open.round.round, reviewer: open.round.reviewer, since: open.since, commit: open.commit } : t.reviewLast
+    // a named commit is the one the round read, or one before it: never a fix committed after the reviewer started
+    if (named && done?.commit && named !== done.commit && !G.isAncestor(t.worktree ?? '', named, done.commit))
+      throw new Error(`--commit ${commit} is not the commit ${t.id}'s round reviewed (${done.commit.slice(0, 7)}) or one before it`)
+    const at = named ?? done?.commit
+    if (record && at && done && !(t.reviewed ?? []).some((r) => r.round === done.round)) {
+      ;(t.reviewed ??= []).push({ round: done.round, commit: at, reviewer: done.reviewer, at: done.since })
+      this.saveNow()
+    }
     if (had) this.retryReviews()
     return had
+  }
+
+  /** whether this task's brief still asks for a review: its own Review line wins, then its --set, then Settings */
+  private reviewOn(t: TaskRec) {
+    return briefReview(t.desc ?? '') ?? this.settings.ways(this.nameOf(t), t.set).review
+  }
+
+  /**
+   * `shepherdr ready` and `shepherdr merge` refuse a final commit no round was recorded on, when the brief asks for a
+   * review and the task has records (a task from before them is left as it was). No new round is needed for the commit
+   * a round was recorded on, for a tree identical to one reviewed, for clean merges of the base onto a reviewed commit,
+   * or for the same change of its own against a moved base (a rebase Shepherdr or the agent made, its own diff as it was
+   * reviewed). A brief that says no review needs none. The refusal names the last reviewed commit and what came after it.
+   */
+  async reviewGate(t: TaskRec): Promise<string | undefined> {
+    if (!t.reviewGate || !this.reviewOn(t) || !t.worktree || !existsSync(t.worktree)) return
+    const base = t.base ?? 'main'
+    const h = await G.git(t.worktree, 'rev-parse', 'HEAD')
+    if (!h.ok) return
+    if ((await G.aheadCount(t.worktree, base)) === 0) return
+    const recs = t.reviewed ?? []
+    const head = h.out
+    if (recs.some((r) => r.commit === head)) return
+    const tree = await G.git(t.worktree, 'rev-parse', `${head}^{tree}`)
+    // its tree is the base's: nothing of its own to merge, so nothing to review
+    const baseTree = await G.git(t.worktree, 'rev-parse', `${await G.mergeBase(t.worktree, base)}^{tree}`)
+    if (tree.ok && baseTree.ok && tree.out === baseTree.out) return
+    // the very tree a round was recorded on (a commit and its revert, a rebase that replayed it unchanged) needs no round
+    if (tree.ok) {
+      for (const r of recs) {
+        const seen = await G.git(t.worktree, 'rev-parse', `${r.commit}^{tree}`)
+        if (seen.ok && seen.out === tree.out) return
+      }
+    }
+    const last = lastReviewedOf(recs, t.worktree, head) ?? recs.at(-1)
+    if (recs.length && ((await this.baseMergesOnly(t, last!.commit, head, base)) || (await this.sameOwnChanges(t, head, base, recs)))) return
+    return this.reviewRefusal(t, head, last)
+  }
+
+  /** a reviewed commit's round still holds: every commit after it (along the first parents) is a clean merge of the base */
+  private async baseMergesOnly(t: TaskRec, reviewed: string, head: string, base: string) {
+    let c = head
+    // back the first parents from HEAD, one commit at a time: it ends at the root, which is no merge of the base's
+    for (;;) {
+      if (c === reviewed) return true
+      const r = await G.git(t.worktree!, 'rev-list', '--parents', '-n', '1', c)
+      const parts = r.out.split(/\s+/).filter(Boolean)
+      if (!r.ok || parts.length !== 3) return false
+      const [, first, other] = parts
+      let inBase = false
+      for (const ref of [base, `origin/${base}`]) {
+        if ((await G.git(t.worktree!, 'merge-base', '--is-ancestor', other, ref)).ok) {
+          inBase = true
+          break
+        }
+      }
+      if (!inBase) return false
+      const merged = await G.git(t.worktree!, 'merge-tree', '--write-tree', first, other)
+      const tree = await G.git(t.worktree!, 'rev-parse', `${c}^{tree}`)
+      // a resolution that changed the merge's tree, or anything added of its own, is work the review did not see
+      if (!merged.ok || !tree.ok || merged.out.split('\n')[0] !== tree.out) return false
+      c = first
+    }
+  }
+
+  /** a commit's own change against the base it is on: each file's header and the lines it adds and takes away, without
+   *  line numbers or the unchanged lines around them, which a newer base moves (upstream's own_diff, #1178) */
+  private async ownDiff(t: TaskRec, base: string, commit: string) {
+    // the base here, or its remote: whichever this branch is on. With neither, nothing is known (undefined)
+    for (const ref of [`origin/${base}`, base]) {
+      if (!(await G.git(t.worktree!, 'rev-parse', '--verify', '--quiet', ref)).ok) continue
+      const diff = await G.git(t.worktree!, 'diff', '--no-color', '--no-ext-diff', '--no-renames', '--binary', '--full-index', `${ref}...${commit}`)
+      if (!diff.ok) continue
+      // nothing of its own against this base says nothing about the review: the other ref, or no carrying at all
+      return diff.out
+        .split('\n')
+        .filter((l) => l && !l.startsWith('index ') && !l.startsWith('@@ ') && !l.startsWith(' '))
+        .join('\n')
+    }
+  }
+
+  /**
+   * HEAD's own change against the base is the one a round reviewed, for any of its records: the review holds across a
+   * merge of the base whose conflicts were resolved keeping both sides, and across a clean rebase, whatever git's own
+   * merge machinery made of it. Anything changed of its own since a round — or a resolution that moved its own lines —
+   * differs, and needs a round.
+   */
+  private async sameOwnChanges(t: TaskRec, head: string, base: string, recs: Reviewed[]) {
+    const mine = await this.ownDiff(t, base, head)
+    if (!mine) return false
+    for (const r of recs.slice(-10)) if ((await this.ownDiff(t, base, r.commit)) === mine) return true
+    return false
+  }
+
+  /** the refusal's words: which commit is unreviewed, the last round's commit, what came after, and how to fix it */
+  private reviewRefusal(t: TaskRec, head: string, last?: Reviewed) {
+    const delta = last
+      ? ` What came after it: ${G.oneline(t.worktree!, `${last.commit}..${head}`).join('; ') || 'no new commits on this branch'}; see git diff ${last.commit.slice(0, 7)}..HEAD.`
+      : ' No round has been recorded on this task yet.'
+    const what = `your final commit ${head.slice(0, 7)} is not reviewed${last ? ` (last round on ${last.commit.slice(0, 7)})` : ''}.${delta}`
+    const how = `Have it reviewed (shepherdr review ${t.id}), fix what must be fixed, record the round on the reviewed commit with \`shepherdr review ${t.id} --done\`, then run ready again.`
+    return this.reviewsLeft(t) <= 0 ? `${this.roundsUsed(t)} ${what}` : `Review is on and ${what} ${how} ${this.reviewsLeft(t)} of ${this.roundsOf(t)} rounds left.`
   }
 
   /** the lease of a task's review ends: its reviewer is free (the round is over, or its step is) */
@@ -3664,7 +3813,9 @@ export class Engine extends Emitter<Events> {
       ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : a.why.why === 'blocked' ? `${chainWords(a.why.harness.h)} is blocked (0 allowed)` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})`
       : ''
     const prompt = reviewerPromptPath(id, a.round)
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`.`
+    const t = this.task(id)
+    const since = lastReviewedOf(t?.reviewed, t?.worktree ?? '')?.commit
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. ${focusWords(since, a.round)} Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. It names both the whole change against the base and ${since ? `this round's change since ${since.slice(0, 7)} (git diff ${since.slice(0, 7)}..HEAD)` : 'what changed since the base'}. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
@@ -3750,6 +3901,9 @@ export class Engine extends Emitter<Events> {
   async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
     if (ended(t)) return { state: 'ended' }
+    // the final commit must be one a round was recorded on: that is the work the human would merge
+    const unreviewed = await this.reviewGate(t)
+    if (unreviewed) throw new Error(unreviewed)
     // reported: its review is over, and its reviewer is free
     this.endReview(t.id)
     if (summary) t.said = summary
@@ -4124,7 +4278,15 @@ export class Engine extends Emitter<Events> {
         for (const r of riders.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
         break
       }
-      if (x !== t) await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+      if (x !== t) {
+        await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+        // a rider's commit goes into the base too: it must be one a round was recorded on, as the head's is (mergeNow)
+        const unreviewed = await this.reviewGate(x)
+        if (unreviewed) {
+          why.set(x, unreviewed)
+          continue
+        }
+      }
       const merged = await G.git(p.path, 'merge-tree', '--write-tree', '--no-messages', '--name-only', top, x.branch!)
       const tree = merged.out.split('\n')[0]
       // the head stacks on main, every other on those before it

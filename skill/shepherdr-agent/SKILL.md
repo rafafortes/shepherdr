@@ -66,8 +66,8 @@ build, check and review the work is your own judgment.
    The first command counts the round and holds its reviewer for it (the primary, or the backup your Reviewer line names
    when the primary is full or out, with why). The second opens the reviewer in a new tab of your task's herdr space
    labelled as its reviewer with `SHEPHERDR_CHAT=<id>/Reviewer`, sends it that prompt, waits up to 900 s printing progress
-   on stderr, then prints its last plain message on stdout and closes the pane. It frees the reviewer itself: a pane
-   round needs no `--done`.
+   on stderr, then prints its last plain message on stdout and closes the pane. It frees the reviewer itself and records
+   the commit it reviewed: a pane round needs no `--done`.
    Raise your shell tool's timeout to at least 1020 s (17 min) for this one command — a round can first wait 90 s for a
    reviewer, then run for 900 s (Claude Code and OpenCode `Bash` 600000 ms
    per call moves it to the background rather than stopping — keep waiting for the answer; pi at least 960 s): a client
@@ -86,7 +86,8 @@ build, check and review the work is your own judgment.
    no per-call tool clock, so the shell `timeout` is it. Where a CLI is not installed, its line comes from that CLI's
    documented flags; a figure that could not be verified is marked unverified. It streams the reviewer's output there as it is written.
    Replace `<prompt>` with the prompt file Shepherdr named and `<out>` with the file to stream into. After a timeout, read the file first and use any findings there instead
-   of starting over; then run `shepherdr review <id> --done`: it frees the reviewer and counts nothing. Wait in this turn
+   of starting over; then run `shepherdr review <id> --done`: it frees the reviewer, counts nothing and records the commit
+   it reviewed. Wait in this turn
    throughout: never in the background, never end your turn while a review runs, and if it times out, wait for the
    fallback subagent in this same turn too; do not end the turn and expect to be woken when it reports.
    A pane round cut by its timeout prints its partial findings marked as cut short: use them for this round, then fall
@@ -98,7 +99,17 @@ build, check and review the work is your own judgment.
    major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style). Fix every finding at or above
    Must fix, then review again; stop once a round has none at or above it, or after Review rounds. Never agree with a
    finding just to end the loop: one you judge wrong goes in the facts with why. Findings below the bar go in the facts,
-   unfixed. Run the checks the reviewer lists under "Not run in my sandbox:" yourself and say the results in `--facts`.
+   unfixed. A round after the first looks first at what changed since the last reviewed commit (`git diff <last-reviewed>..HEAD`,
+   including any merge's conflict resolutions), with the whole change still read for context; Shepherdr writes both
+   ranges into the prompt and names them in the round's answer.
+   `shepherdr review <id> --done` records the commit that round reviewed — the commit the round was counted on, the
+   round and the reviewer — on the task (`--commit <rev>` names another commit of the branch, for a round that read an
+   earlier one). Your final commit must be reviewed before `shepherdr ready` or `shepherdr merge`: a refusal names the
+   last reviewed commit and what came after it. Anything you commit after a round needs its own round, so commit your
+   fixes and review again rather than fixing after the last `--done`. No new round is needed for a clean merge of the
+   base onto a reviewed commit, for a tree identical to a reviewed one, for the same change of your own against a moved
+   base (a clean rebase), or when your brief says no review; a conflict resolution that changes your own lines needs one.
+   Run the checks the reviewer lists under "Not run in my sandbox:" yourself and say the results in `--facts`.
    Copy any "Shepherdr feedback:" line from its findings into `--facts` too: the coordinator reads it in the ready line's
    Facts; never file anything outside yourself. An open choice no experiment can settle goes to the human as a card.
    Out of Review rounds with your final commit

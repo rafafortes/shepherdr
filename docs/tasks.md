@@ -44,6 +44,23 @@
   commit still unreviewed says so in its chat; its coordinator gives it exactly one more with `shepherdr task
   review-more <id>`, once, only once they are all used, and its agent is woken with the round to run. `task show`
   records it.
+- A review belongs to the commit it reviewed. `shepherdr review <id> --done` records the commit the round was counted
+  on — the branch's HEAD then, which is what its reviewer was sent to read, never a fix committed after it — with the round
+  and the reviewer, on the task. `--commit <rev>` names another commit of the branch instead (resolved to its full sha);
+  `shepherdr task show` then names the last reviewed commit. From the first round on, `shepherdr ready`
+  and `shepherdr merge` refuse a final commit no round was recorded on; the refusal names the last reviewed commit and
+  what came after it (`git diff <last-reviewed>..HEAD`). No new round is needed when the final commit is one a round was
+  recorded on, when its tree is identical to a reviewed tree, when only clean merges of the base came after it, when its
+  own change against the moved base is the one a round read (a clean rebase, Shepherdr's own included), or when the brief
+  says no review. A conflict resolution that changes the task's own lines (what it adds or takes away), or anything committed since a
+  round, needs one. A merge train's riders are held to it too: a rider whose head is unreviewed stays out and its own turn
+  refuses it.
+  Tasks from before these records have none, and are left as they were; so is a task whose agent never counted a round
+  (the rule starts with its first). A round after
+  the first gets the change since the last reviewed commit as its focus, with the whole diff still read for context: both
+  ranges are named in the reviewer prompt and in the round's answer. Out of rounds with the final commit unreviewed, the
+  agent says why in its chat and stops; only its coordinator adds one. A pane review that errored, or was cut short with
+  nothing written, frees its reviewer and records no commit: it reviewed nothing.
 - Want something noted but not started? Ask for it "for later": the coordinator adds it with `--later`, and its agent
   starts all the same, with "don't start yet, wait for a go" in its brief. It says in one line that it has it and the task shows To do (`shepherdr todo`).
   Tap it and you are in its chat, like any other: say go when you are ready, or say what to change. The agent decides
@@ -287,12 +304,15 @@
   reviewer holds a slot from the count until the pane round ends (a `--run` frees it itself), or for a headless fallback
   until `shepherdr review <id> --done`, the task's report, stop or end, or 45 minutes after the round was counted (or
   after its agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
-  agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
+  agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. The
+  round's record is kept past the slot: a `--done` after it ended still records the commit that round reviewed. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
   always has. The prompt is Shepherdr's own, from `skill/shepherdr-reviewer/PROMPT.md`, filled with the task, its brief,
   the base and merge-base, the repo's rule files that exist and one findings format for all five CLIs and a subagent:
   the reviewer reads `git diff <merge-base>...HEAD` and `git log` itself, never a pasted diff (a huge one once stalled a
-  round for 540 s with no output). The agent writes no prompt of its own. `--run` sends that file to the pane, waits up
+  round for 540 s with no output). A round after the first also gets `git diff <last-reviewed>..HEAD` as its focus, with
+  the whole change still read for context; where a rebase left that commit off the branch, it says so and asks for the whole
+  change again instead of calling itself the first round. The agent writes no prompt of its own. `--run` sends that file to the pane, waits up
   to 900 s with progress on stderr, reads the reviewer's last plain message from its own CLI log (not the screen) and
   closes the pane. A round cut by the timeout
   prints what the reviewer had written so far, marked cut short, so the agent can use it or fall back to one subagent

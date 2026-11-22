@@ -18,6 +18,10 @@ Read the change with your own read-only tools from that worktree. Never a diff p
 - git log --oneline {{MERGE_BASE}}..HEAD
 - git status --short
 
+## This round's focus
+
+{{FOCUS}}
+
 ## The repo's rules
 
 {{RULES}}
