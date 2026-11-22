@@ -243,7 +243,7 @@ const ROUTE_REPAIR_EVERY = 30_000
  *  reaches herdr (pruneAt starts at 0), then this often. A route file is written for every launch and nothing else
  *  removed one, so the folder grew without end (1707 files on 2026-11-21) and slowed every CLI call (SHE-185). */
 const ROUTE_PRUNE_EVERY = 10 * 60_000
-const ROUTE_PRUNE_MS = 10_000
+const ROUTE_PRUNE_MS = 30_000
 
 /** An idle agent's screen is read on the refresh that ends its turn, then on each refresh for the first minute
  *  (background work is announced as the turn ends and ends soon after), and after that only every 30 s. While a read

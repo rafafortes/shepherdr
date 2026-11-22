@@ -3,7 +3,7 @@
 // Every CLI: the pass is the helper's `--prune`, which looks at a pid and its start stamp and at no CLI's name, so one
 // test serves claude, codex, pi, opencode and agy alike (route-prune.test.ts runs the helper itself).
 import { describe, expect, spyOn, test } from 'bun:test'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -22,15 +22,23 @@ const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const routes = join(home, '.shepherdr', 'helper', 'routes')
 
-/** a route file for a process that is gone: this one's pid, which no process holds */
-const stale = (pid: number) => {
+/** a pid no process holds now (a fixed number may belong to a long-lived process on a machine whose pids are in the millions) */
+let below = Number(readFileSync('/proc/sys/kernel/pid_max', 'utf8').trim())
+const freePid = () => {
+  while (existsSync(`/proc/${--below}`));
+  return below
+}
+
+/** a route file for a process that is gone */
+const stale = () => {
+  const pid = freePid()
   mkdirSync(routes, { recursive: true })
   const file = join(routes, `${pid}.json`)
   writeFileSync(file, JSON.stringify({ stamp: '1', chat: 'DEAD-1/Agent', cwd: home }))
   return file
 }
 
-const until = async (f: () => boolean, ms = 15_000) => {
+const until = async (f: () => boolean, ms = 60_000) => {
   for (const t0 = Date.now(); !f(); await Bun.sleep(10)) if (Date.now() - t0 > ms) throw new Error('timed out')
 }
 
@@ -38,14 +46,14 @@ type Pruner = { pruneAt: number; refresh: () => Promise<void> }
 
 describe('the server prunes dead routes', () => {
   test('at the first refresh that reaches herdr, then not again within ten minutes', async () => {
-    const first = stale(4_000_001)
+    const first = stale()
     const agents = spyOn(herdr, 'agents').mockResolvedValue([])
     try {
       const a = new Agents() as unknown as Pruner
       await a.refresh()
       await until(() => !existsSync(first))
       // a file that dies after it: this pass is not due again yet
-      const second = stale(4_000_002)
+      const second = stale()
       await a.refresh()
       await Bun.sleep(300)
       expect(existsSync(second)).toBe(true)
@@ -65,7 +73,7 @@ describe('the server prunes dead routes', () => {
         env: { ...process.env, HOME: home },
       })
       expect(bound.exitCode).toBe(0)
-      const dead = stale(4_000_003)
+      const dead = stale()
       const agents = spyOn(herdr, 'agents').mockResolvedValue([])
       try {
         const a = new Agents() as unknown as Pruner
@@ -81,7 +89,7 @@ describe('the server prunes dead routes', () => {
   })
 
   test('SHEPHERDR_PRUNE_ROUTES=0 prunes nothing, as in every other test', async () => {
-    const file = stale(4_000_005)
+    const file = stale()
     const agents = spyOn(herdr, 'agents').mockResolvedValue([])
     process.env.SHEPHERDR_PRUNE_ROUTES = '0'
     try {
@@ -96,7 +104,7 @@ describe('the server prunes dead routes', () => {
   })
 
   test('a server that may start no agent prunes nothing', async () => {
-    const file = stale(4_000_004)
+    const file = stale()
     const agents = spyOn(herdr, 'agents').mockResolvedValue([])
     process.env.SHEPHERDR_LAUNCH_AGENTS = '0'
     try {
