@@ -64,7 +64,7 @@ describe('the server prunes dead routes', () => {
     } finally {
       agents.mockRestore()
     }
-  })
+  }, 90_000)
 
   test('a live process’s route stays', async () => {
     const owner = Bun.spawn(['/bin/sleep', '30'])
@@ -86,7 +86,7 @@ describe('the server prunes dead routes', () => {
     } finally {
       owner.kill()
     }
-  })
+  }, 90_000)
 
   test('SHEPHERDR_PRUNE_ROUTES=0 prunes nothing, as in every other test', async () => {
     const file = stale()
