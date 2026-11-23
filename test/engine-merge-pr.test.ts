@@ -875,6 +875,51 @@ describe('taking a pull request that is already open', () => {
     expect(sh('git show main:work.txt', g.bare)).toBe('work')
   })
 
+  test('ready with --pr starts an empty worktree at the pull request tip, and keeps the pull request it already has', async () => {
+    const w = world()
+    const g = onGitHub()
+    const tip = bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await started(w, g.dir, 'take-empty')
+    expect(sh('git rev-parse HEAD', worktreeOf(t))).not.toBe(tip)
+    await w.engine.done(t.id, 'Taking it.', 'facts', '5')
+    expect(t.pr).toMatchObject({ number: 5, taken: true, branch: 'dep/bump' })
+    expect(sh('git rev-parse HEAD', worktreeOf(t))).toBe(tip)
+  })
+
+  test('ready refuses to take a different pull request while the task still has its own', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await started(w, g.dir, 'take-replace')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const own = t.pr?.number
+    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '5'))).toContain(`already has pull request #${own}`)
+    expect(t.pr?.number).toBe(own)
+    expect(g.gh().prs.length).toBe(2)
+    expect(opened(g)).toBe(1)
+  })
+
+  test('a GitHub merge conflict on a taken pull request names its branch, not the task branch', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-ghconflict')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    await w.engine.done(t.id, 'Ready.')
+    g.set({ mergeError: 'Pull request #5 is not mergeable: the merge commit cannot be created' })
+    const r = await w.engine.merge(t.id, { self: true })
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('branch dep/bump conflicts with main')
+    expect(r.error).toContain('merge main into that branch by hand')
+    expect(g.gh().prs[0].state).toBe('OPEN')
+  })
+
   test('a taken branch gone from GitHub is refused before any worktree is made', async () => {
     const w = world()
     const g = onGitHub()
