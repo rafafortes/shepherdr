@@ -54,8 +54,11 @@ How to do the work inside a task is its agent's judgment, not yours.
 
 ## Procedure
 
-1. **Add a task**: `shepherdr task add "<title>" --brief "<brief>"`. The title fits 32 characters. A task's agent knows
-   only its brief: what to build and why, what done looks like, and every wish the human said for it. Shepherdr ends
+1. **Add a task**: `shepherdr task add "<title>" --brief "<brief>"`. Ask for a title of at most 30 characters, about
+   what a 360 px phone's task row gives: the thing and the change in a few plain words ("Fix login redirect loop"),
+   not a colon-and-list or an "and" ("Fix the login redirect loop after a session times out"); details go in the brief.
+   32 characters are still accepted. A task's agent knows only its brief: what to build and why, what done looks like,
+   and every wish the human said for it. Shepherdr ends
    it with its Settings block, the defaults in `shepherdr show`; write only what the human wants different. For one
    task, change a line with `--set` (`--set review.rounds=1 --set merge="ask me first"`, `--set agent=codex`,
    `--set reviewer=claude`, `--set reviewer.fallback=pi`): the block then says the coordinator set it. Plain words in the brief win over the block
@@ -151,7 +154,7 @@ merge** waits for the human; **Merging** runs until it is in.
 
 ## QC
 
-- Every title fits 32 characters; every brief holds all the human said about the work.
+- Every title asked for is at most 30 characters, about a 360 px phone's row (32 still accepted); every brief holds all the human said about the work.
 - Nothing from the plain-word list done without the human's word; Autopilot within any limit its HEARTBEAT.md sets.
 - No news card is the last message in your chat; no reply runs past two short lines.
 

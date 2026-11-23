@@ -11,7 +11,7 @@ import { taskAlert } from '../../shared/alerts.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { ATTACH_MAX, isMedia, isVideo } from '../../shared/files.ts'
 import { placeOrder } from '../../shared/space-order.ts'
-import { type Action, type Alert, doneNewestFirst, type Peer, type Place, type RestartInfo, STATUS_MAX } from '../../shared/types.ts'
+import { type Action, type Alert, doneNewestFirst, type Peer, type Place, type RestartInfo, ROW_MAX, STATUS_MAX } from '../../shared/types.ts'
 import { startsWords, whenFrom } from '../../shared/when.ts'
 import { parseHosts, refusedHosts } from '../hosts.ts'
 import { has } from '../plugins.ts'
@@ -229,7 +229,8 @@ export class CliCommands {
     if (ctx.chat?.includes('/') && ctx.chat.split('/')[0].toUpperCase() !== t.id.toUpperCase()) throw new Error(`A task's agent reports only its own task's progress, not ${t.id}'s.`)
     const line = words.join(' ').trim()
     const done = (one(p, 'done') ?? '').replace(/%$/, '')
-    if (!line || !/^\d{1,3}$/.test(done) || Number(done) > 100) throw new Error(`shepherdr status ${t.id} "<what you are doing, at most ${STATUS_MAX} characters>" --done <0-100> [--left 5m|1h20m]`)
+    if (!line || !/^\d{1,3}$/.test(done) || Number(done) > 100)
+      throw new Error(`shepherdr status ${t.id} "<what you are doing, at most ${ROW_MAX} characters, e.g. 'Fixing two failing tests'>" --done <0-100> [--left 5m|1h20m]`)
     const leftArg = one(p, 'left')
     const left = leftArg === undefined ? undefined : minutesOf(leftArg)
     // up to 99 hours: what fits under the dot ("99h")

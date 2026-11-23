@@ -405,7 +405,9 @@ describe("a task's own progress (shepherdr status)", () => {
       const no = await src.cli(['status', other.t.id, 'Fixing', '--done', '10'], { chat: key })
       expect(no.code).toBe(1)
       expect(no.out).toContain('only its own task')
-      expect((await src.cli(['status', t.id, 'Fixing'], { chat: key })).out).toContain('--done <0-100>')
+      const usage = (await src.cli(['status', t.id, 'Fixing'], { chat: key })).out
+      expect(usage).toContain('--done <0-100>')
+      expect(usage).toContain('at most 30 characters, e.g.')
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '140'], { chat: key })).code).toBe(1)
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '10', '--left', 'soon'], { chat: key })).out).toContain('--left takes a time')
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '10', '--left', '200h'], { chat: key })).out).toContain('up to 99h')

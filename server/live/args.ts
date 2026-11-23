@@ -1,5 +1,5 @@
 // Reads a shepherdr command line: positional words and --options (repeatable ones collect into lists).
-import { splitFacts, STATUS_MAX, SUMMARY_MAX, TITLE_MAX } from '../../shared/types.ts'
+import { ROW_MAX, splitFacts, STATUS_MAX, SUMMARY_MAX, TITLE_MAX } from '../../shared/types.ts'
 import { ATTACH_MAX } from '../../shared/files.ts'
 
 export interface Parsed {
@@ -115,7 +115,10 @@ export const TOPIC = {
                                                  [--at "tomorrow 9:00" | --in 6h] [--set KEY=VALUE ...] [--agent CLI]
                                                  [--model ID] [--effort LEVEL] [--flags "..."] [--reviewer CLI]
                                                  [--reviewer-model ID] [--reviewer-effort LEVEL]
-                                                 the title at most ${TITLE_MAX} characters (it fits one line on a phone);
+                                                 the title asked for at most ${ROW_MAX} characters: the thing and the
+                                                 change in a few plain words ("Fix login redirect loop"), no
+                                                 colon-and-list or "and"; details go in the brief (${TITLE_MAX}
+                                                 characters are still accepted);
                                                  its agent starts at once, in its own worktree. Shepherdr ends the
                                                  brief with its Settings block (shepherdr show has the defaults); the
                                                  brief's own words win (skip the review, plan first, ask me before
@@ -269,11 +272,14 @@ export const TOPIC = {
                                                  answers within two minutes: run it in the foreground and wait
   shepherdr plan <id> --step "..." [--step "..."]
   shepherdr status <id> "<line>" --done <0-100> [--left 5m|1h20m]
-                                                 how far along you are, in your own words: the task's status line (at
-                                                 most ${STATUS_MAX} characters), its pie and the time left (it counts down
-                                                 while you work). Run it at the start, at each natural step and at least
-                                                 every 5 minutes; revise --left honestly each time and say in the line
-                                                 when it is a revision. A line older than 5 minutes reads as older
+                                                 how far along you are, in your own words: the task's status line,
+                                                 asked for at most ${ROW_MAX} characters, a few plain words for a
+                                                 phone's task row (e.g. "Fixing two failing tests"); a longer one is
+                                                 cut at ${STATUS_MAX} characters at a word. It shows the pie and the
+                                                 time left (it counts down while you work). Run it at the start, at
+                                                 each natural step and at least every 5 minutes; revise --left
+                                                 honestly each time and say in the line when it is a revision. A line
+                                                 older than 5 minutes reads as older
 `,
   chat: `Chat
   shepherdr ask "<question>" --choice "<label>" ... [--desc "<label>=<one line>"] [--other] [--multi] [--ordinary]
@@ -371,8 +377,9 @@ export const TOPIC = {
                                                  agent. advisor.* is refused: it applies at once already
   shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"]
                          [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME] [--set KEY=VALUE …]
-                                                 each run adds that task to the space, with a fresh agent; it runs on
-                                                 its time rule, its events, or both (at least one). --set is repeatable:
+                                                 each run adds that task to the space, with a fresh agent; its title is
+                                                 asked for at most ${ROW_MAX} characters, as on task add. It runs on its
+                                                 time rule, its events, or both (at least one). --set is repeatable:
                                                  review=off, review.rounds=1, merge=… (shepherdr show lists the keys);
                                                  agent/model/effort name its agent instead of the flags above
   shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when … | off] [--on … | none]
