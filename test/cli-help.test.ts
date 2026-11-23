@@ -17,7 +17,7 @@ const { ROW_MAX } = await import('../shared/types.ts')
 
 /** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
  *  dispatch verbs; this pins the text itself. Update it when help text is meant to change (as with --json on the lists). */
-const ORIGINAL_HELP_SHA = 'b345a98caa829dba5109fc9993fa288643c008d7d36329788e8db013e58ac75f'
+const ORIGINAL_HELP_SHA = '3bb8386dfe4daf5ecce84dd7e9a6e8cda3eb02fbd5d87a0f2234c8e478d91a0a'
 
 const src = new LiveSource()
 afterAll(() => src.stop())
@@ -47,6 +47,13 @@ describe('shepherdr help, per topic', () => {
     // every example of a good title or status the help gives fits the ask
     for (const good of ['Fix login redirect loop', 'Fixing two failing tests']) expect(good.length).toBeLessThanOrEqual(ROW_MAX)
     for (const bad of ['Fix the login redirect loop after a session times out', 'Rebasing onto main, then running the whole test suite']) expect(bad.length).toBeGreaterThan(ROW_MAX)
+  })
+
+  test('taking an open pull request is in the task add, start and ready help', async () => {
+    expect(TOPIC.tasks).toContain('[--pr N]')
+    expect(TOPIC.tasks).toContain('--pr N: the task takes a pull request already open')
+    expect(TOPIC.tasks).toContain('task start <id> [--agent … --model … --effort …] [--pr N]')
+    expect(TOPIC.agents).toContain('[--facts "<PR · commit · checks · review · not proven>"] [--pr N]')
   })
 
   test('a verb’s --help prints only that verb’s section', async () => {

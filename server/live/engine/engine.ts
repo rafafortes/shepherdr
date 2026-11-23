@@ -85,6 +85,7 @@ import type { UsageLedger } from '../usage-ledger.ts'
 import * as G from './git.ts'
 import { MergeRunner, ghNow, trainLog, type MergeHost } from './merge.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
+import { resolveTakenPr, takenPrRecord, type TakenPr, type TakenPrRecord } from './taken-pr.ts'
 
 export interface TaskRec {
   id: string
@@ -100,8 +101,8 @@ export interface TaskRec {
   branch?: string
   worktree?: string
   base?: string
-  /** its pull request on GitHub, once one is open */
-  pr?: { number: number; url: string }
+  /** its pull request on GitHub, once one is open; a taken one (--pr) keeps its head branch and repo so ready follows it */
+  pr?: TakenPrRecord
   /** the commit Shepherdr last pushed to its branch on GitHub, and when: checks a push starts take a moment to show */
   pushed?: { sha: string; at: number }
   /** what its agent knows of its pull request, so news is told once: comments from before `since` (when it first
@@ -2522,6 +2523,8 @@ export class Engine extends Emitter<Events> {
     flags?: string[]
     set?: Record<string, string>
     priority?: boolean
+    /** a pull request already open that this task takes, resolved and checked before it was added (--pr) */
+    pr?: TakenPr
   }) {
     const p = this.places.byName(o.project) ?? this.places.byKey(o.project) ?? this.places.space(o.project)
     if (!p) throw new Error(`No project called ${o.project}`)
@@ -2548,6 +2551,7 @@ export class Engine extends Emitter<Events> {
         created: Date.now(),
         updated: Date.now(),
         told: 'scheduled',
+        ...(o.pr ? { pr: takenPrRecord(o.pr) } : {}),
         ...(after.length ? { after } : {}),
         ...(o.priority ? { priority: true as const } : {}),
         scheduled: {
@@ -2600,6 +2604,7 @@ export class Engine extends Emitter<Events> {
       reviewer,
       waitChecks: ways.waitChecks,
       rounds: ways.rounds,
+      ...(o.pr ? { pr: takenPrRecord(o.pr) } : {}),
       ...(o.priority ? { priority: true as const } : {}),
       ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
       ...(o.flags !== undefined ? { flagsChosen: true as const } : {}),
@@ -2852,7 +2857,9 @@ export class Engine extends Emitter<Events> {
       await G.validateBase(p.path, t.base)
       // herdr dropping a call is tried again, as its agent's start does (agents.ts launch): creating the worktree finds the one a
       // dropped try made, instead of making another
-      const made = await retrying(() => this.wt.create({ repo: p.path, name: p.name }, branch, t.base!, labelOf(t)), startDelays(), dropped).catch((e) => {
+      // a taken pull request's worktree starts at its head, still on the task's own branch
+      const from = await this.prStart(t, p)
+      const made = await retrying(() => this.wt.create({ repo: p.path, name: p.name }, branch, t.base!, labelOf(t), undefined, from), startDelays(), dropped).catch((e) => {
         throw new Error(`Could not make a worktree: ${(e as Error).message}`)
       })
       Object.assign(t, { branch, worktree: made.path })
@@ -2903,7 +2910,8 @@ export class Engine extends Emitter<Events> {
     const p = this.proj(t)
     const home = { repo: p.path, name: p.name }
     if (!made && !ended(t) && !existsSync(t.worktree!) && this.agents.status(key) === 'gone') {
-      made = await this.wt.create(home, t.branch!, t.base!, labelOf(t), t.worktree)
+      const from = await this.prStart(t, p)
+      made = await this.wt.create(home, t.branch!, t.base!, labelOf(t), t.worktree, from)
       t.worktree = made.path
       this.saveNow()
     }
@@ -2952,7 +2960,7 @@ export class Engine extends Emitter<Events> {
       workspace: labelOf(t),
       tab: 'Agent',
       system:
-        taskPrompt({ id: t.id, branch: t.branch!, base: t.base! }, pastTimes(this.data.tasks, t)) +
+        taskPrompt({ id: t.id, branch: t.branch!, base: t.base!, pr: t.pr }, pastTimes(this.data.tasks, t)) +
         '\n\n' +
         privatePrompt(this.settings.instructions('task', this.nameOf(t)), this.settings.instructions('reviewer', this.nameOf(t))),
       env,
@@ -3190,6 +3198,9 @@ export class Engine extends Emitter<Events> {
    */
   private async freshen(t: TaskRec): Promise<string | undefined> {
     if (ended(t) || t.landing || !t.base || !t.worktree || !existsSync(t.worktree)) return
+    // a taken pull request's commits are already on GitHub: rebasing them here would make the next non-forced push to
+    // its branch fail. Base changes reach the task at merge time, where they are merged in rather than rebased.
+    if (t.pr?.taken) return
     const wt = t.worktree
     const base = t.base
     if (!(await G.git(wt, 'rev-parse', '--verify', '--quiet', `refs/heads/${base}`)).ok) return
@@ -4137,9 +4148,12 @@ export class Engine extends Emitter<Events> {
    * work is in its base already, its pull request merged on GitHub by hand among them: Done (merged), never a pull
    * request opened for what is in.
    */
-  async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
+  async done(id: string, summary: string, facts?: string, pr?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
     if (ended(t)) return { state: 'ended' }
+    // --pr: take (or let go of) a pull request already open, checked against this task's repo and base before a push.
+    // An empty number releases one taken earlier; without the flag a taken pull request stays taken.
+    if (pr !== undefined) await this.takePr(id, pr)
     // #1194: ready reports the task branch's tip; a worktree switched away would publish another branch's work
     const wrong = await this.runner.branchGuard(t)
     if (wrong) throw new Error(wrong)
@@ -4329,6 +4343,112 @@ export class Engine extends Emitter<Events> {
   /** the project's GitHub repo when gh is logged in to it; null: the task merges here */
   private hub(p: Space) {
     return this.runner.hub(p)
+  }
+
+  /**
+   * --pr: the GitHub remote of a project, or a clear refusal before a task is added or changed. gh's --repo (R(g))
+   * scopes the number to this project's own repository, so a PR from another repo is never found here.
+   */
+  private async hubFor(project: string) {
+    const p = this.places.byName(project) ?? this.places.byKey(project) ?? this.places.space(project)
+    if (!p) throw new Error(`No project called ${project}`)
+    const g = await this.hub(p)
+    if (!g) throw new Error(`${p.name} has no GitHub remote, or gh isn't logged in to it: --pr needs a GitHub pull request.`)
+    return { p, g }
+  }
+
+  /** live tasks with the repo each works in, so a number in another repo cannot claim another task's pull request */
+  private async prOwners() {
+    const repos = new Map<string, Promise<string | undefined>>()
+    return Promise.all(
+      this.tasks
+        .filter((t) => !t.merged && !t.closed && !t.doneAt)
+        .map(async (t) => {
+          if (!repos.has(t.project)) {
+            // a task whose project is gone has no path: githubs fails here and the catch leaves its repo unknown
+            const path = this.places.space(t.project)?.path ?? ''
+            repos.set(
+              t.project,
+              G.githubs(path)
+                .then((gs) => gs[0]?.repo)
+                .catch(() => undefined),
+            )
+          }
+          return { ...t, repo: (await repos.get(t.project)) ?? t.pr?.repo }
+        }),
+    )
+  }
+
+  /** resolve a pull request for a new task, before it is added and before any worktree or push */
+  async prToTake(project: string, number: string, base?: string) {
+    const { p, g } = await this.hubFor(project)
+    return resolveTakenPr({ g, cwd: p.path, number, base: base ?? p.base ?? 'main', tasks: await this.prOwners() })
+  }
+
+  /**
+   * Take or release a pull request on a task that is already there (task start and ready). An empty --pr lets go of a
+   * taken pull request, so the task opens its own again. A different pull request drops what the old one's news said.
+   */
+  async takePr(id: string, number: string) {
+    const t = this.req(id)
+    const p = this.proj(t)
+    if (!number.trim()) {
+      if (t.pr?.taken) {
+        t.pr = undefined
+        t.watch = undefined
+        this.saveNow()
+      }
+      return t.pr
+    }
+    const { g } = await this.hubFor(p.name)
+    const taken = await resolveTakenPr({ g, cwd: p.path, number, base: t.base ?? p.base ?? 'main', tasks: await this.prOwners(), self: t.id })
+    // switching from a pull request the task already has would leave it open with nothing to own it. One already closed
+    // or gone on GitHub has no owner to lose: drop its record and carry on.
+    if (t.pr && t.pr.number !== taken.number) {
+      const old = await G.viewPr(g, p.path, t.pr.number)
+      if (old && old.state !== 'CLOSED')
+        throw new Error(
+          `${t.id} already has open pull request #${old.number} (${t.pr.url}): close or merge it on GitHub before taking #${taken.number}${t.pr.taken ? `, or let it go with shepherdr ready --pr ""` : ''}.`,
+        )
+      t.pr = undefined
+      t.watch = undefined
+    }
+    // a branch that does not hold the pull request's latest commit cannot be pushed to its head without force.
+    // An empty worktree still at the base is clean and has no work to lose: start it from the pull request's tip.
+    if (t.worktree && existsSync(t.worktree)) {
+      const holds = await G.git(t.worktree, 'merge-base', '--is-ancestor', taken.head, 'HEAD')
+      if (!holds.ok) {
+        // never hard-reset a worktree that is on another branch: the agent may have switched to someone else's work
+        const wrong = await this.runner.branchGuard(t)
+        if (wrong) throw new Error(wrong)
+        const ahead = t.base ? await G.aheadCount(t.worktree, t.base) : 0
+        const from = ahead === 0 && !(await G.dirty(t.worktree)) ? await this.prStart({ ...t, pr: takenPrRecord(taken) }, p) : undefined
+        if (from) await G.git(t.worktree, 'reset', '--hard', from)
+        else
+          throw new Error(
+            `Your branch does not hold pull request #${taken.number}'s latest commit (${taken.head.slice(0, 7)}): merge it in first (git fetch origin ${taken.branch}, then git merge FETCH_HEAD), then take it again.`,
+          )
+      }
+    }
+    if (t.pr?.number !== taken.number) t.watch = undefined
+    t.pr = takenPrRecord(taken)
+    this.saveNow()
+    return t.pr
+  }
+
+  /**
+   * A taken pull request's branch is where the worktree starts and where pushes go. Fetch it into the repo first:
+   * herdr creates the worktree from that commit, still on the task's own branch, so ready's push is a fast-forward.
+   */
+  private async prStart(t: TaskRec, p: Space): Promise<string | undefined> {
+    if (!t.pr?.taken || !t.pr.branch) return undefined
+    const branch = t.pr.branch
+    const ref = `refs/remotes/origin/${branch}`
+    const fetched = await G.git(p.path, 'fetch', '--quiet', '--no-tags', 'origin', `+refs/heads/${branch}:${ref}`)
+    if (!fetched.ok) throw new Error(`Could not fetch pull request #${t.pr.number}'s branch ${branch}: ${fetched.err || fetched.out || 'git fetch failed'}`)
+    const at = await G.git(p.path, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`)
+    // a ref git cannot resolve (a branch that moved while it was fetched) falls back to the commit GitHub reported
+    return at.ok ? at.out : t.pr.headRefOid!
   }
 
   /** its pull request as GitHub has it now: the one recorded, else the branch's own */

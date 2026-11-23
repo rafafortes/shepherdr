@@ -581,6 +581,29 @@ export async function viewPr(g: GitHub, cwd: string, n: number): Promise<Pr | nu
   }
 }
 
+/** the fields a pull request must answer before a task takes it: its head branch and whether it is a fork's */
+export interface TakePr extends Pr {
+  headRefName: string
+  isCrossRepository: boolean
+}
+
+const TAKE_PR_FIELDS = `${PR_FIELDS},headRefName,isCrossRepository`
+
+/**
+ * A pull request by number, as it is now, with the fields needed to take it over. gh scopes the lookup to this repo
+ * (R(g)), so a number from another repository cannot be taken by a task here. Its error is returned with the answer:
+ * a refusal must say whether the number was unknown, unreadable or unreachable.
+ */
+export async function viewPrToTake(g: GitHub, cwd: string, n: number): Promise<{ pr: TakePr | null; err: string }> {
+  const r = await gh(g, cwd, 'pr', 'view', String(n), ...R(g), '--json', TAKE_PR_FIELDS)
+  if (!r.ok) return { pr: null, err: (r.err || r.out || `gh exited ${r.code}`).split('\n')[0] }
+  try {
+    return { pr: JSON.parse(r.out) as TakePr, err: '' }
+  } catch {
+    return { pr: null, err: 'GitHub did not answer with a readable pull request' }
+  }
+}
+
 /** open a pull request from the branch (pushed already); its number and link, or gh's words */
 export async function openPr(g: GitHub, cwd: string, o: { branch: string; base: string; title: string; body: string; draft: boolean }): Promise<{ number: number; url: string } | { error: string }> {
   const r = await gh(g, cwd, 'pr', 'create', ...R(g), '--head', o.branch, '--base', o.base, '--title', o.title, '--body', o.body, ...(o.draft ? ['--draft'] : []))

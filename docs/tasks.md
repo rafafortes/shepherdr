@@ -511,3 +511,14 @@
   agent. A branch available only on origin gets a local counterpart when the worktree starts.
   Rebase, pull requests and merge use this captured target. A pull request retargeted on GitHub must be corrected
   before Shepherdr will merge it. Branch protection and merge rules still apply at merge time.
+
+- A task can take a pull request that is already open instead of opening a second one:
+  `shepherdr task add "Title" --brief "…" --pr 42` starts the worktree at that pull request's head, and
+  `shepherdr ready ID --pr 42` or `shepherdr task start ID --pr 42` takes one later, and `shepherdr pr ID` then keeps
+  this task's work on it. Its number, not the task's branch, identifies it from then on, so its checks, review and merge
+  follow it.
+  The number must name an open, non-fork pull request in this task's repository, targeting this task's base branch, not
+  held by another task; each of those is refused with why before anything is pushed. A branch that does not hold the
+  pull request's latest commit is refused too, and the push to its head is never forced. `--pr ""` lets go, so the task
+  opens its own again. Omitting `--pr` changes nothing for a task that never took one, including the tasks that
+  polylog-bridge adds.

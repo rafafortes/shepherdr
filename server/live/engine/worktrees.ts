@@ -90,14 +90,15 @@ export class Worktrees {
    * when left out). One its branch is checked out in already (a start herdr finished but whose answer was lost) is
    * opened instead.
    */
-  async create(home: Home, branch: string, base: string, label: string, path?: string): Promise<Made> {
+  async create(home: Home, branch: string, base: string, label: string, path?: string, start?: string): Promise<Made> {
     const open = async () => {
       const at = await G.worktreeOf(home.repo, branch)
       return at && existsSync(at) ? this.made(await this.opening(home, (from) => this.h.worktreeOpen(from, at, label)), at) : undefined
     }
     const was = await open()
     if (was) return was
-    const from = await G.startPoint(home.repo, base)
+    // a taken pull request supplies its own start; otherwise the base's latest (fetched first)
+    const from = start ?? (await G.startPoint(home.repo, base))
     let r: WorktreeSpace
     try {
       r = await this.opening(home, (src) => this.h.worktreeCreate(src, branch, from, label, path))

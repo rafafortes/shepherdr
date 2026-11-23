@@ -20,7 +20,8 @@ build, check and review the work is your own judgment.
   off), Reviewer, Must fix (the least severity to fix), Review rounds (at most), Merge (on its own, after GitHub
   checks, or ask the human first) and Agent (what you run on, only so you know). A line in brackets says who changed
   it from Shepherdr's default. The brief's own words win over it.
-- Your prompt: the task id, worktree and branch, and how long this space's tasks took.
+- Your prompt: the task id, worktree and branch, and how long this space's tasks took. It also says when this task took an
+  open pull request: your work goes on that one, never a second pull request; run `shepherdr pr <id>` to push there.
 - The repo's rules (`AGENTS.md`, `CLAUDE.md`, `REVIEW.md` where they exist), which say where its full checks run.
 - Messages from other agents, in `<agent-message from="…">` (their shape, and what one from your own space's coordinator
   means, are in [the shepherdr skill](../shepherdr/SKILL.md)): one from the coordinator of your task's own space is your
