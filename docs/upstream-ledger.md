@@ -1071,3 +1071,26 @@ runs for all five CLIs; `test/agent-handover-pane.test.ts` covers a restart, a t
 each, and the safety of what may be closed. Upstream's "needs a resume" card is not taken: our failed start already has
 its own honest card and revive loop, and here a plain shell is retired or ignored rather than shown to the person as a
 new ask.
+
+## A task chat showing a terminal has a way back (SHE-198)
+
+Checked 2026-11-23 (SHE-198) on `upstream/main` (`e4c30f63`) and `upstream/v2.0` (`ebb17d58`), their code, history and
+public issues and pull requests (read only). 2.0 has no fix after our merge base (`bcaa2ca4`): upstream's
+`plugins/terminal/client.tsx` is ours — one `ui.term` for every chat, a `PlaceTerm` row only in the coordinator's ⋯
+menu, and a task's Terminal that stays a side-panel item and never clears `term`. 3.x redesigns this:
+`web/plugins/terminal/client.tsx` keys the chat-body swap per thread (`ui.aterm[thread.chat]`), and PR #1375
+("View as terminal / View as chat", `2a6d82d1`) puts a bar on the agent's terminal with a `View as chat` button;
+PR #1347 (`2cc3f91f`) moves Terminal and Screen into the space and task menus, checked while open. Two reports are the
+same class of bug further along: issue #786 ("a tab switched to Chat still shows its terminal", fixed by guarding the
+`chatBody` rule) and PR #756 ("Tasks panel: a task opens on its chat, not the last task's terminal", fixed by resetting
+the body stack on that open path).
+
+**port** (ours, SHE-198): 3.x's per-thread `aterm` belongs to the rewrite and cannot be taken; the idea taken is that
+a chat body showing a terminal always offers the way back. A card's Open terminal (`plugins/chat/client.tsx:1735`)
+still flips a task's chat by writing its key to `ui.term` — the repro — but that chat's ⋯ menu now leads with a
+Back to the chat row (the terminal plugin's new `agentMenu` slot, order 40, ahead of Search), and Ctrl+` on a desktop
+clears `term` for the shown task instead of moving the terminal to its coordinator. The coordinator's PlaceTerm row
+and Ctrl+` toggle are untouched, and a task's own Terminal stays its side-panel item. PR #756's reset-on-open is not
+taken: our 2.0 state has no body stack to reset — a chat is stuck only while its own key is in `ui.term`, and the new
+row clears exactly that. `test/layout-panel.test.ts` proves the card repro failing before and passing after (the
+narrow window's ⋯ menu and the desktop's Ctrl+`), with the coordinator's toggle still tested.
