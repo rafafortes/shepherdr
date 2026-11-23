@@ -60,8 +60,7 @@ export const PR_BODY_END = '<!-- /shepherdr -->'
 
 /** A mark quoted in the summary, facts or brief is escaped: the only real marks in a body must be ours, or the next
  *  ready would close the block at the quoted one and leave a second copy of the rest behind. */
-const escapeMarks = (s: string) =>
-  s.replaceAll(PR_BODY_START, '&lt;!-- shepherdr --&gt;').replaceAll(PR_BODY_END, '&lt;!-- /shepherdr --&gt;')
+const escapeMarks = (s: string) => s.replaceAll(PR_BODY_START, '&lt;!-- shepherdr --&gt;').replaceAll(PR_BODY_END, '&lt;!-- /shepherdr --&gt;')
 
 /** The description a ready makes of the one on GitHub: our marked part replaced, the words around it kept. An older,
  *  unmarked body is rewritten whole, as before: without marks there is no way to tell our words from a person's.
