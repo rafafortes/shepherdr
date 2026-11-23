@@ -43,6 +43,22 @@ export interface FakeGitHub {
   checksSlow?: number
   /** the token can't read checks (a fine-grained one on a private repo): gh pr checks is refused */
   noChecks?: boolean
+  /** check names GitHub marks required through branch protection or a ruleset (gh api graphql's isRequired) */
+  requiredChecks?: string[]
+  /** the required-checks graphql call is refused (no permission, an API error): every check must then count */
+  requiredChecksError?: boolean
+  /** the required-checks graphql call answers with something unreadable: every check must then count */
+  requiredChecksGarbage?: boolean
+  /** the required checks come as StatusContexts (`context`) rather than CheckRuns (`name`) */
+  requiredAsContexts?: boolean
+  /** gh pr checks reports no checks on its first call, then what `checks` holds (checks starting during the window) */
+  checksNoneFirst?: boolean
+  /** api paths that answer with a permission error (a token that cannot read protection or rulesets) */
+  apiFail?: string[]
+  /** api paths that answer "Branch not protected (HTTP 404)": no classic protection, rulesets may still apply */
+  api404?: string[]
+  /** the required-checks graphql answer has more than one page: the rest must not be read as optional */
+  requiredHasNextPage?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
    *  its --jq would pick them */
   api?: Record<string, unknown[]>
@@ -167,11 +183,28 @@ if (import.meta.main) {
     out(st.permission ?? 'WRITE')
   }
   if (a0 === 'api') {
+    if (args.includes('graphql') && args.some((a) => a.includes('isRequired'))) {
+      if (st.requiredChecksError) fail('GraphQL: Resource not accessible by personal access token')
+      if (st.requiredChecksGarbage) out('not json')
+      const names = [...new Set([...(st.checks ?? []).map((c) => c.name), ...(st.requiredChecks ?? [])])]
+      const nodes = names.map((name) =>
+        st.requiredAsContexts
+          ? { __typename: 'StatusContext', context: name, isRequired: st.requiredChecks?.includes(name) ?? false }
+          : { __typename: 'CheckRun', name, isRequired: st.requiredChecks?.includes(name) ?? false },
+      )
+      out(
+        JSON.stringify({
+          data: { repository: { pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: st.requiredHasNextPage ?? false }, nodes } } } }] } } } },
+        }),
+      )
+    }
     const path = args.at(-1)!.split('?')[0]
+    if (st.apiFail?.some((f) => path.startsWith(f))) fail('gh: Resource not accessible by personal access token (HTTP 403)')
+    if (st.api404?.some((f) => path.startsWith(f))) fail('gh: Branch not protected (HTTP 404)')
     const job = path.match(/\/actions\/jobs\/(\d+)\/logs$/)?.[1]
     if (job) out(st.logs?.[job] ?? fail('gh: Not Found (HTTP 404)')!)
     // --paginate --jq '.[]': one item per line
-    out((st.api?.[path] ?? []).map((x) => JSON.stringify(x)).join('\n'))
+    out((st.api?.[path] ?? []).map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n'))
   }
   if (a0 === 'run' && a1 === 'list') out(JSON.stringify(st.runs ?? []))
   if (a0 !== 'pr') fail(`fake gh: no ${a0}`)
@@ -210,16 +243,20 @@ if (import.meta.main) {
       pr().isDraft = false
       out(`✓ Pull request #${a2} is marked as "ready for review"`)
       break
-    case 'checks':
+    case 'checks': {
       // written down before it answers, so a test can act while GitHub takes its time with them
       if (st.checksSlow) {
         save()
         Bun.sleepSync(st.checksSlow)
       }
       if (st.noChecks) fail('GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)')
-      if (!st.checks?.length) fail(`no checks reported on the '${pr().head}' branch`)
-      out(JSON.stringify(st.checks), st.checks!.some((c) => c.bucket === 'fail') ? 1 : st.checks!.some((c) => c.bucket === 'pending') ? 8 : 0)
+      const asks = st.calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'checks').length
+      const checks = st.checksNoneFirst && asks <= 1 ? undefined : st.checks
+      if (!checks?.length) fail(`no checks reported on the '${pr().head}' branch`)
+      const reported = checks ?? []
+      out(JSON.stringify(reported), reported.some((c) => c.bucket === 'fail') ? 1 : reported.some((c) => c.bucket === 'pending') ? 8 : 0)
       break
+    }
     case 'merge': {
       const p = pr()
       if (p.state !== 'OPEN') fail(`Pull request #${p.number} is not open`)

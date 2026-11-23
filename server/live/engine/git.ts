@@ -598,7 +598,14 @@ export type ChecksExpect = 'yes' | 'maybe' | 'none'
 
 /** `unknown` is GitHub reporting no checks while the repo's workflows at head could still run on the pull request:
  *  not the same as `none`, which is a repo with no checks configured. `expect` is why it is still unknown. */
-export type PrChecks = { state: 'pending' | 'pass' | 'fail' | 'none' | 'error' | 'unknown'; passed: number; failed: { name: string; link?: string }[]; error?: string; expect?: ChecksExpect }
+export type PrChecks = {
+  state: 'pending' | 'pass' | 'fail' | 'none' | 'error' | 'unknown'
+  passed: number
+  failed: { name: string; link?: string }[]
+  error?: string
+  expect?: ChecksExpect
+  checks?: Check[]
+}
 
 /** a check as gh pr checks buckets it: pass, fail, pending, skipping or cancel */
 export type Check = { name: string; bucket: string; link?: string }
@@ -652,7 +659,80 @@ export async function prChecks(g: GitHub, cwd: string, n: number): Promise<PrChe
   const failed = list.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel').map((c) => ({ name: c.name, link: c.link || undefined }))
   const pending = list.some((c) => c.bucket === 'pending')
   const passed = list.filter((c) => c.bucket === 'pass').length
-  return { state: failed.length ? 'fail' : pending ? 'pending' : 'pass', passed, failed }
+  return { state: failed.length ? 'fail' : pending ? 'pending' : 'pass', passed, failed, checks: list }
+}
+
+/** required check names GitHub marks on the pull request's head commit: [] when none are marked, undefined when it
+ *  could not be read. `isRequired` covers both branch protection and rulesets, for check runs and status contexts. */
+async function rollupRequired(g: GitHub, cwd: string, n: number): Promise<string[] | undefined> {
+  const [owner, name] = g.repo.split('/')
+  const r = await gh(
+    g,
+    cwd,
+    'api',
+    'graphql',
+    '-f',
+    'query=query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name isRequired(pullRequestNumber: $n) } ... on StatusContext { context isRequired(pullRequestNumber: $n) } } } } } } } } } } }',
+    '-f',
+    `owner=${owner}`,
+    '-f',
+    `name=${name}`,
+    '-F',
+    `n=${n}`,
+  )
+  if (!r.ok) return undefined
+  try {
+    const data = JSON.parse(r.out) as {
+      data?: {
+        repository?: {
+          pullRequest?: {
+            commits?: { nodes?: { commit?: { statusCheckRollup?: { contexts?: { pageInfo?: { hasNextPage?: boolean }; nodes?: { name?: string; context?: string; isRequired?: boolean }[] } } } }[] }
+          }
+        }
+      }
+    }
+    const contexts = data.data?.repository?.pullRequest?.commits?.nodes?.at(-1)?.commit?.statusCheckRollup?.contexts
+    // more than a page: a required check beyond it must not be read as optional
+    if (contexts?.pageInfo?.hasNextPage) return undefined
+    const nodes = contexts?.nodes ?? []
+    return nodes.filter((c) => c.isRequired).map((c) => c.name ?? c.context ?? '')
+  } catch {
+    return undefined
+  }
+}
+
+/** required checks from classic branch protection and rulesets on the base branch: [] when neither has any (a 404 is
+ *  no protection), undefined when GitHub could not say. A required check that has not started yet is named here even
+ *  when absent from the pull request's rollup, so it can never be taken for optional. */
+async function baseRequired(g: GitHub, cwd: string, base: string): Promise<string[] | undefined> {
+  const read = async (path: string, jq: string): Promise<string[] | undefined> => {
+    const r = await gh(g, cwd, 'api', '--jq', jq, path)
+    // an unprotected branch answers 404 ("Branch not protected"): no settings, not a failure to read them
+    if (!r.ok) return /not found|not protected|HTTP 404/i.test(`${r.out}\n${r.err}`) ? [] : undefined
+    return r.out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+  }
+  const [classic, rules] = await Promise.all([
+    read(`repos/${g.repo}/branches/${base}/protection`, '.required_status_checks.contexts[]?'),
+    read(`repos/${g.repo}/rules/branches/${base}`, '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?.context'),
+  ])
+  if (!classic || !rules) return undefined
+  return [...new Set([...classic, ...rules])]
+}
+
+/**
+ * The checks GitHub says the base branch requires on a pull request: what is marked on the head commit together with
+ * what its protection and rulesets require, including checks that have not reported yet. `undefined` when GitHub
+ * cannot say (no permission, an API error, an unreadable answer, no protection at all): an automatic merge then keeps
+ * every check counting, so a required one is never taken for optional (#1221).
+ */
+export async function requiredChecks(g: GitHub, cwd: string, n: number, base: string): Promise<string[] | undefined> {
+  const [rollup, branch] = await Promise.all([rollupRequired(g, cwd, n), baseRequired(g, cwd, base)])
+  if (!rollup || !branch) return undefined
+  const names = [...new Set([...rollup, ...branch])]
+  return names.length ? names : undefined
 }
 
 const PR_EVENTS = ['pull_request', 'pull_request_target']

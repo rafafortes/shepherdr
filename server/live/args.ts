@@ -257,11 +257,12 @@ export const TOPIC = {
                                                  answer, research) has nothing to merge and goes straight to Done
   shepherdr pr <id>                              on GitHub: push its branch and open its pull request (a draft until
                                                  ready) or push to the open one; run it again after new commits
-  shepherdr checks <id>                          wait for GitHub's checks on its pull request (up to 9 minutes); merging
-                                                 waits for them only when Settings say to
+  shepherdr checks <id>                          wait for all GitHub's checks on its pull request (up to 9 minutes);
+                                                 "after GitHub checks" merges wait for them too
   shepherdr merge <id>                           squash-merge into main (on GitHub through its pull request, as it is:
-                                                 rebased only on a conflict with main, without waiting for GitHub's
-                                                 checks unless Settings say to, refused on ones already failed; then
+                                                 rebased only on a conflict with main, waiting only for checks its
+                                                 base requires on its own (all of them after GitHub checks), refused
+                                                 on ones already failed; then
                                                  main here is pulled), mark merged, then put away
                                                  its agent, herdr space, worktree and branch (keeping unsaved or
                                                  unmerged work); only when the brief or the human says so. It

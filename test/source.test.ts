@@ -779,7 +779,7 @@ describe("a task's CLI, model and effort", () => {
     expect(t.waitChecks).toBe(true)
     expect(t.reviewer?.kind).toBe('claude')
     expect(t.desc).toContain('- Review rounds: 1. One round, no review again. (set by coordinator for this task)')
-    expect(t.desc).toContain("- Merge: after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks " + t.id)
+    expect(t.desc).toContain("- Merge: after GitHub checks. Merge it yourself once it works and all of GitHub's checks pass (shepherdr checks " + t.id)
     expect(t.desc).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model and effort).', t.id, '', '(set by coordinator for this task)'))
     // the rest stays Settings', unmarked
     expect(t.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major.\n')

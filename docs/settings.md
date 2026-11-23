@@ -266,8 +266,11 @@ train, above, are this section's other controls, and the Reviewer rows name the 
   review again — critical, major, minor or trivial.
 - **Review rounds** (`review.rounds`, 3, from 1 to 10): how many rounds an agent runs at most, each counted when it calls
   `shepherdr review`, plus one its coordinator may add.
-- **Merge** (`brief.merge`, on its own): when its agent merges — on its own once its quick checks pass, after GitHub's
-  checks, or ask me first.
+- **Merge** (`brief.merge`, on its own): when its agent merges — on its own once its quick checks pass, waiting only
+  for the checks its base branch requires (a red or running optional check does not hold it; GitHub still enforces
+  approvals and its merge queue), after all of GitHub's checks, or ask me first. `shepherdr checks` always waits for
+  all of them, whichever choice is set. When GitHub cannot say which checks the base requires, all of them count,
+  including ones still running.
 
 ## Autopilot
 

@@ -127,6 +127,33 @@ export interface MergeHost {
   trainSize(space: string): number
 }
 
+/**
+ * The checks an automatic merge counts: only the ones GitHub says the base branch requires, so a red or still-running
+ * optional check cannot hold a merge GitHub would allow (#1221). When GitHub cannot name any (no protection, a
+ * permission error, an unreadable answer) or names a check GitHub has not reported yet, every check counts: a required
+ * one must never be taken for optional. By-hand `shepherdr checks` and "after GitHub checks" never call this: strict.
+ */
+export function onlyRequired(c: G.PrChecks, required: string[] | undefined): G.PrChecks | undefined {
+  if (!required?.length || !c.checks?.length) return undefined
+  const names = new Set(required)
+  const checks = c.checks.filter((x) => names.has(x.name))
+  // a required check that has not started yet is absent from the reported ones: it cannot be called optional
+  if (checks.length !== names.size || checks.length === c.checks.length) return undefined
+  const failed = checks.filter((x) => x.bucket === 'fail' || x.bucket === 'cancel').map((x) => ({ name: x.name, link: x.link || undefined }))
+  return {
+    state: failed.length ? 'fail' : checks.some((x) => x.bucket === 'pending') ? 'pending' : 'pass',
+    passed: checks.filter((x) => x.bucket === 'pass').length,
+    failed,
+    checks,
+  }
+}
+
+/** the same rule, read through gh when there's something unsettled to decide about (an all-green PR asks nothing more) */
+export async function autoChecks(g: G.GitHub, cwd: string, n: number, base: string, c: G.PrChecks): Promise<G.PrChecks> {
+  if (c.state !== 'fail' && c.state !== 'pending') return c
+  return onlyRequired(c, await G.requiredChecks(g, cwd, n, base)) ?? c
+}
+
 export class MergeRunner {
   /** one merge at a time per repo: each one's main checkout is shared. The engine reads it too: a task being deleted
    *  waits for its repo's merge first (deleteTask) */
@@ -356,7 +383,7 @@ export class MergeRunner {
     const head = (await G.git(t.worktree, 'rev-parse', '--short', 'HEAD')).out
     return {
       ok: true,
-      text: `${opened ? `Opened PR #${t.pr!.number}${t.reported ? '' : ' as a draft'}` : `Pushed to PR #${t.pr!.number}`} at ${head}: ${t.pr!.url}${dirty ? '\nUncommitted changes are not in it: commit them and run shepherdr pr again.' : ''}\n${(t.waitChecks ?? this.e.settings.ways(p.name).waitChecks) ? `Next: shepherdr checks ${t.id} waits for GitHub's checks (run it with a long timeout, up to 10 minutes).` : `Merging doesn't wait for GitHub's checks (shepherdr checks ${t.id} waits for any that run on it, if you want to see them).`}`,
+      text: `${opened ? `Opened PR #${t.pr!.number}${t.reported ? '' : ' as a draft'}` : `Pushed to PR #${t.pr!.number}`} at ${head}: ${t.pr!.url}${dirty ? '\nUncommitted changes are not in it: commit them and run shepherdr pr again.' : ''}\n${(t.waitChecks ?? this.e.settings.ways(p.name).waitChecks) ? `Next: shepherdr checks ${t.id} waits for all of GitHub's checks (run it with a long timeout, up to 10 minutes).` : `Merging waits only for checks your base branch requires; shepherdr checks ${t.id} waits for all of them.`}`,
     }
   }
 
@@ -496,7 +523,11 @@ export class MergeRunner {
     const w = (t.watch ??= { since: ghNow() })
     const news: string[] = []
     const what: string[] = []
-    const c = await G.prChecks(g, t.worktree!, pr.number)
+    // an automatic merge hears only about checks its base requires: a red optional check neither takes the task out
+    // of Ready nor stops the merge; a strict "after checks" task still hears about all of them
+    const p = this.e.proj(t)
+    const read = await G.prChecks(g, t.worktree!, pr.number)
+    const c = (t.waitChecks ?? this.e.settings.ways(p.name).waitChecks) ? read : await autoChecks(g, t.worktree!, pr.number, pr.baseRefName, read)
     const failed = c.state === 'fail' ? failKey(pr.headRefOid, c) : c.state === 'pass' ? undefined : w.failed
     if (c.state === 'fail' && failed !== w.failed) {
       for (const f of c.failed) {
@@ -870,12 +901,19 @@ export class MergeRunner {
     // pull request is not "none configured" (#1044/#1018): give the repo's workflows the same 90 s Shepherdr always
     // gives them before deciding, so no merge goes through on an unknown.
     const now = wait ? undefined : await G.prChecks(g, wt, n)
+    // "on its own" counts only the checks GitHub's base requires; "after checks" and shepherdr checks stay strict
+    const counted = now && !wait ? await autoChecks(g, wt, n, t.base ?? '', now) : now
+    let filtered = !!now && counted !== now
     let c: G.PrChecks
     if (wait) c = await this.checksOf(t, g, n, 0)
     // checksOf reads the same workflows once: with none it either returns none (no workflow, or a filtered one
     // that did not apply) or waits the 90 s out and refuses while the checks are still unknown
-    else if (now?.state === 'none') c = await this.checksOf(t, g, n, CHECKS_SHOW)
-    else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
+    else if (counted?.state === 'none') {
+      // checks may appear during the 90 s window: they too are counted by required checks only
+      const appeared = await this.checksOf(t, g, n, CHECKS_SHOW)
+      c = appeared.state === 'none' ? appeared : await autoChecks(g, wt, n, t.base ?? '', appeared)
+      filtered ||= c !== appeared
+    } else c = counted?.state === 'fail' || counted?.state === 'pending' ? counted : { state: 'pass' as const, passed: 0, failed: [] }
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
       return {
@@ -925,7 +963,7 @@ export class MergeRunner {
       }
     }
     await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
-    return this.mergedOnGitHub(t, p, `merged PR #${n} on GitHub${wait ? '' : ', not waiting for its checks'}`)
+    return this.mergedOnGitHub(t, p, `merged PR #${n} on GitHub${wait ? '' : filtered ? ', waiting only for required checks' : ', not waiting for its checks'}`)
   }
 
   /**
