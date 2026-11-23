@@ -475,6 +475,47 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(refusal).not.toContain('short review')
   })
 
+  test('an own line added to a file the base just created still needs a normal round', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'new-in-base-file')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // the base adds a file; the task rebases and then adds a line of its own to it
+    writeFileSync(join(dir, 'notes.md'), 'base line\n')
+    sh('git add -A && git commit -qm "base adds notes"', dir)
+    sh('git rebase main', t.worktree!)
+    writeFileSync(join(t.worktree!, 'notes.md'), 'base line\nsneaky own line\n')
+    sh('git add -A && git commit -qm "own line"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test('a deletion added to the own diff after review still needs a normal round', async () => {
+    const w = world()
+    const dir = repo()
+    writeFileSync(join(dir, 'gone.txt'), 'a\nb\nc\n')
+    sh('git add -A && git commit -qm "add gone"', dir)
+    const { t } = await started(w, dir, 'new-deletion')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // with a base move elsewhere to offer a rebase review, the task also deletes a file of its own
+    writeFileSync(join(dir, 'elsewhere.txt'), 'other\n')
+    sh('git add -A && git commit -qm "base elsewhere"', dir)
+    sh('git rebase main', t.worktree!)
+    sh('git rm -q gone.txt && git commit -qm "delete gone"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
   test('a rebase round that waited for a reviewer stays a rebase round when it is woken', async () => {
     const w = world()
     const dir = repo()

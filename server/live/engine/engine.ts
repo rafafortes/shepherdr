@@ -3622,7 +3622,7 @@ export class Engine extends Emitter<Events> {
     const head = t.worktree ? G.head(t.worktree) : undefined
     const delta = last && head && t.worktree ? await this.ownDelta(t, last.commit, head, t.base ?? 'main') : undefined
     const rebase = delta?.kind === 'base'
-    if (rebase) t.reviewDelta = delta!.lines
+    if (rebase) t.reviewDelta = delta!.lines.slice(0, 40) // the prompt shows at most this many; do not save thousands
     if (!rebase && this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
     const deadline = Date.now() + this.reviewDeadline
     // retryReviews leaves a round alone while this call waits for it
@@ -3738,8 +3738,9 @@ export class Engine extends Emitter<Events> {
     const at = named ?? done?.commit
     if (record && at && done && !(t.reviewed ?? []).some((r) => r.round === done.round)) {
       ;(t.reviewed ??= []).push({ round: done.round, commit: at, reviewer: done.reviewer, at: done.since, ...(done.rebase ? { rebase: true } : {}) })
-      this.saveNow()
     }
+    t.reviewDelta = undefined
+    this.saveNow()
     if (had) this.retryReviews()
     return had
   }
@@ -3945,7 +3946,14 @@ export class Engine extends Emitter<Events> {
       await check(file, missingAdded, appearedAdded, next.added)
       await check(file, missingRemoved, appearedRemoved, next.removed, fromBaseRemoved)
     }
-    for (const [file, next] of now) if (!was.has(file) && !(await baseDiff(file)).trim() && next.added.length) own = true
+    // a file new to the own diff gets the same per-line check, even when the base touched it: a new own line there
+    // and a deletion of a base file (including the whole file) are both work the review has not seen
+    for (const [file, next] of now) {
+      if (was.has(file)) continue
+      lines.push(...next.added.map((l) => `${file}: + ${l}`), ...next.removed.map((l) => `${file}: - ${l}`))
+      for (const l of next.added) if (!(await fromBase(file, l))) own = true
+      for (const l of next.removed) if (!(await fromBaseRemoved(file, l))) own = true
+    }
     // a diff whose lines we could not parse (a binary patch, a mode change) is never excused as a base move
     if (own || !lines.length) return { kind: 'own' as const, dropped, lines }
     if (dropped.length) return { kind: 'dropped' as const, dropped, lines }
@@ -4101,7 +4109,10 @@ export class Engine extends Emitter<Events> {
     if (from?.includes('/')) throw new Error(`Only ${t.id}'s coordinator adds a review round, never its own agent: ask your coordinator`)
     // a coordinator of another space (another machine's included) is not this task's
     if (from && from !== t.project) throw new Error(`Only ${this.spaceName(t)}'s coordinator adds ${t.id} a review round, not ${this.places.nameOf(from) ?? from}'s: ask it`)
-    if (t.landing) throw new Error(`${t.id} is on its way into main (${landingLine(t.landing, t.base ?? 'main')}): it needs no more review. Retry after the merge finishes if it did not go in.`)
+    if (t.landing)
+      throw new Error(
+        `${t.id} is on its way into main (${landingLine(t.landing, t.base ?? 'main')}): a review round cannot be added while the merge is in flight. Retry after the merge finishes if it did not go in.`,
+      )
     if (ended(t)) throw new Error(`${t.id} is ${t.closed ? 'Done with nothing to merge' : 'merged'}: it needs no more review`)
     // one, ever: using the round it added is the last of them, not room for another
     if (t.reviewsAdded) throw new Error(`${t.id}'s coordinator has already added its one more review round (${this.normalReviews(t)} of ${this.roundsOf(t)} used): there is no second`)
