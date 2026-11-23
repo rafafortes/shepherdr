@@ -6,8 +6,9 @@ Verdicts are `adopt` (fits 2.0's code as it is), `port` (the idea, rewritten aga
 the reason. Size: **S** a small change (one area, a day's work at most, tests included), **M** a few files and a
 session's work, **L** a subsystem or a rewrite.
 
-Last reviewed 2026-11-23: upstream `main` at `d2d40fb6` ("Release Shepherdr 3.2.3"), tag `v3.2.2`
-(`63594148`, the newest published release), branch `v2.0` at `ebb17d58` (unchanged). Six passes so far: the first read
+Last reviewed 2026-11-23: upstream `main` at `d2d40fb6` ("Release Shepherdr 3.2.3"), tag `v3.2.3` (`d2d40fb6`,
+the newest published release), branch `v2.0` at `ebb17d58` (unchanged). Upstream `main` has since moved to `49409a3b`;
+those commits are left for the next pass. Six passes so far: the first read
 to `main`'s tip `dc1b6782`, one commit past where the tag `v3.1.3` points (`dc018f2a`); the second read 3.1.4 to
 3.1.10; the third read 3.1.11 to 3.1.14; the fourth read 3.1.15 to 3.1.28; the fifth read 3.1.29 to 3.1.35; this one
 reads 3.1.36 to 3.2.3, the sections below.
@@ -328,11 +329,11 @@ does not share, and each of those rows names the line of ours that makes it so, 
 
 ## 3.1.36 to 3.2.3: the 3.2 rewrite, then a week of fixes
 
-Fifteen releases (3.1.36 to 3.1.46, then 3.2.0, 3.2.1, 3.2.2 and main's 3.2.3 release commit), 160 commits from
-`abd5a0f1` (where the last pass stopped, at 3.1.35) to `d2d40fb6`: 113 improvements, weighed in the 40 rows below,
-14 release commits (version bumps and changelogs, so no row) and 33 `AGENTS.md` note commits (upstream's own house
-rules, nothing for us). The rewrite itself (`a1d90086`, 3.2.0) is one commit carrying a whole app; 3.2.1 to 3.2.3
-are its fixes, and 3.2.3 has no published tag yet (the release commit is main's tip). Upstream keeps its `SHEP-`
+Fifteen releases (3.1.36 to 3.1.46, then 3.2.0, 3.2.1, 3.2.2 and the `v3.2.3` release at `d2d40fb6`), 160 commits
+from `abd5a0f1` (where the last pass stopped, at 3.1.35) to `d2d40fb6`: 113 improvements, weighed in the 40 rows
+below, 14 release commits (version bumps and changelogs, so no row) and 33 `AGENTS.md` note commits (upstream's own
+house rules, nothing for us). The rewrite itself (`a1d90086`, 3.2.0) is one commit carrying a whole app; 3.2.1 to
+3.2.3 are its fixes. Upstream `main` moved on during this pass and is left at `49409a3b` for next week. Upstream keeps its `SHEP-`
 numbers from 3.1.0 and restarts them with the 3.2 line, so every row cites its commit as well.
 
 The half year's story is short: 3.1.36 to 3.1.46 finished the triage backlog on herdr-core's scheduler, its Codex

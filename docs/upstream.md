@@ -23,13 +23,14 @@ own `v2.0.<n>` tags (Releases, below).
 
 **Last reviewed** (update these three lines at the end of every pass):
 
-- upstream `main`: `d2d40fb6` "Release Shepherdr 3.2.3 (#1358)", 2026-11-23 12:58 +0100
-- upstream tag `v3.2.2` (`63594148`, 2026-11-23), the newest published release; 3.2.3 is main's tip, untagged
+- upstream `main`: `d2d40fb6` "Release Shepherdr 3.2.3 (#1358)", 2026-11-23 12:58 +0100 — the tip this pass read;
+  upstream has since moved to `49409a3b` (three commits, left for the next pass)
+- upstream tag `v3.2.3` (`d2d40fb6`, 2026-11-23), the newest published release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
 Reviewed on 2026-11-23, the sixth pass: the 160 commits from `abd5a0f1` (where the last pass stopped, at 3.1.35) to
-`main`'s tip `d2d40fb6`, behind the tags of 3.1.36 to 3.2.2 plus 3.2.3's release commit (2026-11-16 19:44 to
-2026-11-23 12:58 UTC) — 113 improvements, 14 release commits and 33 `AGENTS.md` notes; every upstream commit after
+`main`'s tip `d2d40fb6`, behind the tags of 3.1.36 to 3.2.3 (2026-11-16 19:44 to 2026-11-23 11:58 UTC) — 113
+improvements, 14 release commits and 33 `AGENTS.md` notes; every upstream commit after
 `v2.0.0` is weighed in [the ledger](upstream-ledger.md), the new ones in its 3.1.36 to 3.2.3 section, of which six
 ideas come back as worth a task (all ports, one verify-first) and the rest as skips for the reasons their rows give.
 The 3.2 rewrite is a skip on all four criteria. The pass before it read 3.1.29 to 3.1.35 (2026-11-16), the one before
