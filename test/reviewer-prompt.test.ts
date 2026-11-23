@@ -67,6 +67,10 @@ describe('the template Shepherdr owns', () => {
     // a later round whose reviewed commit a rebase left behind has no range to name: it says so, never "First round"
     expect(focusWords(undefined, 3)).toContain('Round 3: the commit the last round reviewed is no longer on this branch')
     expect(focusWords(undefined, 1)).toBe('First round: review the whole change above.')
+    // a short rebase review names the delta; with no lines to name it still says what to judge
+    expect(focusWords(undefined, 2, true)).toContain('Short rebase review: judge only the delta below')
+    expect(focusWords(undefined, 2, true)).not.toContain('The lines of this change')
+    expect(focusWords(undefined, 2, true, ['hash.txt: - const HASH'])).toContain('hash.txt: - const HASH')
   })
 
   test('with no rule files it says so, and an unfilled placeholder is a loud failure', () => {

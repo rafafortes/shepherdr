@@ -197,11 +197,16 @@ export interface TaskRec {
   /** the review rounds its brief's Settings block said when it was added (Settings, or task add --set); none: a task
    *  from before, which follows its space's Settings as they are now */
   rounds?: number
-  /** review rounds its agent has counted (shepherdr review): what the brief's at most so many are kept by */
+  /** review rounds its agent has counted (shepherdr review): what the brief's at most so many are kept by. Rebase
+   *  rounds are counted here too (so round numbers stay unique), but rebaseReviews takes them out of the cap */
   reviews?: number
+  /** of the rounds above, how many were short reviews of a rebase delta: not counted against the brief's rounds */
+  rebaseReviews?: number
+  /** the own-diff lines a rebase review is about, kept so a round that waited for a reviewer keeps its focus */
+  reviewDelta?: string[]
   /** its agent asked for a round while every reviewer of its chain was full or out, and was told to end its turn: the
    *  round is counted and its reviewer named once one is free (retryReviews); cleared when its step is over */
-  reviewWait?: { since: number }
+  reviewWait?: { since: number; rebase?: true }
   /** rounds its coordinator added past those (shepherdr task review-more): one at most, and never by its own agent */
   reviewsAdded?: number
   /** a review round was counted on this task: its final commit must carry a recorded review before ready or merge.
@@ -212,7 +217,7 @@ export interface TaskRec {
   /** the newest round counted, kept past its lease (a restart, or REVIEW_TIMEOUT): `--done` still records the commit it
    *  reviewed, so a whole round of a task's own allowance is never lost to a lease ending first. Its commit is the
    *  branch's HEAD when the round was counted: what the reviewer was sent to read, not what came after it */
-  reviewLast?: { round: number; reviewer: Harness; since: number; commit?: string }
+  reviewLast?: { round: number; reviewer: Harness; since: number; commit?: string; rebase?: true }
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
@@ -623,6 +628,8 @@ export interface Round {
   n: number
   key: string
   why?: Blocked<ReviewStep>
+  /** a short review of only what a rebase or merge of the base changed, outside the brief's rounds */
+  rebase?: true
 }
 
 /** a round finished and recorded on the commit it reviewed, so what merges was seen by fresh eyes */
@@ -631,6 +638,8 @@ export interface Reviewed {
   commit: string
   reviewer: Harness
   at: number
+  /** a short review of only what a rebase or merge of the base changed in the own diff, outside the brief's rounds */
+  rebase?: true
 }
 
 export const HELD = {
@@ -3588,9 +3597,15 @@ export class Engine extends Emitter<Events> {
     return (t.rounds ?? this.settings.ways(this.places.space(t.project)?.name).rounds) + (t.reviewsAdded ?? 0)
   }
 
-  /** the review rounds it has left, as its agent counted them (shepherdr review) */
+  /** rounds counted against the brief's cap: rebase reviews are kept out of this number everywhere they show */
+  normalReviews(t: TaskRec) {
+    return (t.reviews ?? 0) - (t.rebaseReviews ?? 0)
+  }
+
+  /** the review rounds it has left, as its agent counted them (shepherdr review). Rebase reviews are kept out:
+   *  a base that moves again must never push a task into review-more, whatever the brief's round limit says */
   reviewsLeft(t: TaskRec) {
-    return this.roundsOf(t) - (t.reviews ?? 0)
+    return this.roundsOf(t) - this.normalReviews(t)
   }
 
   /**
@@ -3603,18 +3618,23 @@ export class Engine extends Emitter<Events> {
   async reviewRound(id: string): Promise<Round | { wait: Blocked<ReviewStep>[] }> {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already: it has no review to run`)
-    if (this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
+    const last = lastReviewedOf(t.reviewed, t.worktree ?? '') ?? t.reviewed?.at(-1)
+    const head = t.worktree ? G.head(t.worktree) : undefined
+    const delta = last && head && t.worktree ? await this.ownDelta(t, last.commit, head, t.base ?? 'main') : undefined
+    const rebase = delta?.kind === 'base'
+    if (rebase) t.reviewDelta = delta!.lines.slice(0, 40) // the prompt shows at most this many; do not save thousands
+    if (!rebase && this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
     const deadline = Date.now() + this.reviewDeadline
     // retryReviews leaves a round alone while this call waits for it
     this.reviewLive.add(t.id)
     try {
       for (;;) {
-        const a = this.attemptRound(t)
+        const a = this.attemptRound(t, rebase)
         // every reviewer blocked: no round is counted and nothing is waited for (reviewWaitWords says so)
         if (!('wait' in a) || !this.atReviewStep(t) || allBlocked(a.wait)) return a
         const left = deadline - Date.now()
         if (left <= 0) {
-          t.reviewWait = { since: Date.now() }
+          t.reviewWait = { since: Date.now(), ...(rebase ? { rebase: true } : {}) }
           this.saveNow()
           return a
         }
@@ -3635,7 +3655,7 @@ export class Engine extends Emitter<Events> {
 
   /** one try at a round: the first reviewer of its chain with room under the caps and not out is leased and the round
    *  counted, or the wait names each reviewer that cannot run (choose.ts). A round that replaces an unreleased one ends it */
-  private attemptRound(t: TaskRec): Round | { wait: Blocked<ReviewStep>[] } {
+  private attemptRound(t: TaskRec, rebase = false): Round | { wait: Blocked<ReviewStep>[] } {
     this.endReview(t.id)
     const c = this.reviewChoice(t)
     if ('wait' in c) return { wait: c.wait }
@@ -3643,17 +3663,18 @@ export class Engine extends Emitter<Events> {
     const key = keyOf(h.kind, h.model)
     const since = Date.now()
     t.reviews = (t.reviews ?? 0) + 1
+    if (rebase) t.rebaseReviews = (t.rebaseReviews ?? 0) + 1
     t.reviewWait = undefined
     // from the first round on, the final commit must be one a round was recorded on (shepherdr review --done), and this
     // round is kept past its lease, so a --done after a restart still records the commit it reviewed. The commit is
     // HEAD now, before the reviewer starts: a fix committed later in the turn is not what it read
     const commit = t.worktree ? G.head(t.worktree) : undefined
     t.reviewGate = true
-    t.reviewLast = { round: t.reviews, reviewer: h, since, ...(commit ? { commit } : {}) }
+    t.reviewLast = { round: t.reviews, reviewer: h, since, ...(commit ? { commit } : {}), ...(rebase ? { rebase: true } : {}) }
     this.saveNow()
     this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
     const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
-    const round: Round = { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
+    const round: Round = { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}), ...(rebase ? { rebase: true } : {}) }
     this.reviewing.set(t.id, { since, round, ...(commit ? { commit } : {}) })
     // The prompt is Shepherdr's now (SHE-183): write it when the round is counted, so a round woken later when a
     // reviewer frees has its prompt ready too, and every CLI (and a subagent fallback) gets the same file.
@@ -3668,6 +3689,8 @@ export class Engine extends Emitter<Events> {
       worktree: t.worktree ?? '',
       // a later round reads what changed since the last reviewed commit first, with the whole change for context
       since: lastReviewedOf(t.reviewed, t.worktree ?? '')?.commit,
+      rebase: rebase || undefined,
+      delta: rebase ? t.reviewDelta : undefined,
       privacy: privatePrompt('', this.settings.instructions('reviewer', this.nameOf(t) ?? '')),
     })
     return round
@@ -3708,15 +3731,16 @@ export class Engine extends Emitter<Events> {
     this.endReview(t.id)
     // the round its lease held, or the newest one it counted before the lease ended (a restart, REVIEW_TIMEOUT): either
     // way the commit that round read is recorded, once per round
-    const done = open?.round ? { round: open.round.round, reviewer: open.round.reviewer, since: open.since, commit: open.commit } : t.reviewLast
+    const done = open?.round ? { round: open.round.round, reviewer: open.round.reviewer, since: open.since, commit: open.commit, rebase: open.round.rebase } : t.reviewLast
     // a named commit is the one the round read, or one before it: never a fix committed after the reviewer started
     if (named && done?.commit && named !== done.commit && !G.isAncestor(t.worktree ?? '', named, done.commit))
       throw new Error(`--commit ${commit} is not the commit ${t.id}'s round reviewed (${done.commit.slice(0, 7)}) or one before it`)
     const at = named ?? done?.commit
     if (record && at && done && !(t.reviewed ?? []).some((r) => r.round === done.round)) {
-      ;(t.reviewed ??= []).push({ round: done.round, commit: at, reviewer: done.reviewer, at: done.since })
-      this.saveNow()
+      ;(t.reviewed ??= []).push({ round: done.round, commit: at, reviewer: done.reviewer, at: done.since, ...(done.rebase ? { rebase: true } : {}) })
     }
+    t.reviewDelta = undefined
+    this.saveNow()
     if (had) this.retryReviews()
     return had
   }
@@ -3732,6 +3756,8 @@ export class Engine extends Emitter<Events> {
    * a round was recorded on, for a tree identical to one reviewed, for clean merges of the base onto a reviewed commit,
    * or for the same change of its own against a moved base (a rebase Shepherdr or the agent made, its own diff as it was
    * reviewed). A brief that says no review needs none. The refusal names the last reviewed commit and what came after it.
+   * When the own diff differs only through a rebase/merge of the base, the refusal offers a short rebase review of just
+   * that delta, counted apart from the brief's rounds; a dropped own change is named and refused instead.
    */
   async reviewGate(t: TaskRec): Promise<string | undefined> {
     if (!t.reviewGate || !this.reviewOn(t) || !t.worktree || !existsSync(t.worktree)) return
@@ -3755,6 +3781,9 @@ export class Engine extends Emitter<Events> {
     }
     const last = lastReviewedOf(recs, t.worktree, head) ?? recs.at(-1)
     if (recs.length && ((await this.baseMergesOnly(t, last!.commit, head, base)) || (await this.sameOwnChanges(t, head, base, recs)))) return
+    const delta = last && t.worktree ? await this.ownDelta(t, last.commit, head, base) : undefined
+    if (delta?.kind === 'base') return this.rebaseRefusal(t, head, last!, delta.lines)
+    if (delta?.kind === 'dropped') return this.droppedRefusal(head, last!, delta.dropped)
     return this.reviewRefusal(t, head, last)
   }
 
@@ -3800,6 +3829,137 @@ export class Engine extends Emitter<Events> {
     }
   }
 
+  /** the base ref this branch is on, and the commit it forked from: remote first, as ownDiff does */
+  private async baseOf(t: TaskRec, base: string, commit: string) {
+    for (const ref of [`origin/${base}`, base]) {
+      if (!(await G.git(t.worktree!, 'rev-parse', '--verify', '--quiet', ref)).ok) continue
+      const fork = await G.git(t.worktree!, 'merge-base', ref, commit)
+      if (fork.ok && fork.out) return { ref, fork: fork.out }
+    }
+  }
+
+  /** a commit's own change against one commit of its base, filtered as ownDiff filters it */
+  private async diffFiltered(t: TaskRec, fork: string, commit: string) {
+    const diff = await G.git(t.worktree!, 'diff', '--no-color', '--no-ext-diff', '--no-renames', '--binary', '--full-index', fork, commit)
+    if (!diff.ok) return undefined
+    return diff.out
+      .split('\n')
+      .filter((l) => l && !l.startsWith('index ') && !l.startsWith('@@ ') && !l.startsWith(' '))
+      .join('\n')
+  }
+
+  /** the added and taken-away lines of a filtered own diff, per file. A `+++ /dev/null` (a file the change deletes) is
+   *  named by the `--- a/` line before it, so deletions stay with their own file instead of the previous one. */
+  private byFile(diff: string) {
+    type Lines = { added: string[]; removed: string[]; text: string }
+    const files = new Map<string, Lines>()
+    let cur: Lines | undefined
+    let from: string | undefined
+    for (const l of diff.split('\n')) {
+      if (l.startsWith('diff --git ')) {
+        from = undefined
+        continue
+      }
+      if (l.startsWith('--- a/')) {
+        from = l.slice(6)
+        continue
+      }
+      if (l.startsWith('+++ ')) {
+        const path = l.startsWith('+++ b/') ? l.slice(6) : (from ?? l.slice(4))
+        cur = { added: [], removed: [], text: '' }
+        files.set(path, cur)
+        continue
+      }
+      if (!cur) continue
+      cur.text += `${l}\n`
+      if (l.startsWith('+')) cur.added.push(l.slice(1))
+      else if (l.startsWith('-')) cur.removed.push(l.slice(1))
+    }
+    return files
+  }
+
+  /** a line's identity when the value its base carries may move: only a full hash (40 or 64 hex) is a placeholder,
+   *  never an ordinary string literal — changing a message or a label is a change of its own */
+  private lineKey(s: string) {
+    return s.trim().replace(/\b[0-9a-f]{40}\b|\b[0-9a-f]{64}\b/g, '#')
+  }
+
+  /**
+   * How HEAD's own change differs from a reviewed one. 'same' is the gate's existing pass; 'base' is only a derived
+   * value or a conflict resolution caused by the base moving, and may use a short rebase review outside the cap;
+   * 'own' is new work of its own, and 'dropped' is own work a resolution took away. Only 'base' earns a rebase review.
+   * A line is base-derived only when the base carries it or changed it between the two forks — not merely because the
+   * base touched the same file. Both added and removed lines are compared, so a restored deletion counts as dropped too.
+   */
+  private async ownDelta(t: TaskRec, reviewed: string, head: string, base: string) {
+    const before = await this.baseOf(t, base, reviewed)
+    const after = await this.baseOf(t, base, head)
+    if (!before || !after) return undefined
+    const oldDiff = await this.diffFiltered(t, before.fork, reviewed)
+    const newDiff = await this.diffFiltered(t, after.fork, head)
+    if (oldDiff === undefined || newDiff === undefined) return undefined
+    if (oldDiff === newDiff) return { kind: 'same' as const, dropped: [] as string[], lines: [] as string[] }
+    const baseDiffs = new Map<string, string>()
+    const baseDiff = async (file: string) => {
+      if (!baseDiffs.has(file)) baseDiffs.set(file, (await G.git(t.worktree!, 'diff', before.fork, after.fork, '--', file)).out)
+      return baseDiffs.get(file)!
+    }
+    // a line is explained by the base when the base now carries that exact line (a hash it derived) or changed it
+    const fromBase = async (file: string, line: string) => {
+      const k = this.lineKey(line)
+      if ((await G.git(t.worktree!, 'show', `${after.fork}:${file}`)).out.split('\n').some((x) => this.lineKey(x) === k)) return true
+      return (await baseDiff(file)).split('\n').some((x) => (x.startsWith('+') || x.startsWith('-')) && this.lineKey(x.slice(1)) === k)
+    }
+    // a deletion is explained only when the base took that line away too: if the base still carries it, a resolution
+    // that undid the task's deletion dropped work of its own
+    const fromBaseRemoved = async (file: string, line: string) => {
+      const k = this.lineKey(line)
+      if (!(await G.git(t.worktree!, 'show', `${after.fork}:${file}`)).out.split('\n').some((x) => this.lineKey(x) === k)) return true
+      return (await baseDiff(file)).split('\n').some((x) => x.startsWith('-') && this.lineKey(x.slice(1)) === k)
+    }
+    const was = this.byFile(oldDiff)
+    const now = this.byFile(newDiff)
+    const dropped: string[] = []
+    const lines: string[] = []
+    let own = false
+    const delta = (a: string[], b: string[]) => [...a.filter((l) => !b.includes(l)).map((l) => `- ${l}`), ...b.filter((l) => !a.includes(l)).map((l) => `+ ${l}`)]
+    const check = async (file: string, missing: string[], appeared: string[], next: string[], missingOk = fromBase) => {
+      for (const l of missing) {
+        // a resolution keeping the task's line under another value, or a line the base explains, loses no work
+        if (next.some((x) => this.lineKey(x) === this.lineKey(l))) continue
+        if (await missingOk(file, l)) continue
+        dropped.push(l)
+      }
+      for (const l of appeared) {
+        if (await fromBase(file, l)) continue
+        if (missing.some((m) => this.lineKey(m) === this.lineKey(l))) continue // a conflict resolution's new value
+        own = true
+      }
+    }
+    for (const [file, old] of was) {
+      const next = now.get(file) ?? { added: [], removed: [], text: '' }
+      const missingAdded = old.added.filter((l) => !next.added.includes(l))
+      const appearedAdded = next.added.filter((l) => !old.added.includes(l))
+      const missingRemoved = old.removed.filter((l) => !next.removed.includes(l))
+      const appearedRemoved = next.removed.filter((l) => !old.removed.includes(l))
+      lines.push(...[...delta(old.added, next.added), ...delta(old.removed, next.removed)].map((l) => `${file}: ${l}`))
+      await check(file, missingAdded, appearedAdded, next.added)
+      await check(file, missingRemoved, appearedRemoved, next.removed, fromBaseRemoved)
+    }
+    // a file new to the own diff gets the same per-line check, even when the base touched it: a new own line there
+    // and a deletion of a base file (including the whole file) are both work the review has not seen
+    for (const [file, next] of now) {
+      if (was.has(file)) continue
+      lines.push(...next.added.map((l) => `${file}: + ${l}`), ...next.removed.map((l) => `${file}: - ${l}`))
+      for (const l of next.added) if (!(await fromBase(file, l))) own = true
+      for (const l of next.removed) if (!(await fromBaseRemoved(file, l))) own = true
+    }
+    // a diff whose lines we could not parse (a binary patch, a mode change) is never excused as a base move
+    if (own || !lines.length) return { kind: 'own' as const, dropped, lines }
+    if (dropped.length) return { kind: 'dropped' as const, dropped, lines }
+    return { kind: 'base' as const, dropped, lines }
+  }
+
   /**
    * HEAD's own change against the base is the one a round reviewed, for any of its records: the review holds across a
    * merge of the base whose conflicts were resolved keeping both sides, and across a clean rebase, whatever git's own
@@ -3811,6 +3971,34 @@ export class Engine extends Emitter<Events> {
     if (!mine) return false
     for (const r of recs.slice(-10)) if ((await this.ownDiff(t, base, r.commit)) === mine) return true
     return false
+  }
+
+  /** a rebase/merge of the base changed only derived values or a conflict resolution: a short review of that delta is
+   *  enough, and it is counted apart from the brief's rounds, so another base move can never strand the task */
+  private rebaseRefusal(t: TaskRec, head: string, last: Reviewed, lines: string[]) {
+    const shown = lines
+      .slice(0, 8)
+      .map((l) => `    ${l}`)
+      .join('\n')
+    return (
+      `Review is on and your final commit ${head.slice(0, 7)} differs from the last reviewed commit ${last.commit.slice(0, 7)} only where the base moved` +
+      ` (a derived value or a conflict resolution). Run shepherdr review ${t.id}: it opens a short review of just that delta, counted apart from your Review rounds.` +
+      ` The lines of your own diff the base moved are:\n${shown}\n` +
+      `See git diff ${last.commit.slice(0, 7)}..HEAD for the commits. If that review finds the rebase dropped work of your own, restore it and take a normal round instead.`
+    )
+  }
+
+  /** a conflict resolution took away an own addition: no rebase review for it — the work must come back first */
+  private droppedRefusal(head: string, last: Reviewed, dropped: string[]) {
+    const lines = dropped
+      .slice(0, 8)
+      .map((l) => `    ${l}`)
+      .join('\n')
+    return (
+      `Review is on and your final commit ${head.slice(0, 7)} is not reviewed (last round on ${last.commit.slice(0, 7)}): its rebase dropped` +
+      ` work of your own, so a short rebase review is not offered. Restore these lines from the reviewed change, then take a normal round:\n${lines}` +
+      `\nSee git diff ${last.commit.slice(0, 7)}..HEAD.`
+    )
   }
 
   /** the refusal's words: which commit is unreviewed, the last round's commit, what came after, and how to fix it */
@@ -3839,12 +4027,12 @@ export class Engine extends Emitter<Events> {
     // space's priority, then how long its review waited (the same order reviewWaits lists)
     const waiting = this.tasks.filter((t) => !!t.reviewWait && !this.reviewLive.has(t.id)).sort((a, b) => this.reviewOrder(a, b))
     for (const t of waiting) {
-      if (!this.atReviewStep(t) || this.reviewsLeft(t) <= 0) {
+      if (!this.atReviewStep(t) || (!t.reviewWait?.rebase && this.reviewsLeft(t) <= 0)) {
         t.reviewWait = undefined
         this.saveNow()
         continue
       }
-      const a = this.attemptRound(t)
+      const a = this.attemptRound(t, !!t.reviewWait?.rebase)
       if ('wait' in a) continue
       void this.sendBack(t, hidden(`A reviewer is free now. ${this.reviewWords(t.id, a)}`, 'review', { task: t.id }))
     }
@@ -3858,7 +4046,11 @@ export class Engine extends Emitter<Events> {
     const prompt = reviewerPromptPath(id, a.round)
     const t = this.task(id)
     const since = lastReviewedOf(t?.reviewed, t?.worktree ?? '')?.commit
-    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. ${focusWords(since, a.round)} Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own. It names both the whole change against the base and ${since ? `this round's change since ${since.slice(0, 7)} (git diff ${since.slice(0, 7)}..HEAD)` : 'what changed since the base'}. Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
+    const label = a.rebase ? `Short rebase review ${a.round} (not counted against your ${a.rounds} Review rounds)` : `Round ${a.round} of ${a.rounds}`
+    const focus = a.rebase
+      ? ` It names the ${t?.reviewDelta?.length ?? 0} lines of your own diff the base moved, with the whole change for context.`
+      : ` It names both the whole change against the base and ${since ? `this round's change since ${since.slice(0, 7)} (git diff ${since.slice(0, 7)}..HEAD)` : 'what changed since the base'}.`
+    return `${label} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. ${focusWords(since, a.round, a.rebase, t?.reviewDelta)} Shepherdr wrote this round's reviewer prompt to ${prompt}: pass that file and write no prompt of your own.${focus} Run \`shepherdr review ${id} --run ${prompt}\` to open the reviewer in a herdr pane, wait and close it (it frees the reviewer itself). If it says a pane could not open, run \`${reviewRunLine(a.reviewer)}\` (fill in <out>; <prompt> is that file) and then \`shepherdr review ${id} --done\`, which records the commit this round reviewed.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
@@ -3917,13 +4109,17 @@ export class Engine extends Emitter<Events> {
     if (from?.includes('/')) throw new Error(`Only ${t.id}'s coordinator adds a review round, never its own agent: ask your coordinator`)
     // a coordinator of another space (another machine's included) is not this task's
     if (from && from !== t.project) throw new Error(`Only ${this.spaceName(t)}'s coordinator adds ${t.id} a review round, not ${this.places.nameOf(from) ?? from}'s: ask it`)
-    if (ended(t) || t.landing) throw new Error(`${t.id} is ${t.closed ? 'Done with nothing to merge' : t.merged ? 'merged' : 'on its way into main'}: it needs no more review`)
+    if (t.landing)
+      throw new Error(
+        `${t.id} is on its way into main (${landingLine(t.landing, t.base ?? 'main')}): a review round cannot be added while the merge is in flight. Retry after the merge finishes if it did not go in.`,
+      )
+    if (ended(t)) throw new Error(`${t.id} is ${t.closed ? 'Done with nothing to merge' : 'merged'}: it needs no more review`)
     // one, ever: using the round it added is the last of them, not room for another
-    if (t.reviewsAdded) throw new Error(`${t.id}'s coordinator has already added its one more review round (${t.reviews ?? 0} of ${this.roundsOf(t)} used): there is no second`)
+    if (t.reviewsAdded) throw new Error(`${t.id}'s coordinator has already added its one more review round (${this.normalReviews(t)} of ${this.roundsOf(t)} used): there is no second`)
     // a task from before rounds were counted has none: its agent counts the next one, and only then can one be added
     if (this.reviewsLeft(t) > 0)
       throw new Error(
-        `${t.id} has used ${t.reviews ?? 0} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used${t.reviews === undefined ? ` (its agent counts each round: shepherdr review ${t.id})` : ''}`,
+        `${t.id} has used ${this.normalReviews(t)} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used${t.reviews === undefined ? ` (its agent counts each round: shepherdr review ${t.id})` : ''}`,
       )
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
@@ -3947,6 +4143,15 @@ export class Engine extends Emitter<Events> {
     // #1194: ready reports the task branch's tip; a worktree switched away would publish another branch's work
     const wrong = await this.runner.branchGuard(t)
     if (wrong) throw new Error(wrong)
+    // a pull request merged on GitHub by hand only needs marking: its squash merge leaves the branch's commits out of
+    // the base, so the review gate below would ask for a round on a change that is already in (SHE-191). Check first.
+    if (t.worktree && t.base && existsSync(t.worktree) && (await G.aheadCount(t.worktree, t.base)) > 0) {
+      const why = await this.mergedAlready(t).catch(() => null)
+      if (why) {
+        const r = await this.mergedOnGitHub(t, this.proj(t), why, 20_000)
+        return { state: 'merged', note: r.note ?? why }
+      }
+    }
     // the final commit must be one a round was recorded on: that is the work the human would merge
     const unreviewed = await this.reviewGate(t)
     if (unreviewed) throw new Error(unreviewed)
@@ -3968,14 +4173,6 @@ export class Engine extends Emitter<Events> {
         this.markClosed(t)
         if (this.agents.status(this.key(t)) !== 'working') await this.cleanup(t)
         return { state: 'closed' }
-      }
-      // its own work is in its base already, though not as its commits: its pull request was merged there (a squash
-      // merge leaves the branch's commits out), or the work got in by hand. Done at once, merged.
-      const why = ahead > 0 ? await this.mergedAlready(t).catch(() => null) : null
-      if (why) {
-        // its words are the note the merge left, with main here being behind GitHub's said in it when it is
-        const r = await this.mergedOnGitHub(t, this.proj(t), why, 20_000)
-        return { state: 'merged', note: r.note ?? why }
       }
     }
     this.saveNow()

@@ -52,6 +52,10 @@ export interface PromptFacts {
   privacy: string
   /** the newest reviewed commit still on this branch: a round after the first looks at what changed since it */
   since?: string
+  /** a short review of only what a rebase or merge of the base changed in the own diff */
+  rebase?: true
+  /** the lines of the change's own diff that moved under the rebase, for that short review to judge */
+  delta?: string[]
   rules?: string[]
 }
 
@@ -65,12 +69,25 @@ export function lastReviewedOf<T extends { commit: string }>(reviewed: T[] | und
  * A later round whose reviewed commit a rebase left off the branch has no range to name, and says so: the whole change
  * is what it must read again.
  */
-export const focusWords = (since: string | undefined, round = 1) =>
-  since
+export const focusWords = (since: string | undefined, round = 1, rebase?: true, delta?: string[]) => {
+  if (rebase) {
+    const shown = delta?.length
+      ? `\n\nThe lines of this change's own diff that the base moved:\n${delta
+          .slice(0, 40)
+          .map((l) => `    ${l}`)
+          .join('\n')}`
+      : ''
+    return (
+      `Short rebase review: judge only the delta below — what the base move changed in this change's own diff (values derived from the base and conflict resolutions) — with the whole change above as context.` +
+      ` Report any line of the change's own work that the rebase dropped or altered; that needs its own normal round.${shown}`
+    )
+  }
+  return since
     ? `Round after an earlier one: look first at what changed since the last reviewed commit ${since.slice(0, 7)} (git diff ${since}..HEAD and git log --oneline ${since}..HEAD, including any merge's conflict resolutions), then read the whole change above for context.`
     : round > 1
       ? `Round ${round}: the commit the last round reviewed is no longer on this branch (it was rebased), so review the whole change above again, and look for what the rebase changed in it.`
       : 'First round: review the whole change above.'
+}
 
 /** fill the template with one round's facts. Pure: the template is passed in so a test can pin its key lines and a
  *  missing placeholder is a loud failure, not a prompt with a gap in it. */
@@ -84,7 +101,7 @@ export function fillReviewerPrompt(o: PromptFacts, template = readFileSync(REVIE
     BASE: o.base,
     MERGE_BASE: o.mergeBase,
     WORKTREE: o.worktree,
-    FOCUS: focusWords(o.since, o.round),
+    FOCUS: focusWords(o.since, o.round, o.rebase, o.delta),
     RULES: rules,
     PRIVACY: o.privacy.trim(),
   }

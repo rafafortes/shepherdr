@@ -336,6 +336,37 @@ describe('on GitHub: a pull request per task', () => {
     expect(sh('git branch --list "work/*"', g.dir)).toBe('')
   })
 
+  test('ready marks a pull request merged by hand before the review gate would refuse its unreviewed commit', async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
+    const { t } = await started(w, g.dir, 'ghbyhand-gate')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    // a round counted but never recorded: the gate would say the final commit is unreviewed
+    await w.engine.reviewRound(t.id)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    mergedByHand(g, t.branch ?? '')
+    expect(await w.engine.done(t.id, 'Added hello.txt.')).toEqual({ state: 'merged', note: 'PR #1 was merged on GitHub' })
+    expect(t.merged).toBe(true)
+    expect(opened(g)).toBe(1)
+  })
+
+  test('merge marks a pull request merged by hand before the review gate would refuse its unreviewed commit', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghbyhand-merge-gate')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'y.txt'), 'y\n')
+    sh('git add -A && git commit -qm y', wt)
+    await w.engine.reviewRound(t.id) // no --done: the gate would refuse
+    await w.engine.openPr(t.id)
+    mergedByHand(g, t.branch ?? '')
+    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'PR #1 was merged on GitHub already' })
+    expect(t.merged).toBe(true)
+    expect(sh('git rev-parse main', g.dir)).toBe(sh('git rev-parse main', g.bare))
+  })
+
   test('ready with its work squashed into main by hand, no pull request ever: Done (merged), nothing opened', async () => {
     const w = world()
     const g = onGitHub()
