@@ -17,7 +17,7 @@ describe('titles and status lines are asked for at most 30 characters', () => {
     expect(STATUS_MAX).toBe(40)
     // refuse nothing new: a 32-char title is still accepted, a longer one is still refused, and the refusal asks for 30
     expect(checkTitle('x'.repeat(TITLE_MAX))).toHaveLength(TITLE_MAX)
-    expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`ask for at most ${ROW_MAX} characters`)
+    expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`write a shorter one, at most ${ROW_MAX} characters`)
     expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`${TITLE_MAX} are still accepted`)
     // a status line older agents write past the ask still draws, cut at the word
     expect(fitStatus('Fixing two failing tests')).toBe('Fixing two failing tests')

@@ -162,8 +162,7 @@ export const STATUS_MAX = 40
  *  #1354). Titles and status lines agents are asked for are at most this long, with examples. Only asked, never
  *  enforced: a title up to TITLE_MAX is still accepted and a longer status is still cut at STATUS_MAX, so an older
  *  agent's line still draws. Our list row also shows the task's id, so a 30-char title can still truncate there; in
- *  a task's chat header, where there is no id on the line, both 30-char lines read whole (checked at 360 px on the
- *  demo source in SHE-191). */
+ *  a task's chat header, where there is no id on the line, both 30-char lines read whole. */
 export const ROW_MAX = 30
 
 /** How old a working task's last status line may be, in minutes, before the row reads it as older. A task agent reports

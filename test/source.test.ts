@@ -403,7 +403,7 @@ describe('To do from the command', () => {
     const long = await src.cli(['task', 'add', 'Reply to any message, plus what the best chats do', '--desc', 'x'], { chat: place })
     expect(long.code).toBe(1)
     expect(long.out).toContain('49 characters')
-    expect(long.out).toContain('ask for at most 30 characters')
+    expect(long.out).toContain('write a shorter one, at most 30 characters')
     expect(long.out).toContain('32 are still accepted')
     expect(tasksIn(place)).toBe(before)
     expect((await src.cli(['automation', 'add', 'Nightly', '--task', 'x'.repeat(33), '--when', 'FREQ=DAILY'], { chat: place })).code).toBe(1)

@@ -483,8 +483,8 @@
   "Rebasing onto main, then running the whole test suite") for a 360 px phone's task row, revising its time left
   honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left
   5m` (its instructions tell it to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes
-  left down while it works. Past
-  five minutes (or its own time left), that line reads as older instead: `· 12m ago` takes the place of the countdown,
+  left down while it works. Past five minutes (or its own time left), that line reads as older instead: `· 12m ago`
+  takes the place of the countdown,
   under the dot too, so an old line never looks current. Its dot fills like a pie with
   the % done and the minutes left sit small under it in the same orange (`6m`, `<1m`); its row's second line says
   what it does, asked for at most 30 characters for a 360 px phone row; a longer line is cut at 40 characters at a
