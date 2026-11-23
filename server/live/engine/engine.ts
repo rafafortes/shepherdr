@@ -4356,16 +4356,22 @@ export class Engine extends Emitter<Events> {
 
   /** live tasks with the repo each works in, so a number in another repo cannot claim another task's pull request */
   private async prOwners() {
-    const repos = new Map<string, string | undefined>()
+    const repos = new Map<string, Promise<string | undefined>>()
     return Promise.all(
       this.tasks
         .filter((t) => !t.merged && !t.closed && !t.doneAt)
         .map(async (t) => {
           if (!repos.has(t.project)) {
-            const p = this.places.space(t.project)
-            repos.set(t.project, p ? (await G.githubs(p.path).catch(() => []))[0]?.repo : undefined)
+            // a task whose project is gone has no path: githubs fails here and the catch leaves its repo unknown
+            const path = this.places.space(t.project)?.path ?? ''
+            repos.set(
+              t.project,
+              G.githubs(path)
+                .then((gs) => gs[0]?.repo)
+                .catch(() => undefined),
+            )
           }
-          return { ...t, repo: repos.get(t.project) ?? t.pr?.repo }
+          return { ...t, repo: (await repos.get(t.project)) ?? t.pr?.repo }
         }),
     )
   }
@@ -4393,16 +4399,25 @@ export class Engine extends Emitter<Events> {
     }
     const { g } = await this.hubFor(p.name)
     const taken = await resolveTakenPr({ g, cwd: p.path, number, base: t.base ?? p.base ?? 'main', tasks: await this.prOwners(), self: t.id })
-    // switching from a pull request the task already has would leave that one open with nothing to own it
-    if (t.pr && t.pr.number !== taken.number)
-      throw new Error(
-        `${t.id} already has pull request #${t.pr.number} (${t.pr.url}): close or merge it on GitHub before taking #${taken.number}, or let it go with shepherdr ready --pr "" if it is no longer yours.`,
-      )
+    // switching from a pull request the task already has would leave it open with nothing to own it. One already closed
+    // or gone on GitHub has no owner to lose: drop its record and carry on.
+    if (t.pr && t.pr.number !== taken.number) {
+      const old = await G.viewPr(g, p.path, t.pr.number)
+      if (old && old.state !== 'CLOSED')
+        throw new Error(
+          `${t.id} already has open pull request #${old.number} (${t.pr.url}): close or merge it on GitHub before taking #${taken.number}${t.pr.taken ? `, or let it go with shepherdr ready --pr ""` : ''}.`,
+        )
+      t.pr = undefined
+      t.watch = undefined
+    }
     // a branch that does not hold the pull request's latest commit cannot be pushed to its head without force.
     // An empty worktree still at the base is clean and has no work to lose: start it from the pull request's tip.
     if (t.worktree && existsSync(t.worktree)) {
       const holds = await G.git(t.worktree, 'merge-base', '--is-ancestor', taken.head, 'HEAD')
       if (!holds.ok) {
+        // never hard-reset a worktree that is on another branch: the agent may have switched to someone else's work
+        const wrong = await this.runner.branchGuard(t)
+        if (wrong) throw new Error(wrong)
         const ahead = t.base ? await G.aheadCount(t.worktree, t.base) : 0
         const from = ahead === 0 && !(await G.dirty(t.worktree)) ? await this.prStart({ ...t, pr: takenPrRecord(taken) }, p) : undefined
         if (from) await G.git(t.worktree, 'reset', '--hard', from)

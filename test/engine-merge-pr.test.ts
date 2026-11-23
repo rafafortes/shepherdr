@@ -1,7 +1,7 @@
 // On GitHub (a stand-in, test/fake-gh.ts): one pull request per task, its title, its body, and what ready says once
 // its work is in main — by a squash, a merge commit or a hand merge — or its pull request merged already.
 import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { described, PR_BODY_END, PR_BODY_START } from '../server/live/engine/merge.ts'
@@ -897,10 +897,29 @@ describe('taking a pull request that is already open', () => {
     sh('git add -A && git commit -qm work', worktreeOf(t))
     expect((await w.engine.openPr(t.id)).ok).toBe(true)
     const own = t.pr?.number
-    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '5'))).toContain(`already has pull request #${own}`)
+    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '5'))).toContain(`already has open pull request #${own}`)
     expect(t.pr?.number).toBe(own)
     expect(g.gh().prs.length).toBe(2)
     expect(opened(g)).toBe(1)
+    // once the old one is closed on GitHub it no longer owns the task: taking #5 drops its record and goes on
+    sh('git fetch -q origin dep/bump && git merge -q --no-edit FETCH_HEAD', worktreeOf(t))
+    g.set({ prs: g.gh().prs.map((p) => (p.number === own ? { ...p, state: 'CLOSED' } : p)) })
+    const r = await w.engine.done(t.id, 'Taking the other one.', 'facts', '5')
+    expect(r.state).toBe('ready')
+    expect(t.pr).toMatchObject({ number: 5, taken: true, branch: 'dep/bump' })
+  })
+
+  test('ready does not hard-reset a worktree switched to another branch', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await started(w, g.dir, 'take-foreign')
+    sh('git switch -q -c other', worktreeOf(t))
+    const other = sh('git rev-parse HEAD', worktreeOf(t))
+    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '5'))).toContain('HEAD is on other')
+    expect(sh('git rev-parse HEAD', worktreeOf(t))).toBe(other)
+    expect(t.pr).toBeUndefined()
   })
 
   test('a GitHub merge conflict on a taken pull request names its branch, not the task branch', async () => {
@@ -982,6 +1001,31 @@ describe('taking a pull request that is already open', () => {
     expect(g.gh().prs).toHaveLength(1)
     expect(opened(g)).toBe(0)
     expect(g.gh().prs[0].state).toBe('MERGED')
+  })
+
+  test('a git merge refused after it looked clean is reported, not crashed through', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-mergefail')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    sh('git checkout -q main && echo base > base.txt && git add -A && git commit -qm "base moved" && git push -q origin main && git fetch -q origin && git checkout -q dep/bump', g.dir)
+    expect(w.settings.set('merge.gate', 'echo gate ok', { space: w.engine.view(t).place.split(':').pop() ?? '' }).ok).toBe(true)
+    await w.engine.done(t.id, 'Ready.')
+    // a pre-commit hook that fails: merge-tree (the clean check) runs no hooks, but the merge's commit does
+    const hooks = join(tmp('take-hooks'), 'hooks')
+    mkdirSync(hooks, { recursive: true })
+    writeFileSync(join(hooks, 'pre-merge-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    sh(`git config core.hooksPath ${hooks}`, g.dir)
+    expect(sh('git config core.hooksPath', worktreeOf(t))).toContain('take-hooks')
+    expect((await G.git(worktreeOf(t), 'merge-base', '--is-ancestor', 'origin/main', 'HEAD')).ok).toBe(false)
+    const r = await w.engine.merge(t.id, { self: true })
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('Could not bring main into pull request #5')
+    expect(g.gh().prs[0].state).toBe('OPEN')
+    expect(opened(g)).toBe(0)
   })
 
   test('a taken pull request that conflicts with its base is refused with how to resolve it', async () => {
