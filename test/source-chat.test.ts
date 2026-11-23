@@ -405,7 +405,10 @@ describe("a task's own progress (shepherdr status)", () => {
       const no = await src.cli(['status', other.t.id, 'Fixing', '--done', '10'], { chat: key })
       expect(no.code).toBe(1)
       expect(no.out).toContain('only its own task')
-      expect((await src.cli(['status', t.id, 'Fixing'], { chat: key })).out).toContain('--done <0-100>')
+      const usage = (await src.cli(['status', t.id, 'Fixing'], { chat: key })).out
+      expect(usage).toContain('--done <0-100>')
+      expect(usage).toContain('at most 30 characters, e.g.')
+      expect(usage).toContain('Fixing two failing tests')
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '140'], { chat: key })).code).toBe(1)
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '10', '--left', 'soon'], { chat: key })).out).toContain('--left takes a time')
       expect((await src.cli(['status', t.id, 'Fixing', '--done', '10', '--left', '200h'], { chat: key })).out).toContain('up to 99h')
@@ -433,7 +436,7 @@ describe("a task's own progress (shepherdr status)", () => {
       expect(view().report).toEqual({ msg: 'Fixing the two failing tests', progress: 40, eta: 75, at: t.report?.at, left: 80, paused: undefined, stale: 5 })
       // a line too long is cut at a word, and it says so; no --left, no minutes
       const long = await src.cli(['status', t.id, 'Rebasing onto main and running every check again', '--done', '90'], { chat: key })
-      expect(long.out).toBe(`Noted: ${t.id} shows "Rebasing onto main and running every" (cut to 40 characters), 90% done.\n`)
+      expect(long.out).toBe(`Noted: ${t.id} shows "Rebasing onto main and running every" (cut to 40 characters; ask for at most 30), 90% done.\n`)
       expect(view().report!.eta).toBeUndefined()
       // done: its job is over, and so is its report
       st = 'idle'

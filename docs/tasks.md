@@ -103,7 +103,8 @@
   and screen, Antigravity's screen rows, and OpenCode's running subagents (a busy child session in its database, its
   footer where that cannot tell) and background shells, any command its pty daemon still runs for it after the turn.
   A card or question it asked before this turn began does not hold a working task on Needs you;
-  one asked in the turn running now does. A task that needs you says why in at most 40 characters, never by pasting
+  one asked in the turn running now does. A task that needs you says why in at most 40 characters (agents are asked for
+  30, about what a 360 px phone row gives), never by pasting
   the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
@@ -478,12 +479,16 @@
   set: when the task archives, files older than that are removed from its chat and a removed picture or video says so in
   place of the tile. Off, the default, keeps them until the task is deleted, which still removes its chat's files.
 - While a task's agent works, it says itself what it is doing and how far along it is, at the start, at each natural
-  step and at least every 5 minutes, revising its time left honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
-  to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Past
-  five minutes (or its own time left), that line reads as older instead: `· 12m ago` takes the place of the countdown,
+  step and at least every 5 minutes, asked for at most 30 characters ("Fixing the two failing tests", not
+  "Rebasing onto main, then running the whole test suite") for a 360 px phone's task row, revising its time left
+  honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left
+  5m` (its instructions tell it to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes
+  left down while it works. Past five minutes (or its own time left), that line reads as older instead: `· 12m ago`
+  takes the place of the countdown,
   under the dot too, so an old line never looks current. Its dot fills like a pie with
   the % done and the minutes left sit small under it in the same orange (`6m`, `<1m`); its row's second line says
-  what it does in at most 40 characters, so the title and that line each keep the row's whole width. A third, fainter
+  what it does, asked for at most 30 characters for a 360 px phone row; a longer line is cut at 40 characters at a
+  word, so the title and that line each keep the row's width. A third, fainter
   line says what its agent runs on, while it works, merges or waits on you with its agent there: its CLI, provider and
   model (`pi · Spark (local) · qwen3.8-flash-next…`, `Codex · gpt-6-sol`), cut short when it is long (no tooltip: a
   screen reader hears it in full, with the provider's name and the effort, `Runs on pi · Spark (local) ·
@@ -493,8 +498,9 @@
   progress: their typing dots say a message is on its way (at once for yours; for news, once the reply shows on its
   screen and isn't a hidden `<no-reply>`); while they only work in the background they show nothing (no dots, no word in
   the header). Task titles
-  are at most 32 characters, so each fits one line on a phone. A line longer than 40 characters is cut at a word,
-  and the agent is told so. An agent that waits on you keeps its last line, frozen at its % (its minutes stop too);
+  are asked for at most 30 characters, about what a 360 px phone's task row gives; 32 are still accepted. A status
+  line longer than 40 characters is cut at a word, so an older agent's longer line still draws. An agent that waits on you
+  keeps its last line, frozen at its % (its minutes stop too);
   once it reports ready, or waits for a go or for other tasks, it has none.
 
 - New tasks capture their space's base branch when added. Use `shepherdr task add "Title" --brief "…"

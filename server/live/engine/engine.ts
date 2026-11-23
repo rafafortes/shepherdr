@@ -18,6 +18,7 @@ import { agentEnv, BOX } from '../box.ts'
 import { clearTaskTmp, sweepTaskTmp, taskTmpDir } from '../task-tmp.ts'
 import { join } from 'node:path'
 import {
+  ROW_MAX,
   STATUS_CADENCE_MIN,
   STATUS_MAX,
   TITLE_MAX,
@@ -723,7 +724,7 @@ const short = (title: string) =>
 /** A title someone writes is refused when it would not fit one line of the tasks list on a phone. */
 export function checkTitle(title: string) {
   const t = title.trim()
-  if (t.length > TITLE_MAX) throw new Error(`That title is ${t.length} characters: write a shorter one, ${TITLE_MAX} at most, so it fits one line on a phone (the rest goes in the brief)`)
+  if (t.length > TITLE_MAX) throw new Error(`That title is ${t.length} characters: write a shorter one, at most ${ROW_MAX} characters (${TITLE_MAX} are still accepted; the rest goes in the brief)`)
   return t
 }
 

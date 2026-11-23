@@ -158,6 +158,13 @@ export const TITLE_MAX = 32
 /** The most characters an agent's status line may have: one line of a task row on a 375 px phone. */
 export const STATUS_MAX = 40
 
+/** A title measured 231 px at 16 px Inter on a 360 px phone, about 7.7 px a letter, so 30 characters (upstream
+ *  #1354). Titles and status lines agents are asked for are at most this long, with examples. Only asked, never
+ *  enforced: a title up to TITLE_MAX is still accepted and a longer status is still cut at STATUS_MAX, so an older
+ *  agent's line still draws. Our list row also shows the task's id, so a 30-char title can still truncate there; in
+ *  a task's chat header, where there is no id on the line, both 30-char lines read whole. */
+export const ROW_MAX = 30
+
 /** How old a working task's last status line may be, in minutes, before the row reads it as older. A task agent reports
  *  at least this often (its skill); a line past it — or past its own time left, whichever is sooner — is stale: the row
  *  shows its age instead of a time left that lies. */

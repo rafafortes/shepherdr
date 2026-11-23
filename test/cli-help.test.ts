@@ -13,10 +13,11 @@ delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { HELP, TOPIC, CLI_VERBS, VERB_TOPIC, helpTopic, helpVerb } = await import('../server/live/args.ts')
 const { helpVerbs } = await import('../scripts/checks/docs.ts')
+const { ROW_MAX } = await import('../shared/types.ts')
 
 /** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
  *  dispatch verbs; this pins the text itself. Update it when help text is meant to change (as with --json on the lists). */
-const ORIGINAL_HELP_SHA = 'a173950c6a22401a66d0750f49903b6652e9e4d30bd14750cdc57a0e315f3d61'
+const ORIGINAL_HELP_SHA = 'b345a98caa829dba5109fc9993fa288643c008d7d36329788e8db013e58ac75f'
 
 const src = new LiveSource()
 afterAll(() => src.stop())
@@ -31,6 +32,21 @@ describe('shepherdr help, per topic', () => {
     expect(HELP).toBe(page)
     expect(createHash('sha256').update(HELP).digest('hex')).toBe(ORIGINAL_HELP_SHA)
     expect(Object.values(TOPIC).every((section) => section.length < HELP.length)).toBe(true)
+  })
+
+  test('titles and status lines are asked for at most 30 characters, with examples; the 40-char cut stays', () => {
+    expect(ROW_MAX).toBe(30)
+    expect(HELP).toContain('the title asked for at most 30 characters: the thing and the')
+    expect(HELP).toContain('change in a few plain words ("Fix login redirect loop")')
+    expect(HELP).toContain('colon-and-list or "and"')
+    expect(HELP).toContain('characters are still accepted)')
+    expect(HELP).toContain('asked for at most 30 characters, a few plain words for a')
+    expect(HELP).toContain('phone\'s task row (e.g. "Fixing two failing tests")')
+    expect(HELP).toContain('cut at 40 characters at a word')
+    expect(HELP).toContain('asked for at most 30 characters, as on task add')
+    // every example of a good title or status the help gives fits the ask
+    for (const good of ['Fix login redirect loop', 'Fixing two failing tests']) expect(good.length).toBeLessThanOrEqual(ROW_MAX)
+    for (const bad of ['Fix the login redirect loop after a session times out', 'Rebasing onto main, then running the whole test suite']) expect(bad.length).toBeGreaterThan(ROW_MAX)
   })
 
   test('a verb’s --help prints only that verb’s section', async () => {
