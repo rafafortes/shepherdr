@@ -1,6 +1,6 @@
 // On GitHub (a stand-in, test/fake-gh.ts): one pull request per task, its title, its body, and what ready says once
 // its work is in main — by a squash, a merge commit or a hand merge — or its pull request merged already.
-import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -634,7 +634,33 @@ describe('the marked part of a pull request body', () => {
     expect(body).toContain('## Summary\n\nAdded a hello.')
   })
 
-  test('a body GitHub will not show is left alone, not rewritten blind', async () => {
+  test('a mark quoted in the summary cannot close our block early on a later report', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'prquoted')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const said = `I wrote ${PR_BODY_END} literally.`
+    const facts = `and ${PR_BODY_START} too`
+    await w.engine.done(t.id, said, facts)
+    await until(() => g.gh().prs[0].body.includes('literally.'))
+    const first = g.gh().prs[0].body
+    expect(first.split(PR_BODY_END)).toHaveLength(2)
+    expect(first).toContain('&lt;!-- /shepherdr --&gt;')
+    expect(first).toContain('&lt;!-- shepherdr --&gt;')
+    // a second report on the same pull request must not leave a second copy of the quoted tail behind
+    g.set({ prs: g.gh().prs.map((p) => ({ ...p, body: `A note.\n\n${p.body}` })) })
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    await until(() => g.gh().prs[0].body.includes('A note.'))
+    const second = g.gh().prs[0].body
+    expect(second).toStartWith('A note.')
+    expect(second.split(PR_BODY_END)).toHaveLength(2)
+    expect(second).not.toContain('literally.\n\nA note.')
+  })
+
+  test('a body GitHub will not show is left alone, and the skip is logged', async () => {
     const w = world()
     const g = onGitHub()
     const { t } = await started(w, g.dir, 'prunreadable')
@@ -645,9 +671,17 @@ describe('the marked part of a pull request body', () => {
     const calls = (verb: string) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === verb).length
     const views = calls('view')
     const edits = calls('edit')
-    g.set({ prs: [] }) // pr view cannot find it now
-    await w.engine.done(t.id, 'Added a hello.')
-    await until(() => calls('view') > views)
-    expect(calls('edit')).toBe(edits)
+    const logged: string[] = []
+    const stderr = spyOn(console, 'error').mockImplementation((...a: unknown[]) => void logged.push(a.join(' ')))
+    try {
+      g.set({ prs: [] }) // pr view cannot find it now
+      await w.engine.done(t.id, 'Added a hello.')
+      await until(() => logged.some((l) => l.includes('description not updated')))
+      expect(calls('view')).toBeGreaterThan(views)
+      expect(calls('edit')).toBe(edits)
+      expect(logged).toContain(`shepherdr: ${t.id}: pull request description not updated: GitHub did not show it`)
+    } finally {
+      stderr.mockRestore()
+    }
   })
 })

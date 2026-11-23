@@ -535,7 +535,9 @@ export interface Pr {
   body?: string
 }
 
-const PR_FIELDS = 'number,url,state,isDraft,headRefOid,baseRefName,body'
+const PR_FIELDS = 'number,url,state,isDraft,headRefOid,baseRefName'
+/** viewPr reads the description too, so a ready can rewrite only our marked part; the list calls do not need it */
+const VIEW_PR_FIELDS = `${PR_FIELDS},body`
 
 /**
  * The branch's pull request: its open one, else one merged already. A task whose work was carried onto another branch
@@ -571,7 +573,7 @@ export async function findPr(g: GitHub, cwd: string, branch: string, tip: string
 }
 
 export async function viewPr(g: GitHub, cwd: string, n: number): Promise<Pr | null> {
-  const r = await gh(g, cwd, 'pr', 'view', String(n), ...R(g), '--json', PR_FIELDS)
+  const r = await gh(g, cwd, 'pr', 'view', String(n), ...R(g), '--json', VIEW_PR_FIELDS)
   try {
     return r.ok ? (JSON.parse(r.out) as Pr) : null
   } catch {

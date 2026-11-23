@@ -58,6 +58,11 @@ const SIGNED: Record<string, string> = { claude: '🤖 Generated with [Claude Co
 export const PR_BODY_START = '<!-- shepherdr -->'
 export const PR_BODY_END = '<!-- /shepherdr -->'
 
+/** A mark quoted in the summary, facts or brief is escaped: the only real marks in a body must be ours, or the next
+ *  ready would close the block at the quoted one and leave a second copy of the rest behind. */
+const escapeMarks = (s: string) =>
+  s.replaceAll(PR_BODY_START, '&lt;!-- shepherdr --&gt;').replaceAll(PR_BODY_END, '&lt;!-- /shepherdr --&gt;')
+
 /** The description a ready makes of the one on GitHub: our marked part replaced, the words around it kept. An older,
  *  unmarked body is rewritten whole, as before: without marks there is no way to tell our words from a person's. */
 export function described(current: string | undefined, want: string): string {
@@ -180,8 +185,7 @@ export class MergeRunner {
     // the coordinator's words, not the default way of working Shepherdr ended the brief with
     const brief = (splitBrief(t.desc)[0] || t.title).trim()
     const gist = brief.length > 700 ? `${brief.slice(0, 700).replace(/\s+\S*$/, '')} …` : brief
-    return [
-      PR_BODY_START,
+    const inner = [
       `Task: ${t.id}`,
       `## Summary\n\n${t.said || 'Work in progress: the summary comes when the task is done.'}`,
       ...(t.facts ? [`## Proof\n\n${t.facts}`] : []),
@@ -190,15 +194,15 @@ export class MergeRunner {
         .map((l) => `> ${l}`.trimEnd())
         .join('\n')}`,
       SIGNED[kind] ?? `🤖 Generated with ${CLI_NAME[kind] ?? kind}`,
-      PR_BODY_END,
     ].join('\n\n')
+    return [PR_BODY_START, escapeMarks(inner), PR_BODY_END].join('\n\n')
   }
 
   /** Rewrite the description GitHub has now, keeping any words a person added around our marked part. A body GitHub
    *  won't show is left alone: rewriting blind would erase what we could not read. */
   private async editPrBody(t: TaskRec, g: G.GitHub, cwd: string, n: number) {
     const current = await G.viewPr(g, cwd, n)
-    if (!current) return
+    if (!current) return trainLog(`${t.id}: pull request description not updated: GitHub did not show it`)
     await G.editPr(g, cwd, n, described(current.body, this.prBody(t)))
   }
 
