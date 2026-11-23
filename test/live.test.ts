@@ -1221,7 +1221,7 @@ describe("the brief's default way of working", () => {
 ${reviewerLineFor(CODEX_WORDS, 'X-1')}
 - Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.
 - Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.
-- Merge: on its own. Merge it yourself once it works (shepherdr merge X-1). Don't wait for GitHub's checks.`)
+- Merge: on its own. Merge it yourself once it works (shepherdr merge X-1). Wait only for checks your base branch requires; shepherdr checks X-1 waits for all of them.`)
   })
   test("a brief splits into the coordinator's words and the Settings block, written today or before", () => {
     const how = settingsBlock('X-1', { ways })
@@ -1236,7 +1236,7 @@ ${reviewerLineFor(CODEX_WORDS, 'X-1')}
   test('each setting changes its line', () => {
     expect(settingsBlock('X-1', { ways: { ...ways, merge: 'ask me first' } })).toContain('- Merge: ask me first. Ask the human first, and merge (shepherdr merge X-1) once they say yes.')
     expect(settingsBlock('X-1', { ways: { ...ways, waitChecks: true } })).toContain(
-      "- Merge: after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks X-1, then shepherdr merge X-1).",
+      "- Merge: after GitHub checks. Merge it yourself once it works and all of GitHub's checks pass (shepherdr checks X-1, then shepherdr merge X-1).",
     )
     // review off still shows every line, an override among them
     const off = settingsBlock('X-1', { ways: { ...ways, review: false, rounds: 1 }, reviewer: { kind: 'codex' }, by: { review: 'task', rounds: 'task' } })

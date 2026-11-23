@@ -43,6 +43,14 @@ export interface FakeGitHub {
   checksSlow?: number
   /** the token can't read checks (a fine-grained one on a private repo): gh pr checks is refused */
   noChecks?: boolean
+  /** check names GitHub marks required through branch protection or a ruleset (gh api graphql's isRequired) */
+  requiredChecks?: string[]
+  /** the required-checks graphql call is refused (no permission, an API error): every check must then count */
+  requiredChecksError?: boolean
+  /** the required-checks graphql call answers with something unreadable: every check must then count */
+  requiredChecksGarbage?: boolean
+  /** the required checks come as StatusContexts (`context`) rather than CheckRuns (`name`) */
+  requiredAsContexts?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
    *  its --jq would pick them */
   api?: Record<string, unknown[]>
@@ -167,6 +175,17 @@ if (import.meta.main) {
     out(st.permission ?? 'WRITE')
   }
   if (a0 === 'api') {
+    if (args.includes('graphql') && args.some((a) => a.includes('isRequired'))) {
+      if (st.requiredChecksError) fail('GraphQL: Resource not accessible by personal access token')
+      if (st.requiredChecksGarbage) out('not json')
+      const names = [...new Set([...(st.checks ?? []).map((c) => c.name), ...(st.requiredChecks ?? [])])]
+      const nodes = names.map((name) =>
+        st.requiredAsContexts
+          ? { __typename: 'StatusContext', context: name, isRequired: st.requiredChecks?.includes(name) ?? false }
+          : { __typename: 'CheckRun', name, isRequired: st.requiredChecks?.includes(name) ?? false },
+      )
+      out(JSON.stringify({ data: { repository: { pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes } } } }] } } } } }))
+    }
     const path = args.at(-1)!.split('?')[0]
     const job = path.match(/\/actions\/jobs\/(\d+)\/logs$/)?.[1]
     if (job) out(st.logs?.[job] ?? fail('gh: Not Found (HTTP 404)')!)

@@ -598,7 +598,14 @@ export type ChecksExpect = 'yes' | 'maybe' | 'none'
 
 /** `unknown` is GitHub reporting no checks while the repo's workflows at head could still run on the pull request:
  *  not the same as `none`, which is a repo with no checks configured. `expect` is why it is still unknown. */
-export type PrChecks = { state: 'pending' | 'pass' | 'fail' | 'none' | 'error' | 'unknown'; passed: number; failed: { name: string; link?: string }[]; error?: string; expect?: ChecksExpect }
+export type PrChecks = {
+  state: 'pending' | 'pass' | 'fail' | 'none' | 'error' | 'unknown'
+  passed: number
+  failed: { name: string; link?: string }[]
+  error?: string
+  expect?: ChecksExpect
+  checks?: Check[]
+}
 
 /** a check as gh pr checks buckets it: pass, fail, pending, skipping or cancel */
 export type Check = { name: string; bucket: string; link?: string }
@@ -652,7 +659,42 @@ export async function prChecks(g: GitHub, cwd: string, n: number): Promise<PrChe
   const failed = list.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel').map((c) => ({ name: c.name, link: c.link || undefined }))
   const pending = list.some((c) => c.bucket === 'pending')
   const passed = list.filter((c) => c.bucket === 'pass').length
-  return { state: failed.length ? 'fail' : pending ? 'pending' : 'pass', passed, failed }
+  return { state: failed.length ? 'fail' : pending ? 'pending' : 'pass', passed, failed, checks: list }
+}
+
+/**
+ * The names of the checks GitHub says the base branch requires on a pull request, read from the check runs and status
+ * contexts on its head commit (`isRequired` covers branch protection and rulesets); `undefined` when GitHub cannot
+ * say — no permission, an API error, an unreadable answer, or no check marked required at all. An automatic merge
+ * then keeps every check counting, so a required one is never taken for optional (#1221).
+ */
+export async function requiredChecks(g: GitHub, cwd: string, n: number): Promise<string[] | undefined> {
+  const [owner, name] = g.repo.split('/')
+  const r = await gh(
+    g,
+    cwd,
+    'api',
+    'graphql',
+    '-f',
+    'query=query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name isRequired(pullRequestNumber: $n) } ... on StatusContext { context isRequired(pullRequestNumber: $n) } } } } } } } } } }',
+    '-f',
+    `owner=${owner}`,
+    '-f',
+    `name=${name}`,
+    '-F',
+    `n=${n}`,
+  )
+  if (!r.ok) return undefined
+  try {
+    const data = JSON.parse(r.out) as {
+      data?: { repository?: { pullRequest?: { commits?: { nodes?: { commit?: { statusCheckRollup?: { contexts?: { nodes?: { name?: string; context?: string; isRequired?: boolean }[] } } } }[] } } } }
+    }
+    const nodes = data.data?.repository?.pullRequest?.commits?.nodes?.at(-1)?.commit?.statusCheckRollup?.contexts?.nodes ?? []
+    const names = nodes.filter((c) => c.isRequired).map((c) => c.name ?? c.context ?? '')
+    return names.length ? names : undefined
+  } catch {
+    return undefined
+  }
 }
 
 const PR_EVENTS = ['pull_request', 'pull_request_target']

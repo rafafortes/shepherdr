@@ -378,8 +378,9 @@ export const CATALOG: Section[] = [
       // (engine.reviewMore). What counts as which is the skill's and the reviewer's judgment
       { label: 'Must fix', key: 'review.mustFix', value: 'major', options: [...SEVERITIES] },
       { label: 'Review rounds', key: 'review.rounds', value: '3 rounds', num: { min: 1, max: 10, unit: 'rounds', one: 'round' } },
-      // on its own: once its own quick checks pass; GitHub's run on (pull request, main), and main's going red is told
-      // to its coordinator (engine.watchMain). After GitHub checks: shepherdr merge waits for them
+      // on its own: once its own quick checks pass, waiting only for the checks GitHub's base requires; GitHub's
+      // other checks still run (pull request, main), and main's going red is told to its coordinator (watchMain).
+      // After GitHub checks: shepherdr merge waits for all of them
       { label: 'Merge', key: 'brief.merge', value: 'on its own', options: ['on its own', 'after GitHub checks', 'ask me first'] },
       // a command of the space's own, run in the task's worktree after its rebase and before it goes into main
       // (engine.gate): exit 0 lets it in, anything else stops it. Never a git hook: a hook refusing an update leaves

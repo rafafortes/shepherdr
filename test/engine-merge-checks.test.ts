@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { sh, repo, world, until, started, Settings } from './engine-world.ts'
+import { sh, repo, world, until, started, Settings, G } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
 
@@ -11,11 +11,17 @@ import { tmp } from './tmp.ts'
 // machine as busy as a CI runner can get
 setDefaultTimeout(60_000)
 
+/** a task's worktree, or a test failure (new tests keep to the lint ratchet's no-non-null rule) */
+const wt = (t: { id: string; worktree?: string }) => {
+  if (!t.worktree) throw new Error(`${t.id} has no worktree`)
+  return t.worktree
+}
+
 /** a GitHub stand-in: a bare repo is GitHub, gh is test/fake-gh.ts; the clone's origin reads as GitHub's */
 const ghBin = tmp('ghbin')
 writeFileSync(join(ghBin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-gh.ts')}" "$@"\n`, { mode: 0o755 })
 
-function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string } = {}) {
+function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; requiredChecks?: string[]; remote?: string } = {}) {
   process.env.PATH = `${ghBin}:${process.env.PATH}`
   const bare = tmp('gh-origin')
   sh('git init -q --bare -b main', bare)
@@ -24,7 +30,7 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
   const remote = o.remote ?? 'https://github.com/acme/app.git'
   sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin ${remote} && git config url.${bare}.insteadOf ${remote}`, dir)
   const file = join(tmp('gh-state'), 'github.json')
-  writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks }))
+  writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks, requiredChecks: o.requiredChecks }))
   process.env.FAKE_GH_STATE = file
   const gh = () => JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
   const set = (patch: Partial<FakeGitHub>) => writeFileSync(file, JSON.stringify({ ...gh(), ...patch }))
@@ -268,26 +274,174 @@ describe('on GitHub: a pull request per task', () => {
     expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
   })
 
-  test("by default it merges without waiting for GitHub's checks, but never on one already failed at its commit", async () => {
+  test('on its own it waits only for required checks, but never merges on one of them already failed', async () => {
     const w = world()
-    const g = onGitHub({ checks: [{ name: 'test', bucket: 'pending' }] })
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'test', bucket: 'pending' },
+      ],
+      requiredChecks: ['build'],
+    })
     const { t } = await started(w, g.dir, 'ghnowait')
     writeFileSync(join(t.worktree!, 'x.txt'), 'x\n')
     sh('git add -A && git commit -qm x', t.worktree!)
-    expect((await w.engine.openPr(t.id)).text).toContain("Merging doesn't wait for GitHub's checks")
-    g.set({ checks: [{ name: 'test', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' }] })
+    expect((await w.engine.openPr(t.id)).text).toContain('Merging waits only for checks your base branch requires')
+    // the required one is red: the merge waits, even though the optional one is green
+    g.set({
+      checks: [
+        { name: 'build', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' },
+        { name: 'test', bucket: 'pass' },
+      ],
+    })
     const f = await w.engine.merge(t.id, { self: true })
     expect(f.ok).toBe(false)
-    expect(f.error).toContain("GitHub's checks failed on PR #1: test.")
+    expect(f.error).toContain("GitHub's checks failed on PR #1: build.")
     expect(g.gh().prs[0].state).toBe('OPEN')
-    // fixed: a new commit, its checks just started
+    // fixed: a new commit, its required check green and an optional one still running
     writeFileSync(join(t.worktree!, 'x.txt'), 'fixed\n')
     sh('git commit -qam fix', t.worktree!)
-    g.set({ checks: [{ name: 'test', bucket: 'pending' }] })
-    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'merged PR #1 on GitHub, not waiting for its checks' })
+    g.set({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'test', bucket: 'pending' },
+      ],
+    })
+    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'merged PR #1 on GitHub, waiting only for required checks' })
     expect(g.gh().prs[0].state).toBe('MERGED')
     // the brief's Merge line says so too
-    expect(t.desc).toContain("Don't wait for GitHub's checks.")
+    expect(t.desc).toContain('Wait only for checks your base branch requires')
+  })
+
+  test('required checks are read from status contexts as well as check runs', async () => {
+    const g = onGitHub({ checks: [{ name: 'build', bucket: 'pass' }], requiredChecks: ['build'], requiredAsContexts: true })
+    const hub = { repo: 'acme/app', host: 'github.com' }
+    expect(await G.requiredChecks(hub, g.dir, 1)).toEqual(['build'])
+    g.set({ requiredChecks: [], requiredAsContexts: false })
+    expect(await G.requiredChecks(hub, g.dir, 1)).toBeUndefined()
+  })
+
+  test('a red or running optional check does not hold an automatic merge, but the same check required does', async () => {
+    const w = world()
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' },
+      ],
+      requiredChecks: ['build'],
+    })
+    const { t } = await started(w, g.dir, 'ghoptional')
+    writeFileSync(join(wt(t), 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', wt(t))
+    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'merged PR #1 on GitHub, waiting only for required checks' })
+    expect(g.gh().prs[0].state).toBe('MERGED')
+    const asked = g.gh().calls.find((c) => c.args.includes('graphql'))?.args ?? []
+    expect(asked.some((a) => a.includes('isRequired'))).toBe(true)
+    expect(asked).toContain('owner=acme')
+    expect(asked).toContain('name=app')
+
+    // the same red check is required on another pull request: it holds the merge
+    const w2 = world()
+    const g2 = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' },
+      ],
+      requiredChecks: ['lint'],
+    })
+    const { t: t2 } = await started(w2, g2.dir, 'ghrequired')
+    writeFileSync(join(wt(t2), 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', wt(t2))
+    const held = await w2.engine.merge(t2.id, { self: true })
+    expect(held.ok).toBe(false)
+    expect(held.error).toContain("GitHub's checks failed on PR #1: lint.")
+    expect(g2.gh().prs[0].state).toBe('OPEN')
+  })
+
+  test('a required check still running holds an automatic merge; when it passes the agent hears it, even with a red optional one', async () => {
+    const w = world()
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pending' },
+        { name: 'lint', bucket: 'fail' },
+      ],
+      requiredChecks: ['build'],
+    })
+    const { t, key } = await started(w, g.dir, 'ghwaitrequired')
+    writeFileSync(join(wt(t), 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', wt(t))
+    const held = await w.engine.merge(t.id, { self: true })
+    expect(held.ok).toBe(false)
+    expect(held.error).toContain('checks are running on PR #1')
+    expect(t.landing?.step).toBe('checks')
+    expect(g.gh().prs[0].state).toBe('OPEN')
+    // the required one is green; the optional one is still red: no failure is sent, and the nudge goes out
+    g.set({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail' },
+      ],
+    })
+    t.reported = true
+    w.agentIs(key, 'idle')
+    await w.engine.watchPrs()
+    const told = w.sent.at(-1)?.text ?? ''
+    expect(told).toContain('checks passed on PR #1: merge')
+    expect(told).not.toContain('Check failed')
+  })
+
+  test('a red check holds an automatic merge when GitHub cannot say which are required, but an all-green one asks nothing', async () => {
+    const w = world()
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail' },
+      ],
+    })
+    const { t } = await started(w, g.dir, 'ghunsaid')
+    writeFileSync(join(wt(t), 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', wt(t))
+    // no protection at all: no check is marked required
+    expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    // a permission error, an unreadable answer, and required names that name no reported check: all count
+    for (const patch of [{ requiredChecksError: true }, { requiredChecksGarbage: true, requiredChecksError: false }, { requiredChecks: ['other'], requiredChecksGarbage: false }]) {
+      g.set(patch)
+      expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    }
+    // every reported check required, so there is nothing to drop: still strict
+    g.set({ requiredChecks: ['build', 'lint'] })
+    expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    // with every check green no question is asked of GitHub at all
+    g.set({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'pass' },
+      ],
+      requiredChecks: ['build'],
+    })
+    const askedBefore = g.gh().calls.filter((c) => c.args.includes('graphql')).length
+    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'merged PR #1 on GitHub, not waiting for its checks' })
+    expect(g.gh().calls.filter((c) => c.args.includes('graphql')).length).toBe(askedBefore)
+  })
+
+  test('shepherdr checks and after GitHub checks stay strict: a red optional check still holds them', async () => {
+    const w = world()
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail' },
+      ],
+      requiredChecks: ['build'],
+    })
+    waitForChecks(w)
+    const { t } = await started(w, g.dir, 'ghstrict')
+    writeFileSync(join(wt(t), 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', wt(t))
+    await w.engine.openPr(t.id)
+    expect((await w.engine.checks(t.id, 0)).ok).toBe(false)
+    expect((await w.engine.checks(t.id, 0)).text).toContain('lint')
+    expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    expect(g.gh().calls.some((c) => c.args.includes('graphql'))).toBe(false)
   })
 
   test('main going red on GitHub after merges tells its coordinator once, with the run and what merged since green', async () => {

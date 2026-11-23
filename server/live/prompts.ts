@@ -224,8 +224,8 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
     w.merge === 'ask me first'
       ? `ask me first. Ask the human first, and merge (shepherdr merge ${id}) once they say yes.`
       : w.waitChecks
-        ? `after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks ${id}, then shepherdr merge ${id}).`
-        : `on its own. Merge it yourself once it works (shepherdr merge ${id}). Don't wait for GitHub's checks.`
+        ? `after GitHub checks. Merge it yourself once it works and all of GitHub's checks pass (shepherdr checks ${id}, then shepherdr merge ${id}).`
+        : `on its own. Merge it yourself once it works (shepherdr merge ${id}). Wait only for checks your base branch requires; shepherdr checks ${id} waits for all of them.`
   // every line shows, review off too: nothing hidden, an override included
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
