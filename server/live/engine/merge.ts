@@ -241,6 +241,11 @@ export class MergeRunner {
   /** its pull request as GitHub has it now: the one recorded, else the branch's own (one opened by hand) */
   async prOf(t: TaskRec, g: G.GitHub, cwd: string) {
     const known = t.pr ? await G.viewPr(g, cwd, t.pr.number) : null
+    if (t.pr?.taken) {
+      // --pr follows the number, never the task's branch or a tip match: a second pull request would split its review
+      // and checks. A closed one is returned as closed so callers refuse instead of opening a new one; the marker stays.
+      return known
+    }
     // one closed on GitHub is no longer its pull request: the branch may have another, or a fix-forward branch may
     // carry its exact tip. The worktree's head is findPr's fallback when no pull request answers to the branch name.
     const live = known && known.state !== 'CLOSED' ? known : null
@@ -314,13 +319,19 @@ export class MergeRunner {
     }
     const inFront = here.ok ? here.out : `a detached commit (${(await G.git(t.worktree, 'rev-parse', '--short', 'HEAD')).out})`
     const pr = t.pr ? ` (its pull request is #${t.pr.number})` : ''
-    return `HEAD is on ${inFront}, not on ${t.id}'s branch ${t.branch}${pr}: shepherdr pushes and opens only ${t.branch}. Move the work to ${t.branch} (git switch ${t.branch}, then merge or cherry-pick it), or, for another pull request, open it yourself and ask your coordinator for a task to track it.`
+    const target = t.pr?.taken && t.pr.branch ? `pull request #${t.pr.number}'s branch ${t.pr.branch}` : t.branch
+    return `HEAD is on ${inFront}, not on ${t.id}'s branch ${t.branch}${pr}: shepherdr pushes to ${target} only. Move the work to ${t.branch} (git switch ${t.branch}, then merge or cherry-pick it), or, for another pull request, open it yourself and ask your coordinator for a task to track it.`
   }
 
-  /** push the task's branch as it is committed, to GitHub: forced, since it is rebased on main and only its agent's */
-  private async push(t: TaskRec) {
+  /**
+   * Push the task's branch as committed, to GitHub. Its own branch is forced, since it is rebased on main and only its
+   * agent's. A taken pull request's branch is someone else's: push without force, so a commit that is not its tip is
+   * refused rather than overwritten, and never touch the task's own branch here.
+   */
+  private async push(t: TaskRec, branch = t.branch!) {
+    const taken = !!t.pr?.taken && !!t.pr.branch
     const sha = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
-    const r = await G.git(t.worktree!, 'push', '--quiet', '--force', 'origin', `HEAD:refs/heads/${t.branch}`)
+    const r = await G.git(t.worktree!, 'push', '--quiet', ...(taken ? [] : ['--force']), 'origin', `HEAD:refs/heads/${branch}`)
     if (r.ok) {
       t.pushed = { sha, at: Date.now() }
       // a push that works again clears the refusal it left on this task's row, without touching a gate's own note
@@ -353,6 +364,15 @@ export class MergeRunner {
     )
   }
 
+  /** a taken pull request that vanished or closed is never replaced with a new one of the task's own */
+  private takenProblem(t: TaskRec, pr: G.Pr | null): string | undefined {
+    if (!t.pr?.taken) return undefined
+    if (!pr) return `Could not read pull request #${t.pr.number}, which ${t.id} took: nothing was pushed. Reopen it, take another with shepherdr ready --pr <n>, or let it go with --pr "".`
+    if (pr.state === 'CLOSED')
+      return `Pull request #${t.pr.number}, which ${t.id} took, is closed on GitHub: nothing was pushed. Reopen it, take another with shepherdr ready --pr <n>, or let it go with --pr "".`
+    return undefined
+  }
+
   private async openPrNow(t: TaskRec): Promise<{ ok: boolean; text: string }> {
     if (ended(t)) return { ok: false, text: `${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).` }
     if (!t.worktree || !t.branch || !t.base) return { ok: false, text: `${t.id} has no branch yet.` }
@@ -365,11 +385,16 @@ export class MergeRunner {
         ok: true,
         text: `No pull request: ${this.e.places.shownName(p.name)} has no GitHub remote, or gh isn't logged in to it (gh auth status). shepherdr merge ${t.id} squash-merges it here.`,
       }
+    // a taken pull request is checked before anything is pushed, so a closed or lost one never gets a push
+    const known = t.pr?.taken ? await this.prOf(t, g, t.worktree) : null
+    const no = this.takenProblem(t, known)
+    if (no) return { ok: false, text: no }
     if ((await G.aheadCount(t.worktree, t.base)) === 0) return { ok: false, text: `${t.id} has no commits yet: commit your work, then run shepherdr pr ${t.id} again.` }
     const dirty = await G.dirty(t.worktree)
-    const pushed = await this.push(t)
-    if (!pushed.ok) return { ok: false, text: this.pushFailed(t, t.branch, pushed) }
-    let pr = await this.prOf(t, g, t.worktree)
+    const target = t.pr?.taken && t.pr.branch ? t.pr.branch : t.branch
+    const pushed = await this.push(t, target)
+    if (!pushed.ok) return { ok: false, text: this.pushFailed(t, target, pushed) }
+    const pr = known ?? (await this.prOf(t, g, t.worktree))
     if (pr && pr.baseRefName !== t.base) return { ok: false, text: `PR #${pr.number} targets ${pr.baseRefName}, but ${t.id} targets ${t.base}. Correct the pull request target on GitHub first.` }
     let opened = false
     if (pr?.state === 'MERGED') return { ok: false, text: `PR #${pr.number} is merged on GitHub already: run shepherdr merge ${t.id} to mark it merged and clean up.` }
@@ -840,6 +865,8 @@ export class MergeRunner {
         error: `${t.base} here has ${ahead} commit${ahead === 1 ? '' : 's'} GitHub lacks: push ${t.base} (git push origin ${t.base}) or move them off it, then merge ${t.id} again. Nothing was merged.`,
       }
     let pr = await this.prOf(t, g, wt)
+    const no = this.takenProblem(t, pr)
+    if (no) return { ok: false, error: `${no} Nothing was merged.` }
     if (pr && pr.baseRefName !== t.base)
       return { ok: false, error: `PR #${pr.number} targets ${pr.baseRefName}, but ${t.id} targets ${t.base}. Correct the pull request target on GitHub first. Nothing was merged.` }
     // merged on GitHub already (by hand, or a merge whose answer was lost): it only needs main here and marking
@@ -868,7 +895,8 @@ export class MergeRunner {
     if (await G.landed(wt, 'HEAD', base)) {
       // closed, with its branch there
       const closed = pr ? (await G.closePr(g, wt, pr.number, `Closed by Shepherdr: ${t.base} has this work already.`)).ok : false
-      if (closed) await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
+      // a taken pull request's head belongs to someone else: close it, never delete its branch
+      if (closed && !t.pr?.taken) await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
       return this.mergedOnGitHub(t, p, `it was in ${t.base} already${pr ? (closed ? `; closed PR #${pr.number}` : `; could not close PR #${pr.number}: close it on GitHub`) : ''}`)
     }
     // the gate, on the commit that will land, in the task's worktree: a run of its own, detached as it is for a merge
@@ -887,8 +915,9 @@ export class MergeRunner {
     const whyRebased = rebased === 'gate' ? `, rebased on ${t.base} for its merge gate` : rebased ? `, rebased on ${t.base} for a conflict` : ''
     const pushing = !pr || pr.headRefOid !== head
     if (pushing) {
-      const push = await this.push(t)
-      if (!push.ok) return { ok: false, error: this.pushFailed(t, t.branch!, push) }
+      const target = t.pr?.taken && t.pr.branch ? t.pr.branch : t.branch!
+      const push = await this.push(t, target)
+      if (!push.ok) return { ok: false, error: this.pushFailed(t, target, push) }
     }
     if (!pr) {
       const o = await G.openPr(g, wt, { branch: t.branch!, base: t.base!, title: this.prTitle(t), body: this.prBody(t), draft: false })

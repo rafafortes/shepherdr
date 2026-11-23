@@ -4,11 +4,12 @@ import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
-import type { FakeGitHub } from './fake-gh.ts'
-import { tmp } from './tmp.ts'
-import { SETTINGS_HEAD } from '../shared/brief.ts'
 import { described, PR_BODY_END, PR_BODY_START } from '../server/live/engine/merge.ts'
+import { resolveTakenPr } from '../server/live/engine/taken-pr.ts'
+import { SETTINGS_HEAD } from '../shared/brief.ts'
+import { G, repo, Settings, sh, started, until, world } from './engine-world.ts'
+import type { FakeGitHub, FakePr } from './fake-gh.ts'
+import { tmp } from './tmp.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
@@ -18,7 +19,7 @@ setDefaultTimeout(60_000)
 const ghBin = tmp('ghbin')
 writeFileSync(join(ghBin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-gh.ts')}" "$@"\n`, { mode: 0o755 })
 
-function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string; listUnreadable?: boolean; tipListUnreadable?: boolean } = {}) {
+function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string; listUnreadable?: boolean; tipListUnreadable?: boolean; viewUnreadable?: boolean } = {}) {
   process.env.PATH = `${ghBin}:${process.env.PATH}`
   const bare = tmp('gh-origin')
   sh('git init -q --bare -b main', bare)
@@ -29,7 +30,18 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
   const file = join(tmp('gh-state'), 'github.json')
   writeFileSync(
     file,
-    JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks, listUnreadable: o.listUnreadable, tipListUnreadable: o.tipListUnreadable }),
+    JSON.stringify({
+      origin: bare,
+      repo: 'acme/app',
+      prs: [],
+      calls: [],
+      authed: o.authed,
+      down: o.down,
+      checks: o.checks,
+      listUnreadable: o.listUnreadable,
+      tipListUnreadable: o.tipListUnreadable,
+      viewUnreadable: o.viewUnreadable,
+    }),
   )
   process.env.FAKE_GH_STATE = file
   const gh = () => JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
@@ -740,5 +752,245 @@ describe('the marked part of a pull request body', () => {
     } finally {
       stderr.mockRestore()
     }
+  })
+})
+
+describe('taking a pull request that is already open', () => {
+  type Hub = ReturnType<typeof onGitHub>
+  /** a branch on GitHub with one commit, for a pull request a task can take */
+  const bump = (g: Hub, branch = 'dep/bump', subject = 'Bump a dependency') => {
+    sh(`git switch -q -c ${branch} main && echo dep > dep.txt && git add -A && git commit -qm "${subject}" && git push -q origin ${branch} && git switch -q main`, g.dir)
+    return sh(`git rev-parse refs/heads/${branch}`, g.bare)
+  }
+  const open = (n: number, branch = 'dep/bump', base = 'main'): FakePr => ({ number: n, head: branch, base, title: 'Bump', body: '', isDraft: false, state: 'OPEN' })
+  const resolve = async (g: Hub, number: string, base = 'main', tasks: Parameters<typeof resolveTakenPr>[0]['tasks'] = [], self?: string) => {
+    const hub = await G.github(g.dir)
+    if (!hub) throw new Error('the test repo has no GitHub remote')
+    return resolveTakenPr({ g: hub, cwd: g.dir, number, base, tasks, self })
+  }
+  const refusal = async (f: () => Promise<unknown>) => {
+    try {
+      await f()
+    } catch (e) {
+      return (e as Error).message
+    }
+    throw new Error('expected a refusal')
+  }
+  /** a task whose worktree started on the taken pull request's branch */
+  const taking = async (w: ReturnType<typeof world>, g: Hub, name: string, n = 5) => {
+    const p = await w.places.add(g.dir, name)
+    const taken = await w.engine.prToTake(p.name, String(n), 'main')
+    const t = w.engine.add({ project: p.name, title: 'Take the bump', by: 'test', pr: taken })
+    await until(() => {
+      try {
+        return existsSync(worktreeOf(t))
+      } catch {
+        return false
+      }
+    })
+    return { p, t, taken }
+  }
+
+  test('a number is read from GitHub with its head branch, and a wrong number or an unreadable answer is refused', async () => {
+    const g = onGitHub()
+    const tip = bump(g)
+    g.set({ prs: [open(5)] })
+    const taken = await resolve(g, ' #5 ')
+    expect(taken).toMatchObject({ number: 5, branch: 'dep/bump', base: 'main', repo: 'acme/app', url: 'https://github.com/acme/app/pull/5' })
+    expect(taken.head).toBe(tip)
+    for (const bad of ['', 'abc', '5x', '#', '5.2']) expect(await refusal(() => resolve(g, bad))).toContain('--pr takes')
+    expect(await refusal(() => resolve(g, '9'))).toContain('Could not find pull request #9')
+    g.set({ viewUnreadable: true })
+    expect(await refusal(() => resolve(g, '5'))).toContain('readable pull request')
+    g.set({ viewUnreadable: false, viewFail: 'Resource not accessible' })
+    expect(await refusal(() => resolve(g, '5'))).toContain('Resource not accessible')
+    g.set({ viewFail: undefined, noHeadRef: true })
+    expect(await refusal(() => resolve(g, '5'))).toContain('has no head branch')
+  })
+
+  test('a closed pull request, a fork, another repo or another base is refused with why', async () => {
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [{ ...open(5), state: 'CLOSED' }] })
+    expect(await refusal(() => resolve(g, '5'))).toContain('is closed')
+    g.set({ prs: [{ ...open(5), isCrossRepository: true }] })
+    expect(await refusal(() => resolve(g, '5'))).toContain('comes from a fork')
+    g.set({ prs: [{ ...open(5), url: 'https://github.com/other/repo/pull/5' }] })
+    expect(await refusal(() => resolve(g, '5'))).toContain('is not in github.com/acme/app')
+    g.set({ prs: [{ ...open(5), url: 'not a url' }] })
+    expect(await refusal(() => resolve(g, '5'))).toContain('is not in github.com/acme/app')
+    g.set({ prs: [open(6, 'dep/bump', 'develop')] })
+    expect(await refusal(() => resolve(g, '6'))).toContain('merges into develop')
+  })
+
+  test('a pull request held by another task is refused, by number or by head branch; a done one or one’s own is not', async () => {
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    expect(await refusal(() => resolve(g, '5', 'main', [{ id: 'X-1', pr: { number: 5, url: 'x' } }]))).toContain("already X-1's")
+    expect(await refusal(() => resolve(g, '5', 'main', [{ id: 'X-2', pr: { number: 6, url: 'x', taken: true, branch: 'dep/bump' } }]))).toContain("already X-2's")
+    for (const gone of [{ merged: true }, { closed: true }, { doneAt: Date.now() }]) expect((await resolve(g, '5', 'main', [{ id: 'X-3', pr: { number: 5, url: 'x' }, ...gone }])).number).toBe(5)
+    expect((await resolve(g, '5', 'main', [{ id: 'X-1', pr: { number: 5, url: 'x' } }], 'X-1')).number).toBe(5)
+  })
+
+  test('task add and task start refuse --pr without a GitHub remote, or an unknown project', async () => {
+    const w = world()
+    expect(await refusal(() => w.engine.prToTake('nope', '5'))).toContain('No project called nope')
+    const p = await w.places.add(repo(), 'plain')
+    expect(await refusal(() => w.engine.prToTake(p.name, '5'))).toContain('has no GitHub remote')
+  })
+
+  test('the worktree starts on the taken branch, the agent knows, and ready, pr and merge follow that pull request', async () => {
+    const w = world()
+    const g = onGitHub()
+    const tip = bump(g)
+    g.set({ prs: [open(5)] })
+    const { t, taken } = await taking(w, g, 'take-flow')
+    expect(t.pr).toMatchObject({ number: 5, url: 'https://github.com/acme/app/pull/5', taken: true, branch: 'dep/bump', repo: 'acme/app', headRefOid: tip })
+    expect(taken.head).toBe(tip)
+    expect(sh('git rev-parse HEAD', worktreeOf(t))).toBe(tip)
+    const system = w.started.find((s) => s.key === `${t.id}/Agent`)?.system
+    expect(system).toContain('took pull request #5 (branch dep/bump)')
+    expect(system).toContain('never opening a second one')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(true)
+    expect(r.text).toContain('Pushed to PR #5')
+    expect(g.gh().prs).toHaveLength(1)
+    expect(opened(g)).toBe(0)
+    expect(sh('git rev-parse refs/heads/dep/bump', g.bare)).toBe(sh('git rev-parse HEAD', worktreeOf(t)))
+    expect(sh(`git branch --list ${branchOf(t)}`, g.bare)).toBe('')
+    await w.engine.done(t.id, 'Took the bump.')
+    await until(() => g.gh().prs[0].isDraft === false)
+    const m = await w.engine.merge(t.id, { self: true })
+    expect(m.ok).toBe(true)
+    expect(g.gh().prs[0].state).toBe('MERGED')
+    expect(sh('git show main:work.txt', g.bare)).toBe('work')
+  })
+
+  test('a taken branch gone from GitHub is refused before any worktree is made', async () => {
+    const w = world()
+    const g = onGitHub()
+    const p = await w.places.add(g.dir, 'take-gone')
+    const t = w.engine.add({
+      project: p.name,
+      title: 'Gone branch',
+      by: 'test',
+      pr: { number: 9, url: 'https://github.com/acme/app/pull/9', branch: 'gone/branch', head: sh('git rev-parse main', g.bare), base: 'main', repo: 'acme/app' },
+    })
+    await until(() => !!t.trouble)
+    expect(t.trouble).toContain('Could not fetch pull request #9')
+    expect(t.worktree).toBeUndefined()
+  })
+
+  test('merge itself pushes to the taken branch, never opening a second pull request', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-merge')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    const head = sh('git rev-parse HEAD', worktreeOf(t))
+    // no shepherdr pr first: merge must push to the pull request's branch, not the task's own
+    await w.engine.done(t.id, 'Ready to merge.')
+    const m = await w.engine.merge(t.id, { self: true })
+    expect(m.ok).toBe(true)
+    expect(sh('git rev-parse refs/heads/dep/bump', g.bare)).toBe(head)
+    expect(sh('git branch --list work/*', g.bare)).toBe('')
+    expect(g.gh().prs).toHaveLength(1)
+    expect(opened(g)).toBe(0)
+    expect(g.gh().prs[0].state).toBe('MERGED')
+  })
+
+  test('a taken branch that moved on GitHub is not overwritten with a forced push', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-noforce')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    // someone else advances the pull request's branch; a force push would destroy their commit
+    sh('git switch -q dep/bump && echo other > other.txt && git add -A && git commit -qm other && git push -q origin dep/bump', g.dir)
+    const theirs = sh('git rev-parse refs/heads/dep/bump', g.bare)
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('Could not push')
+    expect(sh('git rev-parse refs/heads/dep/bump', g.bare)).toBe(theirs)
+    expect(g.gh().prs).toHaveLength(1)
+    expect(opened(g)).toBe(0)
+  })
+
+  test('a closed or vanished taken pull request is refused before a push, never replaced with a new one', async () => {
+    const w = world()
+    const g = onGitHub()
+    const tip = bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-closed')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    g.set({ prs: [{ ...open(5), state: 'CLOSED' }] })
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('is closed on GitHub')
+    expect(r.text).toContain('--pr <n>')
+    const m = await w.engine.merge(t.id, { self: true })
+    expect(m.ok).toBe(false)
+    expect(m.error).toContain('is closed on GitHub')
+    g.set({ prs: [] })
+    expect((await w.engine.openPr(t.id)).text).toContain('Could not read pull request #5')
+    expect(g.gh().prs).toHaveLength(0)
+    expect(opened(g)).toBe(0)
+    expect(sh('git rev-parse refs/heads/dep/bump', g.bare)).toBe(tip)
+  })
+
+  test('ready takes a pull request by number, lets it go with an empty --pr, and refuses one whose tip the branch lacks', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    bump(g, 'dep/other', 'Other dependency')
+    g.set({ prs: [open(5), open(7, 'dep/other')] })
+    const { t } = await started(w, g.dir, 'take-ready')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    // this task's branch is on main, not on the pull request's branch: taking it would overwrite theirs
+    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '5'))).toContain('does not hold pull request #5')
+    // release with no take is a no-op; an unknown number is refused before the task is marked ready
+    await w.engine.done(t.id, 'Released.', undefined, '')
+    expect(t.pr).toBeUndefined()
+    expect(await refusal(() => w.engine.done(t.id, 'No.', undefined, '8'))).toContain('Could not find pull request #8')
+    // a task whose worktree started on the branch keeps the pull request through ready
+    const { t: t2 } = await taking(w, g, 'take-ready-on-branch', 7)
+    writeFileSync(join(worktreeOf(t2), 'two.txt'), 'two')
+    sh('git add -A && git commit -qm two', worktreeOf(t2))
+    await w.engine.done(t2.id, 'Took the other one.', undefined, '7')
+    expect(t2.pr).toMatchObject({ number: 7, taken: true, branch: 'dep/other' })
+    await w.engine.done(t2.id, 'Let go.', undefined, '')
+    expect(t2.pr).toBeUndefined()
+  })
+
+  test('a task start takes --pr before making its worktree; a detached gate still allows a taken pull request', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const p = await w.places.add(g.dir, 'take-start')
+    const waiting = w.engine.add({ project: p.name, title: 'Wait then take', desc: 'x', by: 'test', later: true })
+    await w.engine.takePr(waiting.id, '5')
+    expect(waiting.pr).toMatchObject({ number: 5, taken: true, branch: 'dep/bump' })
+    await w.engine.takePr(waiting.id, '')
+    expect(waiting.pr).toBeUndefined()
+    await w.engine.takePr(waiting.id, '#5')
+    expect(waiting.pr).toMatchObject({ number: 5, taken: true })
+    await w.engine.takePr(waiting.id, '')
+    expect(waiting.pr).toBeUndefined()
+    const { t } = await taking(w, g, 'take-detached')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    sh('git checkout -q --detach', worktreeOf(t))
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    expect(g.gh().prs).toHaveLength(1)
   })
 })

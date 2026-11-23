@@ -720,6 +720,7 @@ describe("a task's CLI, model and effort", () => {
       [['--model', 'opus 9'], '--model opus 9: Claude Code has no such model. It takes claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, or default'],
       [['--model', 'opus;rm'], 'Write a model id'],
       [['--prio', 'high'], 'Task add takes no --prio'],
+      [['--pr', '42'], 'has no GitHub remote'],
       [['--effort'], '--effort needs a value'],
       [['--agent', 'gemini', '--model', 'x'], 'does not support Shepherdr chat'],
     ]) {

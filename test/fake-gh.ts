@@ -17,6 +17,10 @@ export interface FakePr {
   state: 'OPEN' | 'CLOSED' | 'MERGED'
   /** the commit a pull request closed or merged was at: its head branch may be gone by then (its tip when unset) */
   at?: string
+  /** a pull request from a fork, which a task cannot take (gh's isCrossRepository) */
+  isCrossRepository?: boolean
+  /** a URL on another repo, for the second owner/repo guard when a task takes it */
+  url?: string
 }
 
 export interface FakeGitHub {
@@ -33,6 +37,12 @@ export interface FakeGitHub {
   mergeSlow?: number
   /** gh pr list answers with unreadable bytes (a GitHub answer we cannot parse) */
   listUnreadable?: boolean
+  /** gh pr view answers with unreadable bytes, so a task cannot take the pull request */
+  viewUnreadable?: boolean
+  /** gh pr view is refused with these words (no permission, no such pull request) */
+  viewFail?: string
+  /** gh pr view leaves out the head branch, so a task cannot take the pull request */
+  noHeadRef?: boolean
   /** only the tip fallback's list (the one without --head) answers with unreadable bytes */
   tipListUnreadable?: boolean
   prs: FakePr[]
@@ -154,9 +164,11 @@ if (import.meta.main) {
   const url = (n: number) => `https://github.com/${st.repo}/pull/${n}`
   const json = (p: FakePr) => ({
     number: p.number,
-    url: url(p.number),
+    url: p.url ?? url(p.number),
     state: p.state,
     isDraft: p.isDraft,
+    ...(st.noHeadRef ? {} : { headRefName: p.head }),
+    isCrossRepository: p.isCrossRepository ?? false,
     headRefOid: p.state === 'OPEN' ? headOf(p.head) : p.at,
     title: p.title,
     body: p.body,
@@ -221,6 +233,8 @@ if (import.meta.main) {
       break
     }
     case 'view':
+      if (st.viewFail) fail(st.viewFail)
+      if (st.viewUnreadable) out('not json')
       out(JSON.stringify(json(pr())))
       break
     case 'create': {

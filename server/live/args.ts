@@ -111,7 +111,7 @@ export const TOPIC = {
                                                  refused while one is already waking, and only on its own machine
 `,
   tasks: `Tasks (coordinators add them; only when the human asks, or on Autopilot)
-  shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--after SHE-12,SHE-13] [--later]
+  shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--pr N] [--after SHE-12,SHE-13] [--later]
                                                  [--at "tomorrow 9:00" | --in 6h] [--set KEY=VALUE ...] [--agent CLI]
                                                  [--model ID] [--effort LEVEL] [--flags "..."] [--reviewer CLI]
                                                  [--reviewer-model ID] [--reviewer-effort LEVEL]
@@ -131,6 +131,10 @@ export const TOPIC = {
                                                  reviewer.fallbackModel and reviewer.fallbackEffort) names the
                                                  backup reviewer this task reviews with where its reviewer cannot
                                                  run at all.
+                                                 --pr N: the task takes a pull request already open on GitHub, by its number, instead of opening a second one: its worktree
+                                                 starts on that branch, ready and pr push there, and its checks and review follow it. Its
+                                                 owner, repo and base must match this task's, and no other task may hold it; --pr "" lets go.
+                                                 Without --pr nothing changes.
                                                  --later: its agent reads the brief and waits for a go (To do); the go
                                                  is a message to it that says so (task tell).
                                                  --agent, --model and --effort pick the CLI (claude, codex, pi, …),
@@ -195,11 +199,11 @@ export const TOPIC = {
                                                  agent is stopped first. Done tasks archive themselves after
                                                  tasks.archiveAfter (default 7 days; off allowed)
   shepherdr task unarchive <id>                  bring it back into its lists
-  shepherdr task start <id> [--agent … --model … --effort …]
+  shepherdr task start <id> [--agent … --model … --effort …] [--pr N]
                                                  yours alone: start a task that waits now, first in line, past the
                                                  machine's load, pressure and spacing (within its slots), no longer
                                                  waiting for the tasks it was queued after; --agent and the like pick
-                                                 its worker for this task alone
+                                                 its worker for this task alone; --pr N takes an open pull request on its worktree's branch, checked before it starts
   shepherdr task priority <id> [off]             first in line: ahead of the other held tasks and past the machine's
                                                  load, pressure and spacing, within its slots (for a fix of a red main
                                                  or merge gate); off: back in line by its age. task add --priority
@@ -252,10 +256,12 @@ export const TOPIC = {
                                                   (--commit <rev> names another commit of the branch when the round read
                                                   an earlier one); ready and merge refuse an unreviewed final commit (a
                                                   --run pane already released its reviewer)
-  shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"]
+  shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"] [--pr N]
                                                  the summary at most ${SUMMARY_MAX} characters, in plain words for the
                                                  human (longer is refused); the facts go in the PR,
-                                                 task show and the coordinator's news, not the card;
+                                                 task show and the coordinator's news, not the card; --pr N takes an open pull request (its owner, repo and base must match,
+                                                  no other task may hold it), so this task goes on it instead of opening a
+                                                  second one; --pr "" lets go;
                                                  Ready to merge (done is its old name); a branch with no changes (an
                                                  answer, research) has nothing to merge and goes straight to Done
   shepherdr pr <id>                              on GitHub: push its branch and open its pull request (a draft until

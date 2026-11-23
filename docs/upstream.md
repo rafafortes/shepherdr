@@ -82,7 +82,8 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
    - `shepherdr task tell <ID> <text>` — the output `Told <ID>.`, or `<ID> is held: …` when the machine is full
      (its pattern is `^(?:Told (ID)\.|(ID) is held)`, so "is held" has no `Told` in front).
    - `shepherdr task add <title> --brief <text> --space polylog [--set review=off --set merge=ask me first]` — the
-     output `Added <ID>: …` (an investigation sets those two settings).
+     output `Added <ID>: …` (an investigation sets those two settings). `--pr` is optional and the bridge never sends it:
+      a task added without it behaves exactly as before.
    - `shepherdr ready <ID> --summary "…" --facts "…"` — what an investigation task's brief tells the agent to run; its
      summary and facts are what comes back.
    - Task ids of the form `POL-12` (`^[A-Z]{2,5}-[0-9]{1,6}$`), the space named `polylog`, and `shepherdr` on `PATH`

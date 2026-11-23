@@ -321,11 +321,14 @@ export function coordinatorPrompt(place: { role: 'space' | 'home' | 'main'; name
 Autopilot is ${mode === 'autopilot' ? 'on' : 'off'} now. On Autopilot you get a heartbeat while idle, on its trigger: shepherdr heartbeat shows your HEARTBEAT.md and when, shepherdr heartbeat set changes it.`
 }
 
-export function taskPrompt(t: { id: string; branch: string; base: string }, times = '') {
+export function taskPrompt(t: { id: string; branch: string; base: string; pr?: { taken?: boolean; number: number; branch?: string } }, times = '') {
+  const taken = t.pr?.taken
+    ? ` This task took pull request #${t.pr.number}${t.pr.branch ? ` (branch ${t.pr.branch})` : ''}: shepherdr pr and ready push your commits there, never opening a second one, and its checks and review come to you.`
+    : ''
   return [
     base(`the agent of task ${t.id}`, 'shepherdr-agent'),
     commandLine(`${t.id}/Agent`),
-    `You work in your own git worktree on branch ${t.branch} (from ${t.base}): commit there, and don't switch branches.`,
+    `You work in your own git worktree on branch ${t.branch} (from ${t.base}): commit there, and don't switch branches.${taken}`,
     times,
     has('browser') ? browserLine(t.id) : '',
   ]

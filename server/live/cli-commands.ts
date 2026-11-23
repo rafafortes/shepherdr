@@ -648,7 +648,7 @@ export class CliCommands {
         const t = this.engine.task(a1)
         if (!t) throw new Error(`No task ${a1}`)
         const { said, facts } = summaryOpts(p, rest)
-        const r = await this.engine.done(t.id, said ?? '', facts)
+        const r = await this.engine.done(t.id, said ?? '', facts, one(p, 'pr'))
         if (r.state === 'ended') return `Noted. ${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).`
         if (r.state === 'merged')
           return `Noted: ${r.note}, so ${t.id} is Done (merged): there is nothing to merge, and no pull request to open.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
@@ -1259,11 +1259,12 @@ export class CliCommands {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
       const odd = [...Object.keys(p.opts), ...p.flags].filter(
-        (f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'flags', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f),
+        (f) =>
+          !['brief', 'desc', 'space', 'base', 'pr', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'flags', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f),
       )
       if (odd.length)
         throw new Error(
-          `Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --flags, --reviewer, --reviewer-model and --reviewer-effort`,
+          `Task add takes no --${odd[0]}: only --desc, --space, --base, --pr, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --flags, --reviewer, --reviewer-model and --reviewer-effort`,
         )
       // --set key=value: a How tasks work setting for this task, or what --agent, --reviewer and the like set
       const set: Record<string, string> = {}
@@ -1319,9 +1320,13 @@ export class CliCommands {
       // --flags (or --set flags=) is checked against the CLI this task will actually run, once, here
       const flags = flagsOf(p, this.settings, pr.name)
       const reviewer = reviewerOf(p, this.settings)
+      // --pr: an open pull request this task takes. Resolved here, before the task and its worktree exist, so a wrong
+      // number, a fork, another repo or base, or another task's pull request is refused before anything is pushed.
+      const taken = one(p, 'pr') ? await this.engine.prToTake(pr.name, one(p, 'pr')!, one(p, 'base') ?? pr.base) : undefined
       const t = this.engine.add({
         project: pr.name,
         base: one(p, 'base'),
+        pr: taken,
         title,
         desc: one(p, 'brief') ?? one(p, 'desc'),
         by: this.byWho(ctx),
@@ -1425,6 +1430,8 @@ export class CliCommands {
       case 'start': {
         // yours alone: a coordinator puts one first in line with task priority, and the machine starts it at its turn
         if (ctx.chat) throw new Error(`Only the human starts a task now. To put ${t.id} first in line, run shepherdr task priority ${t.id}.`)
+        // --pr on a waiting task takes an open pull request before its worktree is made
+        if (one(p, 'pr') !== undefined) await this.engine.takePr(t.id, one(p, 'pr')!)
         const on = harnessOf(p, this.settings)
         const r = await this.engine.startNow(t.id, on.kind ? (on as Harness) : undefined)
         this.emit('snapshot')

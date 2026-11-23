@@ -1212,6 +1212,11 @@ describe("the brief's default way of working", () => {
     expect(p).not.toContain('shepherdr-coordinator')
     expect(p).toContain('on branch work/1-x (from main)')
     expect(p).toContain("How long this space's tasks really took: 20m.")
+    const taken = taskPrompt({ id: 'X-2', branch: 'work/2-x', base: 'main', pr: { taken: true, number: 42, branch: 'dep/bump' } })
+    expect(taken).toContain('took pull request #42 (branch dep/bump)')
+    expect(taken).toContain('never opening a second one')
+    const owned = taskPrompt({ id: 'X-3', branch: 'work/3-x', base: 'main', pr: { number: 43 } })
+    expect(owned).not.toContain('took pull request')
     for (const s of ['shepherdr', 'shepherdr-agent', 'shepherdr-coordinator']) expect(existsSync(join(ROOT, 'skill', s, 'SKILL.md'))).toBe(true)
   })
   const ways = { review: true, mustFix: 'major', rounds: 3, merge: 'on its own', waitChecks: false }
