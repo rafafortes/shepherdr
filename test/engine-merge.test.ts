@@ -13,6 +13,26 @@ import { tmp } from './tmp.ts'
 setDefaultTimeout(60_000)
 
 describe('shepherdr merge', () => {
+  test('a worktree left detached by a dead gate is reattached before the branch guard, and still merges', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'dead-gate')
+    const wt = t.worktree
+    const branch = t.branch
+    if (!wt || !branch) throw new Error('task has no worktree')
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm work', wt)
+    const tip = sh('git rev-parse HEAD', wt)
+    // a gate process died with no run left to resume: its worktree stays at a commit the task branch does not hold
+    sh('git checkout -q --detach HEAD~1', wt)
+    expect(sh('git branch --show-current', wt)).toBe('')
+    const r = await w.engine.merge(t.id, { self: true })
+    expect(r).toEqual({ ok: true, note: undefined })
+    expect(sh('git branch --show-current', wt)).toBe(branch)
+    expect(sh('git rev-parse HEAD', wt)).toBe(tip)
+    expect(sh('git log --format=%s -n 2', dir).split('\n')).toEqual([`${t.id}: Say hello`, 'init'])
+  })
+
   test('rebases on main, squash-merges into main, marks it merged and cleans up once the turn ends', async () => {
     const w = world()
     const dir = repo()

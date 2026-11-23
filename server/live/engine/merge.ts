@@ -238,8 +238,10 @@ export class MergeRunner {
    * to another branch would push that branch's commit as the task's, so refuse before anything goes out, naming the
    * branch in front, the task's own branch and the way back. A detached HEAD at the task branch's own tip is a check
    * run (a gate detaches there), so it is allowed; any other detached commit holds work the task branch does not.
+   * A merge first reattaches a detached worktree to its branch (below), so this guards what is really going out.
    */
   async branchGuard(t: TaskRec): Promise<string | undefined> {
+    // no worktree, or one put away: there is no branch in front to publish, as elsewhere in done and markReady
     if (!t.worktree || !t.branch || !existsSync(t.worktree)) return undefined
     const here = await G.git(t.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD')
     if (here.ok) {
@@ -247,9 +249,7 @@ export class MergeRunner {
     } else {
       const at = await G.git(t.worktree, 'rev-parse', 'HEAD')
       const own = await G.git(t.worktree, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`)
-      // a gate resumed after a restart left HEAD at its own stack top: that run is the task's merge, not another's work
-      const resuming = t.landing?.step === 'gate' && t.gateRun?.head === at.out
-      if (at.ok && (resuming || (own.ok && at.out === own.out))) return undefined
+      if (at.ok && own.ok && at.out === own.out) return undefined
     }
     const inFront = here.ok ? here.out : `a detached commit (${(await G.git(t.worktree, 'rev-parse', '--short', 'HEAD')).out})`
     const pr = t.pr ? ` (its pull request is #${t.pr.number})` : ''
@@ -678,8 +678,6 @@ export class MergeRunner {
     if (t.merged) return t.train ? { ok: true, note: `it went in with ${t.train}'s merge train` } : { ok: false, error: `${t.id} is already merged` }
     if (t.closed) return { ok: false, error: `${t.id} is Done: it had nothing to merge` }
     if (!t.worktree || !t.branch || !t.base) return { ok: false, error: `${t.id} has no branch yet` }
-    const wrong = await this.branchGuard(t)
-    if (wrong) return { ok: false, error: wrong }
     if (!self && this.e.agents.status(this.e.key(t)) === 'working')
       return { ok: false, error: `${t.id}'s agent is working: wait for its turn to end, or ask it to merge (shepherdr task tell ${t.id} "merge it").` }
     // a late note from you or a coordinator, not read yet, may change what goes in
@@ -702,8 +700,11 @@ export class MergeRunner {
     // a timed-out fetch is offline, not a refusal: the merge goes on from the base as it is here, but the agent and
     // the row are told, just as the GitHub path's note says main there was not brought up
     const stale = up.err ? `${t.base} here was not brought up to the remote: ${up.err}` : undefined
-    // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first
+    // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first,
+    // before the guard, so a dead gate's detached commit is not mistaken for another branch's work (#1194)
     if (!(await G.git(wt, 'branch', '--show-current')).out) await G.git(wt, 'checkout', '--quiet', t.branch)
+    const wrong = await this.branchGuard(t)
+    if (wrong) return { ok: false, error: wrong }
     await G.commitAll(wt, `${t.id}: ${t.title}`)
     // the commit that would go in must be one a review round was recorded on (a clean base merge needs none)
     const unreviewed = await this.e.reviewGate(t)
