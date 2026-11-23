@@ -939,6 +939,24 @@ describe('taking a pull request that is already open', () => {
     expect(g.gh().prs[0].state).toBe('OPEN')
   })
 
+  test('words to a resting taken task do not rebase its pushed commits onto a moved base', async () => {
+    const w = world()
+    const g = onGitHub()
+    bump(g)
+    g.set({ prs: [open(5)] })
+    const { t } = await taking(w, g, 'take-freshen')
+    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
+    sh('git add -A && git commit -qm work', worktreeOf(t))
+    const head = sh('git rev-parse HEAD', worktreeOf(t))
+    // main moves here and on GitHub: a normal task would be rebased on the next message to its resting agent
+    sh('git checkout -q main && echo base > base.txt && git add -A && git commit -qm "base moved" && git push -q origin main && git fetch -q origin && git checkout -q dep/bump', g.dir)
+    w.agentIs(`${t.id}/Agent`, 'idle')
+    await w.engine.tell(t.id, 'Go on.')
+    expect(sh('git rev-parse HEAD', worktreeOf(t))).toBe(head)
+    expect(w.sent.filter((s) => s.key === `${t.id}/Agent`).at(-1)?.text).not.toContain('rebased your branch')
+    expect(g.gh().prs[0].state).toBe('OPEN')
+  })
+
   test('a taken branch gone from GitHub is refused before any worktree is made', async () => {
     const w = world()
     const g = onGitHub()

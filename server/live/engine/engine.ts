@@ -3198,6 +3198,9 @@ export class Engine extends Emitter<Events> {
    */
   private async freshen(t: TaskRec): Promise<string | undefined> {
     if (ended(t) || t.landing || !t.base || !t.worktree || !existsSync(t.worktree)) return
+    // a taken pull request's commits are already on GitHub: rebasing them here would make the next non-forced push to
+    // its branch fail. Base changes reach the task at merge time, where they are merged in rather than rebased.
+    if (t.pr?.taken) return
     const wt = t.worktree
     const base = t.base
     if (!(await G.git(wt, 'rev-parse', '--verify', '--quiet', `refs/heads/${base}`)).ok) return
