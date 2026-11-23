@@ -883,13 +883,30 @@ export class MergeRunner {
     const conflict = !(await G.mergesCleanly(wt, base, 'HEAD'))
     const behind = !!cmd && !conflict && !(await G.git(wt, 'merge-base', '--is-ancestor', base, 'HEAD')).ok
     let rebased: 'conflict' | 'gate' | undefined
+    let broughtBase = false
     if (conflict || behind) {
-      const rb = await G.rebase(wt, base)
-      if (!rb.ok) {
-        this.land(t, 'rebase')
-        return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${base} by hand, commit, push with shepherdr pr ${t.id}, then run shepherdr merge ${t.id} again.` }
+      if (t.pr?.taken && t.pr.branch) {
+        // a taken pull request's branch belongs to someone else: rebasing would rewrite commits GitHub already has,
+        // and the non-forced push would be refused. Bring the base in with a merge instead, or stop on a conflict.
+        if (conflict)
+          return {
+            ok: false,
+            error: `Pull request #${t.pr.number}'s branch ${t.pr.branch} conflicts with ${t.base}: merge ${t.base} into it by hand, resolve the conflict, commit, push with shepherdr pr ${t.id}, then run shepherdr merge ${t.id} again. Nothing was merged.`,
+          }
+        const merged = await G.git(wt, 'merge', '--quiet', '--no-edit', base)
+        if (!merged.ok) {
+          this.land(t, 'rebase')
+          return { ok: false, error: `Could not bring ${t.base} into pull request #${t.pr.number}'s branch ${t.pr.branch}: ${merged.err || merged.out || 'git merge failed'}` }
+        }
+        broughtBase = true
+      } else {
+        const rb = await G.rebase(wt, base)
+        if (!rb.ok) {
+          this.land(t, 'rebase')
+          return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${base} by hand, commit, push with shepherdr pr ${t.id}, then run shepherdr merge ${t.id} again.` }
+        }
+        rebased = conflict ? 'conflict' : 'gate'
       }
-      rebased = conflict ? 'conflict' : 'gate'
     }
     // main has this work already (merged another way): its pull request would change nothing
     if (await G.landed(wt, 'HEAD', base)) {
@@ -912,7 +929,13 @@ export class MergeRunner {
     }
     const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
     // what the messages below say about the branch being rebased here: for a conflict, or for its merge gate
-    const whyRebased = rebased === 'gate' ? `, rebased on ${t.base} for its merge gate` : rebased ? `, rebased on ${t.base} for a conflict` : ''
+    const whyRebased = broughtBase
+      ? `, brought ${t.base} into the pull request's branch for its merge gate`
+      : rebased === 'gate'
+        ? `, rebased on ${t.base} for its merge gate`
+        : rebased
+          ? `, rebased on ${t.base} for a conflict`
+          : ''
     const pushing = !pr || pr.headRefOid !== head
     if (pushing) {
       const target = t.pr?.taken && t.pr.branch ? t.pr.branch : t.branch!
@@ -997,7 +1020,8 @@ export class MergeRunner {
           : `GitHub did not merge PR #${n}: ${said}`,
       }
     }
-    await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
+    // a taken pull request's head belongs to someone else: it stays on GitHub; the task's own branch was never pushed
+    if (!t.pr?.taken) await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
     return this.mergedOnGitHub(t, p, `merged PR #${n} on GitHub${wait ? '' : filtered ? ', waiting only for required checks' : ', not waiting for its checks'}`)
   }
 

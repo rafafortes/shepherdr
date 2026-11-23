@@ -4354,10 +4354,21 @@ export class Engine extends Emitter<Events> {
     return { p, g }
   }
 
+  /** every task with the repo it works in, so a number in another repo cannot claim another task's pull request */
+  private async prOwners() {
+    return Promise.all(
+      this.tasks.map(async (t) => {
+        const p = this.places.space(t.project)
+        const repo = p ? (await G.githubs(p.path).catch(() => []))[0]?.repo : undefined
+        return { ...t, repo: repo ?? t.pr?.repo }
+      }),
+    )
+  }
+
   /** resolve a pull request for a new task, before it is added and before any worktree or push */
   async prToTake(project: string, number: string, base?: string) {
     const { p, g } = await this.hubFor(project)
-    return resolveTakenPr({ g, cwd: p.path, number, base: base ?? p.base ?? 'main', tasks: this.tasks })
+    return resolveTakenPr({ g, cwd: p.path, number, base: base ?? p.base ?? 'main', tasks: await this.prOwners() })
   }
 
   /**
@@ -4376,7 +4387,7 @@ export class Engine extends Emitter<Events> {
       return t.pr
     }
     const { g } = await this.hubFor(p.name)
-    const taken = await resolveTakenPr({ g, cwd: p.path, number, base: t.base ?? p.base ?? 'main', tasks: this.tasks, self: t.id })
+    const taken = await resolveTakenPr({ g, cwd: p.path, number, base: t.base ?? p.base ?? 'main', tasks: await this.prOwners(), self: t.id })
     // a branch that does not hold the pull request's latest commit cannot be pushed to its head without force; say so
     // before the task follows it, and say how to bring the two together.
     if (t.worktree && existsSync(t.worktree) && t.base && (await G.aheadCount(t.worktree, t.base)) > 0) {

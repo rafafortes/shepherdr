@@ -38,6 +38,10 @@ export interface TakenPrRecord {
 /** a task that already holds a pull request, for the ownership check; done tasks let go of theirs */
 type Owner = {
   id: string
+  /** the owner's own worktree branch, which a hand-opened pull request may use as its head */
+  branch?: string
+  /** the repo the owner works in, so a pull request number in another repo does not block this one */
+  repo?: string
   pr?: TakenPrRecord
   merged?: boolean
   closed?: boolean
@@ -73,7 +77,15 @@ export async function resolveTakenPr(o: { g: G.GitHub; cwd: string; number: stri
   if (pr.baseRefName !== o.base)
     throw new Error(`Pull request #${n} merges into ${pr.baseRefName}, but this task merges into ${o.base}: take it with --base ${pr.baseRefName}, or change the pull request's base on GitHub.`)
   if (!pr.headRefName) throw new Error(`Pull request #${n} has no head branch on GitHub: it cannot be taken.`)
-  const other = o.tasks.find((t) => t.id !== o.self && !finished(t) && t.pr && ((t.pr.number === pr.number && (t.pr.repo ?? o.g.repo) === o.g.repo) || (t.pr.taken && t.pr.branch === pr.headRefName)))
+  // another live task in this same repo owns it by number, by the head branch it took, or simply by working on that
+  // branch. Tasks in other repos are left alone: a number is only unique within a repo.
+  const other = o.tasks.find(
+    (t) =>
+      t.id !== o.self &&
+      !finished(t) &&
+      (t.repo === o.g.repo || (t.repo === undefined && !!t.pr?.taken)) &&
+      (t.branch === pr.headRefName || (t.pr && ((t.pr.number === pr.number && (t.pr.repo ?? o.g.repo) === o.g.repo) || (t.pr.taken && t.pr.branch === pr.headRefName)))),
+  )
   if (other) throw new Error(`Pull request #${n} (branch ${pr.headRefName}) is already ${other.id}'s: let it go there first, or take another.`)
   return { number: pr.number, url: pr.url, branch: pr.headRefName, head: pr.headRefOid, base: pr.baseRefName, repo: o.g.repo }
 }
