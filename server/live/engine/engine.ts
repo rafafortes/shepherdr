@@ -734,7 +734,7 @@ const short = (title: string) =>
 /** A title someone writes is refused when it would not fit one line of the tasks list on a phone. */
 export function checkTitle(title: string) {
   const t = title.trim()
-  if (t.length > TITLE_MAX) throw new Error(`That title is ${t.length} characters: write a shorter one, at most ${ROW_MAX} characters (${TITLE_MAX} are still accepted; the rest goes in the brief)`)
+  if (t.length > TITLE_MAX) throw new Error(`That title is ${t.length} characters: at most ${TITLE_MAX} are accepted, and ${ROW_MAX} or fewer fit a phone's task row (the rest goes in the brief)`)
   return t
 }
 

@@ -17,8 +17,7 @@ describe('titles and status lines are asked for at most 30 characters', () => {
     expect(STATUS_MAX).toBe(40)
     // refuse nothing new: a 32-char title is still accepted, a longer one is still refused, and the refusal asks for 30
     expect(checkTitle('x'.repeat(TITLE_MAX))).toHaveLength(TITLE_MAX)
-    expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`write a shorter one, at most ${ROW_MAX} characters`)
-    expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`${TITLE_MAX} are still accepted`)
+    expect(() => checkTitle('x'.repeat(TITLE_MAX + 1))).toThrow(`at most ${TITLE_MAX} are accepted, and ${ROW_MAX} or fewer fit a phone's task row`)
     // a status line older agents write past the ask still draws, cut at the word
     expect(fitStatus('Fixing two failing tests')).toBe('Fixing two failing tests')
     expect(fitStatus('Rebasing onto main and running every check again')).toBe('Rebasing onto main and running every')
@@ -31,6 +30,7 @@ describe('titles and status lines are asked for at most 30 characters', () => {
     expect(skill).toContain('("Running the full tests", not "Rebasing onto main, then running the whole test suite")')
     expect(skill).toContain("before you ask, set your status line to why, at most 30 characters for a phone's task row")
     expect(skill).toContain('e.g. "Needs a go for a screenshot", not "Waiting for the person to say whether I can take the window"')
+    expect(skill).toContain("it stays frozen under your task's pie while you wait")
     expect(skill).not.toContain('at most 40 characters')
   })
 
