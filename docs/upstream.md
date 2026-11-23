@@ -24,7 +24,7 @@ own `v2.0.<n>` tags (Releases, below).
 **Last reviewed** (update these three lines at the end of every pass):
 
 - upstream `main`: `d2d40fb6` "Release Shepherdr 3.2.3 (#1358)", 2026-11-23 12:58 +0100 — the tip this pass read;
-  upstream has since moved to `49409a3b` (three commits, left for the next pass)
+  upstream has since moved on (`49409a3b` at this writing), and those commits are left for the next pass
 - upstream tag `v3.2.3` (`d2d40fb6`, 2026-11-23), the newest published release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 

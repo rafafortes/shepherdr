@@ -333,8 +333,8 @@ Fifteen releases (3.1.36 to 3.1.46, then 3.2.0, 3.2.1, 3.2.2 and the `v3.2.3` re
 from `abd5a0f1` (where the last pass stopped, at 3.1.35) to `d2d40fb6`: 113 improvements, weighed in the 40 rows
 below, 14 release commits (version bumps and changelogs, so no row) and 33 `AGENTS.md` note commits (upstream's own
 house rules, nothing for us). The rewrite itself (`a1d90086`, 3.2.0) is one commit carrying a whole app; 3.2.1 to
-3.2.3 are its fixes. Upstream `main` moved on during this pass and is left at `49409a3b` for next week. Upstream keeps its `SHEP-`
-numbers from 3.1.0 and restarts them with the 3.2 line, so every row cites its commit as well.
+3.2.3 are its fixes. Upstream `main` moved on during this pass; those commits are left for next week. Upstream keeps
+its `SHEP-` numbers from 3.1.0 and restarts them with the 3.2 line, so every row cites its commit as well.
 
 The half year's story is short: 3.1.36 to 3.1.46 finished the triage backlog on herdr-core's scheduler, its Codex
 workers and the phone/watch app; 3.2.0 then threw that away and rebuilt Shepherdr as one web app on the tailnet,
