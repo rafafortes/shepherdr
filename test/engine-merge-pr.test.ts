@@ -8,6 +8,7 @@ import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
 import { SETTINGS_HEAD } from '../shared/brief.ts'
+import { described, PR_BODY_END, PR_BODY_START } from '../server/live/engine/merge.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
@@ -563,5 +564,90 @@ describe('on GitHub: a pull request per task', () => {
     expect(r.text).toContain('PR #1 is merged on GitHub already')
     expect(opened(g)).toBe(0)
     expect(lists(g).length).toBe(2) // the branch's list was readable; only the tip's was junk
+  })
+})
+
+describe('the marked part of a pull request body', () => {
+  const want = `${PR_BODY_START}\nTask: T-1\n\n## Summary\n\nNew words.\n${PR_BODY_END}`
+
+  test('an unmarked body is rewritten whole, rather than guessing which words are ours', () => {
+    expect(described('A person wrote this.', want)).toBe(want)
+    expect(described('', want)).toBe(want)
+    expect(described(undefined, want)).toBe(want)
+  })
+
+  test('a body with only one mark is rewritten whole too', () => {
+    expect(described(`A note.\n\n${PR_BODY_START}\nOld words.`, want)).toBe(want)
+    expect(described(`Old words.\n\n${PR_BODY_END}\n\nA note.`, want)).toBe(want)
+  })
+
+  test('between the marks only: words around them survive and the marks stay for the next ready', () => {
+    const current = `Look at this.\n\n${PR_BODY_START}\nOld words.\n${PR_BODY_END}\n\nSigned, a reviewer.`
+    const once = described(current, want)
+    expect(once).toBe(`Look at this.\n\n${want}\n\nSigned, a reviewer.`)
+    const twice = described(`${once}\n\nOne more note.`, want)
+    expect(twice).toBe(`Look at this.\n\n${want}\n\nSigned, a reviewer.\n\nOne more note.`)
+  })
+
+  test('ready keeps a reviewer’s words above and below our marked part', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'prmarked')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const marked = g.gh().prs[0].body
+    expect(marked).toContain(PR_BODY_START)
+    expect(marked).toContain(PR_BODY_END)
+    // the reviewer adds words around Shepherdr's block on GitHub
+    g.set({ prs: g.gh().prs.map((p) => ({ ...p, body: `Reviewer note above.\n\n${marked}\n\nReviewer note below.` })) })
+    await w.engine.done(t.id, 'Added a hello.')
+    await until(() => g.gh().prs[0].body.includes('## Summary\n\nAdded a hello.'))
+    const body = g.gh().prs[0].body
+    expect(body).toStartWith('Reviewer note above.')
+    expect(body).toEndWith('Reviewer note below.')
+    expect(body).toContain(`${PR_BODY_START}\n\nTask: ${t.id}`)
+    expect(body.split(PR_BODY_START)).toHaveLength(2)
+    expect(body.split(PR_BODY_END)).toHaveLength(2)
+    expect(body).not.toContain('Work in progress')
+  })
+
+  test('merge keeps a person’s words around our marked part too', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'prmergedbody')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const marked = g.gh().prs[0].body
+    g.set({ prs: g.gh().prs.map((p) => ({ ...p, body: `A note before ready.\n\n${marked}` })) })
+    await w.engine.done(t.id, 'Added a hello.')
+    await until(() => g.gh().prs[0].body.includes('Added a hello.'))
+    // another note arrives between ready and the merge's own rewrite
+    g.set({ prs: g.gh().prs.map((p) => ({ ...p, body: `${p.body}\n\nA note before merge.` })) })
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+    const body = g.gh().prs[0].body
+    expect(body).toStartWith('A note before ready.')
+    expect(body).toContain('A note before merge.')
+    expect(body).toContain('## Summary\n\nAdded a hello.')
+  })
+
+  test('a body GitHub will not show is left alone, not rewritten blind', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'prunreadable')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const calls = (verb: string) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === verb).length
+    const views = calls('view')
+    const edits = calls('edit')
+    g.set({ prs: [] }) // pr view cannot find it now
+    await w.engine.done(t.id, 'Added a hello.')
+    await until(() => calls('view') > views)
+    expect(calls('edit')).toBe(edits)
   })
 })

@@ -531,9 +531,11 @@ export interface Pr {
   /** the commit the pull request is at */
   headRefOid: string
   baseRefName: string
+  /** its description as GitHub holds it, read by viewPr so a ready rewrites only Shepherdr's marked part */
+  body?: string
 }
 
-const PR_FIELDS = 'number,url,state,isDraft,headRefOid,baseRefName'
+const PR_FIELDS = 'number,url,state,isDraft,headRefOid,baseRefName,body'
 
 /**
  * The branch's pull request: its open one, else one merged already. A task whose work was carried onto another branch

@@ -53,6 +53,20 @@ export const ghNow = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z')
 /** a pull request's footer, as the agent's CLI signs its work */
 const SIGNED: Record<string, string> = { claude: '🤖 Generated with [Claude Code](https://claude.com/claude-code)', codex: '🤖 Generated with [Codex](https://openai.com/codex)' }
 
+/** the marks around the part of a pull request's description Shepherdr writes; a later ready replaces only that part,
+ *  keeping whatever a person added around it on GitHub (SHE-193). */
+export const PR_BODY_START = '<!-- shepherdr -->'
+export const PR_BODY_END = '<!-- /shepherdr -->'
+
+/** The description a ready makes of the one on GitHub: our marked part replaced, the words around it kept. An older,
+ *  unmarked body is rewritten whole, as before: without marks there is no way to tell our words from a person's. */
+export function described(current: string | undefined, want: string): string {
+  const body = current ?? ''
+  const a = body.indexOf(PR_BODY_START)
+  const b = a < 0 ? -1 : body.indexOf(PR_BODY_END, a + PR_BODY_START.length)
+  return a < 0 || b < 0 ? want : body.slice(0, a) + want + body.slice(b + PR_BODY_END.length)
+}
+
 export interface MergeHost {
   /** the tasks as the engine holds them now */
   tasks(): TaskRec[]
@@ -159,14 +173,15 @@ export class MergeRunner {
 
   /** The pull request's words: its task's id, the summary, the proof (the facts the task reported) and the brief's
    *  gist, so a reviewer reads what changed first and can still see what was asked. The brief stays reachable here:
-   *  it lives with the task in Shepherdr too. readyForReview rewrites this body when the report comes; the title is
-   *  touched only when the pull request opens, so a hand-edited one is left alone. */
+   *  it lives with the task in Shepherdr too. Between the marks, so a later ready rewrites only this part and keeps
+   *  a person's words around it; the title is touched only when the pull request opens, so a hand-edited one is left alone. */
   private prBody(t: TaskRec) {
     const kind = this.e.agents.record(this.e.key(t))?.kind ?? t.agent?.kind ?? this.e.settings.harness('task', this.e.nameOf(t)).kind
     // the coordinator's words, not the default way of working Shepherdr ended the brief with
     const brief = (splitBrief(t.desc)[0] || t.title).trim()
     const gist = brief.length > 700 ? `${brief.slice(0, 700).replace(/\s+\S*$/, '')} …` : brief
     return [
+      PR_BODY_START,
       `Task: ${t.id}`,
       `## Summary\n\n${t.said || 'Work in progress: the summary comes when the task is done.'}`,
       ...(t.facts ? [`## Proof\n\n${t.facts}`] : []),
@@ -175,7 +190,16 @@ export class MergeRunner {
         .map((l) => `> ${l}`.trimEnd())
         .join('\n')}`,
       SIGNED[kind] ?? `🤖 Generated with ${CLI_NAME[kind] ?? kind}`,
+      PR_BODY_END,
     ].join('\n\n')
+  }
+
+  /** Rewrite the description GitHub has now, keeping any words a person added around our marked part. A body GitHub
+   *  won't show is left alone: rewriting blind would erase what we could not read. */
+  private async editPrBody(t: TaskRec, g: G.GitHub, cwd: string, n: number) {
+    const current = await G.viewPr(g, cwd, n)
+    if (!current) return
+    await G.editPr(g, cwd, n, described(current.body, this.prBody(t)))
   }
 
   /** its pull request as GitHub has it now: the one recorded, else the branch's own (one opened by hand) */
@@ -196,7 +220,7 @@ export class MergeRunner {
     const p = this.e.proj(t)
     const g = hub ?? (await this.hub(p))
     if (!g || !t.pr) return
-    await G.editPr(g, p.path, t.pr.number, this.prBody(t))
+    await this.editPrBody(t, g, p.path, t.pr.number)
     await G.readyPr(g, p.path, t.pr.number)
   }
   /** a merge that went on past its caller's deadline is through: its agent hears how it went, and wakes on it */
@@ -827,7 +851,7 @@ export class MergeRunner {
       this.e.saveNow()
     } else {
       // its words carry the summary, whether or not the agent reported done before
-      if (t.said) await G.editPr(g, wt, pr.number, this.prBody(t))
+      if (t.said) await this.editPrBody(t, g, wt, pr.number)
       if (pr.isDraft) await G.readyPr(g, wt, pr.number)
     }
     const n = t.pr!.number
