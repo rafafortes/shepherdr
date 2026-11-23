@@ -3901,6 +3901,9 @@ export class Engine extends Emitter<Events> {
   async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
     if (ended(t)) return { state: 'ended' }
+    // #1194: ready reports the task branch's tip; a worktree switched away would publish another branch's work
+    const wrong = await this.runner.branchGuard(t)
+    if (wrong) throw new Error(wrong)
     // the final commit must be one a round was recorded on: that is the work the human would merge
     const unreviewed = await this.reviewGate(t)
     if (unreviewed) throw new Error(unreviewed)

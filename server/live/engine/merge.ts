@@ -233,6 +233,29 @@ export class MergeRunner {
     return text
   }
 
+  /**
+   * #1194: ready, pr and merge publish the task branch's tip, never whatever HEAD happens to name. A worktree switched
+   * to another branch would push that branch's commit as the task's, so refuse before anything goes out, naming the
+   * branch in front, the task's own branch and the way back. A detached HEAD at the task branch's own tip is a check
+   * run (a gate detaches there), so it is allowed; any other detached commit holds work the task branch does not.
+   */
+  async branchGuard(t: TaskRec): Promise<string | undefined> {
+    if (!t.worktree || !t.branch || !existsSync(t.worktree)) return undefined
+    const here = await G.git(t.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD')
+    if (here.ok) {
+      if (here.out === t.branch) return undefined
+    } else {
+      const at = await G.git(t.worktree, 'rev-parse', 'HEAD')
+      const own = await G.git(t.worktree, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`)
+      // a gate resumed after a restart left HEAD at its own stack top: that run is the task's merge, not another's work
+      const resuming = t.landing?.step === 'gate' && t.gateRun?.head === at.out
+      if (at.ok && (resuming || (own.ok && at.out === own.out))) return undefined
+    }
+    const inFront = here.ok ? here.out : `a detached commit (${(await G.git(t.worktree, 'rev-parse', '--short', 'HEAD')).out})`
+    const pr = t.pr ? ` (its pull request is #${t.pr.number})` : ''
+    return `HEAD is on ${inFront}, not on ${t.id}'s branch ${t.branch}${pr}: shepherdr pushes and opens only ${t.branch}. Move the work to ${t.branch} (git switch ${t.branch}, then merge or cherry-pick it), or, for another pull request, open it yourself and ask your coordinator for a task to track it.`
+  }
+
   /** push the task's branch as it is committed, to GitHub: forced, since it is rebased on main and only its agent's */
   private async push(t: TaskRec) {
     const sha = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
@@ -272,6 +295,8 @@ export class MergeRunner {
   private async openPrNow(t: TaskRec): Promise<{ ok: boolean; text: string }> {
     if (ended(t)) return { ok: false, text: `${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).` }
     if (!t.worktree || !t.branch || !t.base) return { ok: false, text: `${t.id} has no branch yet.` }
+    const wrong = await this.branchGuard(t)
+    if (wrong) return { ok: false, text: wrong }
     const p = this.e.proj(t)
     const g = await this.hub(p)
     if (!g)
@@ -653,6 +678,8 @@ export class MergeRunner {
     if (t.merged) return t.train ? { ok: true, note: `it went in with ${t.train}'s merge train` } : { ok: false, error: `${t.id} is already merged` }
     if (t.closed) return { ok: false, error: `${t.id} is Done: it had nothing to merge` }
     if (!t.worktree || !t.branch || !t.base) return { ok: false, error: `${t.id} has no branch yet` }
+    const wrong = await this.branchGuard(t)
+    if (wrong) return { ok: false, error: wrong }
     if (!self && this.e.agents.status(this.e.key(t)) === 'working')
       return { ok: false, error: `${t.id}'s agent is working: wait for its turn to end, or ask it to merge (shepherdr task tell ${t.id} "merge it").` }
     // a late note from you or a coordinator, not read yet, may change what goes in
