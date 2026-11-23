@@ -237,8 +237,9 @@ export class MergeRunner {
    * #1194: ready, pr and merge publish the task branch's tip, never whatever HEAD happens to name. A worktree switched
    * to another branch would push that branch's commit as the task's, so refuse before anything goes out, naming the
    * branch in front, the task's own branch and the way back. A detached HEAD at the task branch's own tip is a check
-   * run (a gate detaches there), so it is allowed; any other detached commit holds work the task branch does not.
-   * A merge first reattaches a detached worktree to its branch (below), so this guards what is really going out.
+   * run (a gate detaches there), so it is allowed. A merge reattaches any detached worktree to its branch before this
+   * runs (as it always has, so a dead gate's stack top does not block it); ready and pr refuse a detached commit that
+   * is not the task branch's own tip.
    */
   async branchGuard(t: TaskRec): Promise<string | undefined> {
     // no worktree, or one put away: there is no branch in front to publish, as elsewhere in done and markReady
