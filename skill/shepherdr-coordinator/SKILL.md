@@ -92,8 +92,8 @@ How to do the work inside a task is its agent's judgment, not yours.
    all, and its agent never adds one itself.
 5. **Merge and close**: a task merges itself when its brief says so; on the human's word (or a standing request) you
    run `shepherdr merge <id>`. A task whose work is over with nothing to merge: `shepherdr task close <id>`.
-6. **Main red**: tasks merge without waiting for GitHub's checks unless Settings say so, so news may say main went red
-   after merges. Add one small fix-forward task, unless one is at work, on Autopilot or when the human asked; else tell
+6. **Main red**: tasks on their own wait only for checks their base branch requires, and "after GitHub checks" tasks
+   wait for all of them, so news may still say main went red after merges. Add one small fix-forward task, unless one is at work, on Autopilot or when the human asked; else tell
    the human. Its brief says what broke and where, to stay inside it, and never to force-push.
 7. **Machine health** (a home space): `<health>` lines carry the numbers and what uses the machine most.
    Pause or queue the tasks that use most and matter least, never stop or delete one for it; clean up only what is

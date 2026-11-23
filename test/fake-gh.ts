@@ -53,6 +53,10 @@ export interface FakeGitHub {
   requiredAsContexts?: boolean
   /** gh pr checks reports no checks on its first call, then what `checks` holds (checks starting during the window) */
   checksNoneFirst?: boolean
+  /** api paths that answer with a permission error (a token that cannot read protection or rulesets) */
+  apiFail?: string[]
+  /** the required-checks graphql answer has more than one page: the rest must not be read as optional */
+  requiredHasNextPage?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
    *  its --jq would pick them */
   api?: Record<string, unknown[]>
@@ -186,9 +190,14 @@ if (import.meta.main) {
           ? { __typename: 'StatusContext', context: name, isRequired: st.requiredChecks?.includes(name) ?? false }
           : { __typename: 'CheckRun', name, isRequired: st.requiredChecks?.includes(name) ?? false },
       )
-      out(JSON.stringify({ data: { repository: { pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes } } } }] } } } } }))
+      out(
+        JSON.stringify({
+          data: { repository: { pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: st.requiredHasNextPage ?? false }, nodes } } } }] } } } },
+        }),
+      )
     }
     const path = args.at(-1)!.split('?')[0]
+    if (st.apiFail?.some((f) => path.startsWith(f))) fail('gh: Resource not accessible by personal access token (HTTP 403)')
     const job = path.match(/\/actions\/jobs\/(\d+)\/logs$/)?.[1]
     if (job) out(st.logs?.[job] ?? fail('gh: Not Found (HTTP 404)')!)
     // --paginate --jq '.[]': one item per line
@@ -231,7 +240,7 @@ if (import.meta.main) {
       pr().isDraft = false
       out(`✓ Pull request #${a2} is marked as "ready for review"`)
       break
-    case 'checks':
+    case 'checks': {
       // written down before it answers, so a test can act while GitHub takes its time with them
       if (st.checksSlow) {
         save()
@@ -244,6 +253,7 @@ if (import.meta.main) {
       const reported = checks ?? []
       out(JSON.stringify(reported), reported.some((c) => c.bucket === 'fail') ? 1 : reported.some((c) => c.bucket === 'pending') ? 8 : 0)
       break
+    }
     case 'merge': {
       const p = pr()
       if (p.state !== 'OPEN') fail(`Pull request #${p.number} is not open`)

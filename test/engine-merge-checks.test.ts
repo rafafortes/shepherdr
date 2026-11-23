@@ -327,12 +327,23 @@ describe('on GitHub: a pull request per task', () => {
     expect(t.desc).toContain('Wait only for checks your base branch requires')
   })
 
-  test('required checks are read from status contexts as well as check runs', async () => {
+  test('required checks are read from status contexts, branch protection and rulesets', async () => {
     const g = onGitHub({ checks: [{ name: 'build', bucket: 'pass' }], requiredChecks: ['build'], requiredAsContexts: true })
     const hub = { repo: 'acme/app', host: 'github.com' }
-    expect(await G.requiredChecks(hub, g.dir, 1)).toEqual(['build'])
-    g.set({ requiredChecks: [], requiredAsContexts: false })
-    expect(await G.requiredChecks(hub, g.dir, 1)).toBeUndefined()
+    const read = () => G.requiredChecks(hub, g.dir, 1, 'main')
+    expect(await read()).toEqual(['build'])
+    // a check the base requires but the pull request has not reported yet is named too
+    g.set({ requiredAsContexts: false, api: { 'repos/acme/app/branches/main/protection': ['future'], 'repos/acme/app/rules/branches/main': ['rule'] } })
+    expect((await read())?.sort()).toEqual(['build', 'future', 'rule'])
+    // a token that cannot read protection cannot say what is required: every check must count
+    g.set({ apiFail: ['repos/acme/app/branches/main/protection'] })
+    expect(await read()).toBeUndefined()
+    // neither protection nor a ruleset, and no check marked required: nothing to go on
+    g.set({ apiFail: [], api: {}, checks: [], requiredChecks: [] })
+    expect(await read()).toBeUndefined()
+    // more than a page of contexts: a required check beyond it must not be called optional
+    g.set({ checks: [{ name: 'build', bucket: 'pass' }], requiredChecks: ['build'], requiredHasNextPage: true })
+    expect(await read()).toBeUndefined()
   })
 
   test('a red or running optional check does not hold an automatic merge, but the same check required does', async () => {
@@ -418,7 +429,7 @@ describe('on GitHub: a pull request per task', () => {
     mkdirSync(join(wt(t), '.github', 'workflows'), { recursive: true })
     writeFileSync(join(wt(t), '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n')
     sh('git add -A && git commit -qm ci', wt(t))
-    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+    expect(await w.engine.merge(t.id, { self: true })).toEqual({ ok: true, note: 'merged PR #1 on GitHub, waiting only for required checks' })
     expect(g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'checks').length).toBeGreaterThan(1)
   }, 40_000)
 
@@ -443,6 +454,10 @@ describe('on GitHub: a pull request per task', () => {
     // every reported check required, so there is nothing to drop: still strict
     g.set({ requiredChecks: ['build', 'lint'] })
     expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    // a required check the base names but has not reported yet must not make the red one optional either
+    g.set({ requiredChecks: ['build'], api: { 'repos/acme/app/branches/main/protection': ['future'] } })
+    expect((await w.engine.merge(t.id, { self: true })).error).toContain('lint')
+    g.set({ api: {} })
     // with every check green no question is asked of GitHub at all
     g.set({
       checks: [

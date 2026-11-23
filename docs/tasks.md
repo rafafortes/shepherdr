@@ -10,7 +10,8 @@
   one plain line per setting that shapes how the agent works, the source it follows: whether it is reviewed and by whom (the reviewer tags each finding critical, major, minor or trivial; the agent fixes
   those at or above Must fix, `review.mustFix`, major by default, and reviews again, at most Review rounds,
   `review.rounds`, 3 by default), and whether it merges on its own (by default once its own quick checks pass,
-  without waiting for GitHub's checks), on its own after GitHub's checks, or asks you first, and the agent, model
+  waiting only for checks GitHub says its base requires), on its own after all of GitHub's checks, or asks you first,
+  and the agent, model
   and effort it runs on (only so it knows). A line that differs from Shepherdr's default says who changed it: this
   space's setting, this machine's, yours for every machine, or set by the coordinator for this task (`task add --set
   review.rounds=1 --set merge="ask me first"`). The brief's own words win, so a wish for one task needs no setting
@@ -394,7 +395,7 @@
   one, AGENTS.md). On its own it waits only for the checks GitHub says the base branch requires (branch protection or a
   ruleset): a red or running optional check does not hold the merge, though it still runs on the pull request and on
   every push to main. GitHub itself still enforces approvals and its merge queue. When GitHub cannot say which checks
-  are required, every check counts, so a required one is never treated as optional. With Settings → How tasks work →
+  are required, every check counts, including ones still running, so a required one is never treated as optional. With Settings → How tasks work →
   Merge on "after GitHub checks", it merges only once all of GitHub's checks pass; `shepherdr checks` is strict too,
   whichever setting is in force. Either way only
   at the commit this machine has (`gh pr merge --squash --match-head-commit`), then its branch on GitHub is deleted

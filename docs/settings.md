@@ -269,7 +269,8 @@ train, above, are this section's other controls, and the Reviewer rows name the 
 - **Merge** (`brief.merge`, on its own): when its agent merges — on its own once its quick checks pass, waiting only
   for the checks its base branch requires (a red or running optional check does not hold it; GitHub still enforces
   approvals and its merge queue), after all of GitHub's checks, or ask me first. `shepherdr checks` always waits for
-  all of them, whichever choice is set. When GitHub cannot say which checks the base requires, all of them count.
+  all of them, whichever choice is set. When GitHub cannot say which checks the base requires, all of them count,
+  including ones still running.
 
 ## Autopilot
 
