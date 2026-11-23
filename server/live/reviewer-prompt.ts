@@ -52,6 +52,8 @@ export interface PromptFacts {
   privacy: string
   /** the newest reviewed commit still on this branch: a round after the first looks at what changed since it */
   since?: string
+  /** a short review of only what a rebase or merge of the base changed in the own diff */
+  rebase?: true
   rules?: string[]
 }
 
@@ -65,12 +67,16 @@ export function lastReviewedOf<T extends { commit: string }>(reviewed: T[] | und
  * A later round whose reviewed commit a rebase left off the branch has no range to name, and says so: the whole change
  * is what it must read again.
  */
-export const focusWords = (since: string | undefined, round = 1) =>
-  since
+export const focusWords = (since: string | undefined, round = 1, rebase?: true) => {
+  const words = since
     ? `Round after an earlier one: look first at what changed since the last reviewed commit ${since.slice(0, 7)} (git diff ${since}..HEAD and git log --oneline ${since}..HEAD, including any merge's conflict resolutions), then read the whole change above for context.`
     : round > 1
       ? `Round ${round}: the commit the last round reviewed is no longer on this branch (it was rebased), so review the whole change above again, and look for what the rebase changed in it.`
       : 'First round: review the whole change above.'
+  return rebase
+    ? `${words} Short rebase review: judge only what the base move changed in this change's own diff — values derived from the base (such as hashes of generated text) and conflict resolutions. Report any line of the change's own work that a resolution dropped or altered; that needs its own normal round.`
+    : words
+}
 
 /** fill the template with one round's facts. Pure: the template is passed in so a test can pin its key lines and a
  *  missing placeholder is a loud failure, not a prompt with a gap in it. */
@@ -84,7 +90,7 @@ export function fillReviewerPrompt(o: PromptFacts, template = readFileSync(REVIE
     BASE: o.base,
     MERGE_BASE: o.mergeBase,
     WORKTREE: o.worktree,
-    FOCUS: focusWords(o.since, o.round),
+    FOCUS: focusWords(o.since, o.round, o.rebase),
     RULES: rules,
     PRIVACY: o.privacy.trim(),
   }

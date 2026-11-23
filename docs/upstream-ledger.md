@@ -1025,6 +1025,14 @@ marker comes with the task's first round, and the coordinator's `review-more` wa
 The prompt template and `shepherdr review`'s answer name both `git diff <merge-base>...HEAD` and, from the second round,
 `git diff <last-reviewed>..HEAD`, with the focus on the latter.
 
+Follow-up (SHE-196): checked upstream again for a re-review after a base move that changed the task's own diff. Upstream
+has nothing beyond `carried_over`/`own_diff` (#1178, above): 3.x's `review_refusal` says a changed patch needs a normal
+round, and issue #1206 ("ready refuses a rebase-only change") was closed pointing at 3.1.45's `own_diff` alone, which
+we already have. So there is no upstream short-review design to port: ours is a small addition to this gate — when the
+own diff differs only through derived values or a conflict resolution, `shepherdr review` offers a short review of that
+delta, counted apart from the brief's rounds; a dropped own change is named and refused. Upstream's patch-id idea in
+#1206 was not taken: a patch-id only recognizes an unchanged patch, which is exactly the case `own_diff` already covers.
+
 ## A CLI call stays fast however many routes there are (SHE-185)
 
 Checked 2026-11-21 (SHE-185) on `upstream/main` and `upstream/v2.0`, their code, history and public issues and pull

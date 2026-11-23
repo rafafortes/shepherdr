@@ -349,4 +349,79 @@ describe('a review is tied to the commit it reviewed', () => {
     await round(w, t)
     expect(await w.engine.done(t.id, 'done', 'facts')).toMatchObject({ state: 'ready' })
   })
+
+  test('a new own change after review still needs a normal round, even with no rounds left', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'own-after')
+    t.rounds = 1
+    await round(w, t)
+    writeFileSync(join(t.worktree!, 'fix.txt'), 'fix\n')
+    sh('git add -A && git commit -qm "own fix"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('short rebase review')
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test('a rebase that only moves a value derived from the base gets a short review outside the cap', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'derived-value')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n")
+    sh('git add -A && git commit -qm "add hello and bump derived hash"', t.worktree!)
+    t.rounds = 1
+    await round(w, t) // its one round is spent
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+    const reviewed = t.reviewed![0].commit
+    // another task merges and moves the derived value on the base
+    writeFileSync(join(dir, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && git commit -qm "base moves the hash"', dir)
+    sh('git rebase main || true', t.worktree!)
+    // resolve the conflict by taking the base's newer value
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
+    expect(head(t)).not.toBe(reviewed)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('base moved')
+    expect(refusal).toContain('short review')
+    expect(refusal).toContain('counted apart')
+    // out of normal rounds, the delta still gets its review, and it costs nothing against the cap
+    const r = await w.engine.reviewRound(t.id)
+    if ('wait' in r) throw new Error('no reviewer free')
+    expect(r.rebase).toBe(true)
+    expect(w.engine.reviewWords(t.id, r)).toContain('not counted against')
+    expect(readFileSync(reviewerPromptPath(t.id, r.round), 'utf8')).toContain('Short rebase review')
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(t.reviewed!.at(-1)).toMatchObject({ commit: head(t), rebase: true })
+    expect(t.rebaseReviews).toBe(1)
+    expect(t.reviews).toBe(2)
+    expect(w.engine.reviewsLeft(t)).toBe(0) // still no normal rounds left, and none were spent on the base move
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+    expect(await w.engine.done(t.id, 'done', 'facts')).toMatchObject({ state: 'ready' })
+  })
+
+  test('a rebase that drops an own change is refused with the exact lines and earns no rebase review', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'dropped-row')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    writeFileSync(join(t.worktree!, 'notes.md'), 'mine: a row the task wrote\n')
+    sh('git add -A && git commit -qm "add hello and my row"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // the base changes the same file (another task adds its own row)
+    writeFileSync(join(dir, 'notes.md'), 'theirs: a row the base wrote\n')
+    sh('git add -A && git commit -qm "base row"', dir)
+    sh('git rebase main || true', t.worktree!)
+    // resolve by taking theirs: the task's own row is gone
+    writeFileSync(join(t.worktree!, 'notes.md'), 'theirs: a row the base wrote\n')
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('dropped')
+    expect(refusal).toContain('mine: a row the task wrote')
+    expect(refusal).not.toContain('short review')
+    // the gate catches it, so a cheap rebase review is not offered: restore the work and take a normal round
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
 })

@@ -757,6 +757,13 @@ export class MergeRunner {
     t.mergeStop = undefined
     const p = this.e.proj(t)
     const wt = t.worktree
+    // a pull request merged on GitHub by hand (or a merge whose answer was lost) only needs marking: check it before
+    // the review gate below, which would refuse a branch whose own diff no longer matches what a round reviewed
+    const g = await this.hub(p)
+    if (g) {
+      const already = await this.prOf(t, g, wt)
+      if (already?.state === 'MERGED') return this.mergedOnGitHub(t, p, `PR #${already.number} was merged on GitHub already`)
+    }
     // main here first catches up with the remote's, so the branch is rebased on what main really is. Bound the fetch
     // well under the caller's deadline: an answerless remote must free this repo's place in the queue with words
     // about it, not leave every later merge here waiting behind this one
@@ -774,7 +781,6 @@ export class MergeRunner {
     // the commit that would go in must be one a review round was recorded on (a clean base merge needs none)
     const unreviewed = await this.e.reviewGate(t)
     if (unreviewed) return { ok: false, error: `Can't merge ${t.id}: ${unreviewed}` }
-    const g = await this.hub(p)
     if (g) return this.mergeOnGitHub(t, p, g, self)
     // its pull request is open, but gh can't use GitHub here now: it is never merged around it
     if (t.pr) return { ok: false, error: `Can't merge ${t.id}: its PR #${t.pr.number} is on GitHub, but gh isn't signed in to it here (gh auth login), so nothing was merged.` }

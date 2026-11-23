@@ -83,4 +83,19 @@ describe('review rounds a coordinator may add', () => {
     t.merged = true
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('needs no more review')
   })
+
+  test('a task on its way into main is told to retry after the merge, not that it needs no review', async () => {
+    const w = world()
+    const t = await twoRounds(w, 'landing')
+    await w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
+    t.reported = true
+    t.landing = { step: 'merge', at: Date.now() }
+    expect(t.landing?.step).toBe('merge')
+    const failed = await w.engine.reviewMore(t.id, t.project).catch((e: Error) => e.message)
+    expect(failed).toContain('on its way into main')
+    expect(failed).toContain('Merging')
+    expect(failed).toContain('Retry after the merge finishes')
+    expect(t.reviewsAdded).toBeUndefined()
+  })
 })
