@@ -55,6 +55,8 @@ export interface FakeGitHub {
   checksNoneFirst?: boolean
   /** api paths that answer with a permission error (a token that cannot read protection or rulesets) */
   apiFail?: string[]
+  /** api paths that answer "Branch not protected (HTTP 404)": no classic protection, rulesets may still apply */
+  api404?: string[]
   /** the required-checks graphql answer has more than one page: the rest must not be read as optional */
   requiredHasNextPage?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
@@ -198,10 +200,11 @@ if (import.meta.main) {
     }
     const path = args.at(-1)!.split('?')[0]
     if (st.apiFail?.some((f) => path.startsWith(f))) fail('gh: Resource not accessible by personal access token (HTTP 403)')
+    if (st.api404?.some((f) => path.startsWith(f))) fail('gh: Branch not protected (HTTP 404)')
     const job = path.match(/\/actions\/jobs\/(\d+)\/logs$/)?.[1]
     if (job) out(st.logs?.[job] ?? fail('gh: Not Found (HTTP 404)')!)
     // --paginate --jq '.[]': one item per line
-    out((st.api?.[path] ?? []).map((x) => JSON.stringify(x)).join('\n'))
+    out((st.api?.[path] ?? []).map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n'))
   }
   if (a0 === 'run' && a1 === 'list') out(JSON.stringify(st.runs ?? []))
   if (a0 !== 'pr') fail(`fake gh: no ${a0}`)

@@ -341,6 +341,14 @@ describe('on GitHub: a pull request per task', () => {
     // neither protection nor a ruleset, and no check marked required: nothing to go on
     g.set({ apiFail: [], api: {}, checks: [], requiredChecks: [] })
     expect(await read()).toBeUndefined()
+    // rulesets only: the classic protection read is a 404, not a failure, so the ruleset's check still counts
+    g.set({
+      api404: ['repos/acme/app/branches/main/protection'],
+      api: { 'repos/acme/app/rules/branches/main': ['rule'] },
+      checks: [{ name: 'build', bucket: 'pass' }],
+      requiredChecks: ['build'],
+    })
+    expect(await read()).toEqual(['build', 'rule'])
     // more than a page of contexts: a required check beyond it must not be called optional
     g.set({ checks: [{ name: 'build', bucket: 'pass' }], requiredChecks: ['build'], requiredHasNextPage: true })
     expect(await read()).toBeUndefined()

@@ -707,15 +707,12 @@ async function rollupRequired(g: GitHub, cwd: string, n: number): Promise<string
 async function baseRequired(g: GitHub, cwd: string, base: string): Promise<string[] | undefined> {
   const read = async (path: string, jq: string): Promise<string[] | undefined> => {
     const r = await gh(g, cwd, 'api', '--jq', jq, path)
-    if (!r.ok) return /not found/i.test(`${r.out}\n${r.err}`) ? [] : undefined
-    try {
-      return r.out
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as string)
-    } catch {
-      return undefined
-    }
+    // an unprotected branch answers 404 ("Branch not protected"): no settings, not a failure to read them
+    if (!r.ok) return /not found|not protected|HTTP 404/i.test(`${r.out}\n${r.err}`) ? [] : undefined
+    return r.out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
   }
   const [classic, rules] = await Promise.all([
     read(`repos/${g.repo}/branches/${base}/protection`, '.required_status_checks.contexts[]?'),
