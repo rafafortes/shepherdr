@@ -51,6 +51,8 @@ export interface FakeGitHub {
   requiredChecksGarbage?: boolean
   /** the required checks come as StatusContexts (`context`) rather than CheckRuns (`name`) */
   requiredAsContexts?: boolean
+  /** gh pr checks reports no checks on its first call, then what `checks` holds (checks starting during the window) */
+  checksNoneFirst?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
    *  its --jq would pick them */
   api?: Record<string, unknown[]>
@@ -236,8 +238,11 @@ if (import.meta.main) {
         Bun.sleepSync(st.checksSlow)
       }
       if (st.noChecks) fail('GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)')
-      if (!st.checks?.length) fail(`no checks reported on the '${pr().head}' branch`)
-      out(JSON.stringify(st.checks), st.checks!.some((c) => c.bucket === 'fail') ? 1 : st.checks!.some((c) => c.bucket === 'pending') ? 8 : 0)
+      const asks = st.calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'checks').length
+      const checks = st.checksNoneFirst && asks <= 1 ? undefined : st.checks
+      if (!checks?.length) fail(`no checks reported on the '${pr().head}' branch`)
+      const reported = checks ?? []
+      out(JSON.stringify(reported), reported.some((c) => c.bucket === 'fail') ? 1 : reported.some((c) => c.bucket === 'pending') ? 8 : 0)
       break
     case 'merge': {
       const p = pr()

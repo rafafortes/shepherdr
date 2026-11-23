@@ -905,8 +905,11 @@ export class MergeRunner {
     if (wait) c = await this.checksOf(t, g, n, 0)
     // checksOf reads the same workflows once: with none it either returns none (no workflow, or a filtered one
     // that did not apply) or waits the 90 s out and refuses while the checks are still unknown
-    else if (counted?.state === 'none') c = await this.checksOf(t, g, n, CHECKS_SHOW)
-    else c = counted?.state === 'fail' || counted?.state === 'pending' ? counted : { state: 'pass' as const, passed: 0, failed: [] }
+    else if (counted?.state === 'none') {
+      // checks may appear during the 90 s window: they too are counted by required checks only
+      const appeared = await this.checksOf(t, g, n, CHECKS_SHOW)
+      c = appeared.state === 'none' ? appeared : await autoChecks(g, wt, n, appeared)
+    } else c = counted?.state === 'fail' || counted?.state === 'pending' ? counted : { state: 'pass' as const, passed: 0, failed: [] }
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
       return {

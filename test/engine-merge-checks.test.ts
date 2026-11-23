@@ -21,7 +21,7 @@ const wt = (t: { id: string; worktree?: string }) => {
 const ghBin = tmp('ghbin')
 writeFileSync(join(ghBin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-gh.ts')}" "$@"\n`, { mode: 0o755 })
 
-function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; requiredChecks?: string[]; remote?: string } = {}) {
+function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; requiredChecks?: string[]; requiredAsContexts?: boolean; checksNoneFirst?: boolean; remote?: string } = {}) {
   process.env.PATH = `${ghBin}:${process.env.PATH}`
   const bare = tmp('gh-origin')
   sh('git init -q --bare -b main', bare)
@@ -30,7 +30,21 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
   const remote = o.remote ?? 'https://github.com/acme/app.git'
   sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin ${remote} && git config url.${bare}.insteadOf ${remote}`, dir)
   const file = join(tmp('gh-state'), 'github.json')
-  writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks, requiredChecks: o.requiredChecks }))
+  writeFileSync(
+    file,
+    JSON.stringify({
+      origin: bare,
+      repo: 'acme/app',
+      prs: [],
+      calls: [],
+      authed: o.authed,
+      down: o.down,
+      checks: o.checks,
+      requiredChecks: o.requiredChecks,
+      requiredAsContexts: o.requiredAsContexts,
+      checksNoneFirst: o.checksNoneFirst,
+    }),
+  )
   process.env.FAKE_GH_STATE = file
   const gh = () => JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
   const set = (patch: Partial<FakeGitHub>) => writeFileSync(file, JSON.stringify({ ...gh(), ...patch }))
@@ -389,6 +403,24 @@ describe('on GitHub: a pull request per task', () => {
     expect(told).toContain('checks passed on PR #1: merge')
     expect(told).not.toContain('Check failed')
   })
+
+  test('checks that start during the 90 s window are counted by required checks too', async () => {
+    const w = world()
+    const g = onGitHub({
+      checks: [
+        { name: 'build', bucket: 'pass' },
+        { name: 'lint', bucket: 'fail' },
+      ],
+      requiredChecks: ['build'],
+      checksNoneFirst: true,
+    })
+    const { t } = await started(w, g.dir, 'ghappear')
+    mkdirSync(join(wt(t), '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(wt(t), '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n')
+    sh('git add -A && git commit -qm ci', wt(t))
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+    expect(g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'checks').length).toBeGreaterThan(1)
+  }, 40_000)
 
   test('a red check holds an automatic merge when GitHub cannot say which are required, but an all-green one asks nothing', async () => {
     const w = world()
