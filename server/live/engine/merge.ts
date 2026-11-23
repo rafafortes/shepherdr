@@ -64,12 +64,16 @@ const escapeMarks = (s: string) =>
   s.replaceAll(PR_BODY_START, '&lt;!-- shepherdr --&gt;').replaceAll(PR_BODY_END, '&lt;!-- /shepherdr --&gt;')
 
 /** The description a ready makes of the one on GitHub: our marked part replaced, the words around it kept. An older,
- *  unmarked body is rewritten whole, as before: without marks there is no way to tell our words from a person's. */
-export function described(current: string | undefined, want: string): string {
+ *  unmarked body is rewritten whole, as before: without marks there is no way to tell our words from a person's.
+ *  `undefined` means leave it alone: with only one mark the block is broken and rewriting would erase a person's notes. */
+export function described(current: string | undefined, want: string): string | undefined {
   const body = current ?? ''
   const a = body.indexOf(PR_BODY_START)
-  const b = a < 0 ? -1 : body.indexOf(PR_BODY_END, a + PR_BODY_START.length)
-  return a < 0 || b < 0 ? want : body.slice(0, a) + want + body.slice(b + PR_BODY_END.length)
+  const b = body.indexOf(PR_BODY_END)
+  if (a < 0 && b < 0) return want
+  const end = a < 0 ? -1 : body.indexOf(PR_BODY_END, a + PR_BODY_START.length)
+  if (end < 0) return undefined
+  return body.slice(0, a) + want + body.slice(end + PR_BODY_END.length)
 }
 
 export interface MergeHost {
@@ -203,7 +207,9 @@ export class MergeRunner {
   private async editPrBody(t: TaskRec, g: G.GitHub, cwd: string, n: number) {
     const current = await G.viewPr(g, cwd, n)
     if (!current) return trainLog(`${t.id}: pull request description not updated: GitHub did not show it`)
-    await G.editPr(g, cwd, n, described(current.body, this.prBody(t)))
+    const next = described(current.body, this.prBody(t))
+    if (!next) return trainLog(`${t.id}: pull request description not updated: its Shepherdr marks are incomplete`)
+    await G.editPr(g, cwd, n, next)
   }
 
   /** its pull request as GitHub has it now: the one recorded, else the branch's own (one opened by hand) */

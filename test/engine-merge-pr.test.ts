@@ -576,9 +576,10 @@ describe('the marked part of a pull request body', () => {
     expect(described(undefined, want)).toBe(want)
   })
 
-  test('a body with only one mark is rewritten whole too', () => {
-    expect(described(`A note.\n\n${PR_BODY_START}\nOld words.`, want)).toBe(want)
-    expect(described(`Old words.\n\n${PR_BODY_END}\n\nA note.`, want)).toBe(want)
+  test('a half-marked body is left alone: a broken block must not cost the words around it', () => {
+    expect(described(`A note.\n\n${PR_BODY_START}\nOld words.`, want)).toBeUndefined()
+    expect(described(`Old words.\n\n${PR_BODY_END}\n\nA note.`, want)).toBeUndefined()
+    expect(described(`${PR_BODY_END}\n\nA note.\n\n${PR_BODY_START}`, want)).toBeUndefined()
   })
 
   test('between the marks only: words around them survive and the marks stay for the next ready', () => {
@@ -658,6 +659,31 @@ describe('the marked part of a pull request body', () => {
     expect(second).toStartWith('A note.')
     expect(second.split(PR_BODY_END)).toHaveLength(2)
     expect(second).not.toContain('literally.\n\nA note.')
+  })
+
+  test('a body with a broken mark is left alone, and the skip is logged', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'prhalfmarked')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const calls = (verb: string) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === verb).length
+    const edits = calls('edit')
+    const logged: string[] = []
+    const stderr = spyOn(console, 'error').mockImplementation((...a: unknown[]) => void logged.push(a.join(' ')))
+    try {
+      // the human removed the end mark while editing our block
+      g.set({ prs: g.gh().prs.map((p) => ({ ...p, body: `A note.\n\n${PR_BODY_START}\nOld words.` })) })
+      await w.engine.done(t.id, 'Added a hello.')
+      await until(() => logged.some((l) => l.includes('marks are incomplete')))
+      expect(calls('edit')).toBe(edits)
+      expect(logged).toContain(`shepherdr: ${t.id}: pull request description not updated: its Shepherdr marks are incomplete`)
+      expect(g.gh().prs[0].body).toBe(`A note.\n\n${PR_BODY_START}\nOld words.`)
+    } finally {
+      stderr.mockRestore()
+    }
   })
 
   test('a body GitHub will not show is left alone, and the skip is logged', async () => {
