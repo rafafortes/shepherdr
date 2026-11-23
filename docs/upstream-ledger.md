@@ -1089,8 +1089,9 @@ the body stack on that open path).
 a chat body showing a terminal always offers the way back. A card's Open terminal (`plugins/chat/client.tsx:1735`)
 still flips a task's chat by writing its key to `ui.term` — the repro — but that chat's ⋯ menu now leads with a
 Back to the chat row (the terminal plugin's new `agentMenu` slot, order 40, ahead of Search), and Ctrl+` on a desktop
-clears `term` for the shown task instead of moving the terminal to its coordinator. The coordinator's PlaceTerm row
-and Ctrl+` toggle are untouched, and a task's own Terminal stays its side-panel item. PR #756's reset-on-open is not
-taken: our 2.0 state has no body stack to reset — a chat is stuck only while its own key is in `ui.term`, and the new
-row clears exactly that. `test/layout-panel.test.ts` proves the card repro failing before and passing after (the
-narrow window's ⋯ menu and the desktop's Ctrl+`), with the coordinator's toggle still tested.
+clears `term` for the task chat showing it — including a pane's task in split view, where `ui.task` is not that chat —
+instead of moving the terminal to a coordinator. The coordinator's PlaceTerm row and Ctrl+` toggle are untouched, and
+a task's own Terminal stays its side-panel item. PR #756's reset-on-open is not taken: our 2.0 state has no body stack
+to reset — a chat is stuck only while its own key is in `ui.term`, and the new row clears exactly that.
+`test/layout-panel.test.ts` proves the card repro failing before and passing after (the narrow window's ⋯ menu, the
+desktop's Ctrl+`, and a split pane's Ctrl+`), with the coordinator's toggle still tested.

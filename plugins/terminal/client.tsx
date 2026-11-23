@@ -297,8 +297,8 @@ function toChat(chat: string) {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`textarea[name=message][data-chat="${CSS.escape(chat)}"]`)?.focus())
 }
 
-/** A task's chat flipped to its terminal (a card's Open terminal, a restored screen): the way out, first in its ⋯
- *  menu. Its own Terminal stays an item of the side panel; this row only closes the chat body's terminal view. */
+/** A task's chat flipped to its terminal by a card's Open terminal: the way out, first in its ⋯ menu. Its own
+ *  Terminal stays an item of the side panel; this row only closes the chat body's terminal view. */
 function BackToChat({ chatKey }: { chatKey: string }) {
   const ui = useUI()
   if (ui.term !== chatKey) return null
@@ -331,10 +331,12 @@ export default definePlugin({
         const focused = (e.target as HTMLElement | null)?.closest?.<HTMLElement>(SCREEN)?.dataset.termScreen
         if (e.ctrlKey && e.key === '`') {
           e.preventDefault()
-          // a task's chat body showing its terminal: back to that chat, not the coordinator's terminal
-          if (task && ui.term === task) {
+          // a task chat body showing its terminal: back to that chat, not the coordinator's terminal. It may be a
+          // pane's task, not the open task on the right, so look through every task's chat key
+          const term = ui.term
+          if (term && snap.tasks.some((t) => t.agent?.chat === term)) {
             setUI({ term: null, arts: null, kb: true })
-            toChat(task)
+            toChat(term)
             return true
           }
           // a task's: its panel opens on the terminal, which takes the focus; pressed in it, back to the chat

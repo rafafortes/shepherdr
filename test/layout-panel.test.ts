@@ -378,6 +378,39 @@ describe.skipIf(!browser)("a task's side panel", () => {
     }
   }, 30_000)
 
+  test('Ctrl+` takes a pane’s task chat back from its terminal in split view', async () => {
+    const b = browser
+    const s = server
+    if (!b || !s) return
+    const chat = world.chats['GTM-14/Agent']
+    const page = await b.newPage({ viewport: { width: 1920, height: 900 } })
+    try {
+      chat.messages.push(terminalCard)
+      await page.goto(`http://127.0.0.1:${s.port}/?place=vm-str/home`)
+      await page
+        .getByRole('region', { name: 'Tasks', exact: true })
+        .getByRole('button', { name: /GTM-14/ })
+        .first()
+        .click({ modifiers: ['Control'] })
+      const pane = page.locator('[data-pane="1"]')
+      await pane.getByRole('textbox', { name: /Message GTM-14/ }).waitFor()
+      await pane.locator('[data-whole="term-way-back"] [data-card]').getByRole('button', { name: 'Open terminal', exact: true }).click()
+      await pane.locator('[role=log][aria-label=Terminal]').waitFor()
+      // no task is open on the right here: the key must find the pane's chat, not ui.task
+      await page.keyboard.press('Control+`')
+      const box = pane.getByRole('textbox', { name: /Message GTM-14/ })
+      await box.waitFor()
+      expect(await page.locator('[role=log][aria-label=Terminal]').count()).toBe(0)
+      // and the terminal is really closed: typing goes into this chat, not another chat's terminal
+      await box.focus()
+      await page.keyboard.type('x')
+      expect(await box.inputValue()).toBe('x')
+    } finally {
+      chat.messages = chat.messages.filter((m) => m.id !== terminalCard.id)
+      await page.close()
+    }
+  }, 30_000)
+
   test('the coordinator keeps its terminal menu row and Ctrl+` toggle', async () => {
     const b = browser
     const s = server
