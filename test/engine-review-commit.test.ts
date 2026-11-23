@@ -64,6 +64,23 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(t.reported).toBe(true)
   })
 
+  test('ready refuses a worktree switched to another branch, and takes it once back on the task branch', async () => {
+    const w = world()
+    const { t } = await withCommit(w, 'foreign-ready')
+    const branch = t.branch!
+    sh('git switch -q -c other', t.worktree!)
+    writeFileSync(join(t.worktree!, 'other.txt'), 'other\n')
+    sh('git add -A && git commit -qm other', t.worktree!)
+    const failed = await w.engine.done(t.id, 'done', 'facts').catch((e: Error) => e.message)
+    expect(failed).toContain('HEAD is on other')
+    expect(failed).toContain(branch)
+    expect(failed).toContain('git switch')
+    expect(t.reported).toBeUndefined()
+    sh(`git switch -q ${branch}`, t.worktree!)
+    await round(w, t)
+    expect(await w.engine.done(t.id, 'done', 'facts')).toMatchObject({ state: 'ready' })
+  })
+
   test("--done still records the commit when the round's lease is gone (a restart, REVIEW_TIMEOUT)", async () => {
     const w = world()
     const { t } = await withCommit(w, 'late-done')
