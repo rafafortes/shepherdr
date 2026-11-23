@@ -25,7 +25,10 @@ const effortOf = (h: Harness) => (!h.effort || h.effort === 'default' ? '' : (ef
 const flagsOf = (h: Harness) => h.flags ?? []
 const sameFlags = (a: Harness, b: Harness) => JSON.stringify(flagsOf(a)) === JSON.stringify(flagsOf(b))
 
-export const sameHarness = (a: Harness, b: Harness) => a.kind === b.kind && modelOf(a) === modelOf(b) && effortOf(a) === effortOf(b) && sameFlags(a, b)
+/** flags are deliberately NOT part of this comparison: it is also used to decide whether an agent is back on its
+ *  primary after a cap or a cut-off, and a space's flag row must not make that look like a different worker. Only the
+ *  restart hint compares flags, where a change of them is exactly what is being asked about. */
+export const sameHarness = (a: Harness, b: Harness) => a.kind === b.kind && modelOf(a) === modelOf(b) && effortOf(a) === effortOf(b)
 
 /** a harness as Shepherdr passes it: a model by its id, a level its model takes; nothing for the CLI's own */
 export function fitHarness(h: Harness): Harness {
@@ -62,7 +65,8 @@ export function chainWords(h: Harness) {
  * add --agent, the + menu's model) is no change of Settings.
  */
 export function restartHint(on: Harness, set: Harness | undefined, want: Harness): RestartHint | undefined {
-  if (sameHarness(on, want) || (set && sameHarness(set, want))) return undefined
+  if (sameHarness(on, want) && (sameFlags(on, want) || (set && sameFlags(set, want)))) return undefined
+  if (set && sameHarness(set, want) && sameFlags(set, want)) return undefined
   if (on.kind !== want.kind) return { on: name(on.kind), want: name(want.kind) }
   const label = (h: Harness) => (modelOf(h) ? (findModel(h.kind, modelOf(h))?.label ?? modelOf(h)) : `${name(h.kind)}'s default model`)
   if (modelOf(on) !== modelOf(want)) return { on: label(on), want: label(want) }

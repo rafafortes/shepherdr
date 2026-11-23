@@ -43,8 +43,8 @@
     `--help` is checked) and none Shepherdr sets itself (model, effort, permissions, session, settings, print mode);
     a refusal says why. A task can set its own with `task add --flags="--advisor opus"` or `--set flags=...`, validated
     against the CLI that task runs. "none" means no extra flags, an empty value inherits the level above. Flags belong
-    to one CLI: after a switch to another, the old CLI's flags are dropped and the chat says so. The brief's Agent line
-    names the flags that will be passed.
+    to one CLI: after a switch to another, the old CLI's flags are dropped and the server log says so. The brief's
+    Agent line names the flags that will be passed.
 - **Coordinators** (`coordinator.agent`, `coordinator.model`, `coordinator.effort`): the CLI, model and effort a new
   coordinator starts with, set and inherited the same way as the tasks' three. Its backup's own pair sits under
   Coordinators in [Backup agents](#backup-agents).

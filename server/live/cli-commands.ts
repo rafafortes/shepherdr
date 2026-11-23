@@ -864,7 +864,7 @@ export class CliCommands {
         const sets = (op === 'add' || op === 'edit') && (p.flags.has('set') || p.opts.set?.length) ? automationSet(p, ctx.local) : undefined
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') || one(p, 'flags') ? harnessOf(p, this.settings) : undefined
         if (agent) {
-          const flags = flagsOf(p, this.settings)
+          const flags = flagsOf(p, this.settings, pr?.name)
           if (flags !== undefined) agent.flags = flags
         }
         const brief = one(p, 'brief') ?? one(p, 'desc')
@@ -1316,8 +1316,7 @@ export class CliCommands {
       const after = p.opts.after ?? []
       const agent = harnessOf(p, this.settings)
       // --flags (or --set flags=) is checked against the CLI this task will actually run, once, here
-      const flags = flagsOf(p, this.settings)
-      if (flags !== undefined) agent.flags = flags
+      const flags = flagsOf(p, this.settings, pr.name)
       const reviewer = reviewerOf(p, this.settings)
       const t = this.engine.add({
         project: pr.name,
@@ -1331,6 +1330,7 @@ export class CliCommands {
         at: when,
         agent,
         reviewer,
+        flags,
         set,
         priority: p.flags.has('priority'),
       })
@@ -1594,14 +1594,16 @@ function automationSet(p: Parsed, local?: boolean): Record<string, string> {
 /** task add's --flags (or --set flags=): extra flags for this one task's agent CLI. Validated here, at set time,
  *  against the CLI it will run (an explicit --agent, else the space's task agent). "none" means no flags; an empty
  *  value or "default" leaves the space's Settings row to apply. */
-function flagsOf(p: Parsed, settings: Settings): string[] | undefined {
+function flagsOf(p: Parsed, settings: Settings, space?: string): string[] | undefined {
   const given = one(p, 'flags')
   if (given === undefined) return undefined
   const v = given.trim()
   if (!v || /^default$/i.test(v)) return undefined
   if (/^none$/i.test(v)) return []
   const cli = one(p, 'agent')
-  const kind = cli === undefined ? settings.harness('task').kind : (kindOf(cli) ?? cli)
+  // validate against the CLI this task will really run: its own --agent, else the TARGET space's task agent. A
+  // machine-level lookup would check a Claude flag for a space that runs Codex (SHEP-266)
+  const kind = cli === undefined ? settings.harness('task', space).kind : (kindOf(cli) ?? cli)
   try {
     return parseFlags(kind, v)
   } catch (e) {

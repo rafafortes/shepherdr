@@ -49,7 +49,7 @@ import { Agents, hidden, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
 import { launchesAgents } from './launch-policy.ts'
-import { cleanFlags } from './flags.ts'
+import { cleanFlags, flagWords } from './flags.ts'
 import { findModel, modelsOf } from './models.ts'
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { parseArgs, type Parsed } from './args.ts'
@@ -2136,6 +2136,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // extra flags for this CLI only (SHEP-266): a switch to another CLI has none of the old one's, and a hand-edited
     // setting can't break the launch. The record's own flags survive a resume and a crash's recovery.
     const flags = cleanFlags(ownKind, h?.flags ?? (rec && rec.kind === ownKind ? rec.flags : undefined) ?? (set.kind === ownKind ? set.flags : undefined) ?? []).keep
+    if (rec && rec.kind !== ownKind && rec.flags?.length)
+      console.info(`shepherdr: ${id} switched its coordinator from ${rec.kind} to ${ownKind}: its extra flags (${flagWords(rec.flags)}) were for ${rec.kind} and were dropped.`)
     const spec: Spec = {
       // Explicit, never undefined: a coordinator runs with the same access a task does on every CLI today, so no CLI
       // silently reads a missing value as 'full' and no CLI starts asking for approvals by accident. Whether it should

@@ -14,6 +14,8 @@
  * it dropped so a caller can tell the person a flag belonged to another CLI.
  */
 
+import { statSync } from 'node:fs'
+
 export type Kind = 'claude' | 'codex' | 'pi' | 'opencode' | 'agy'
 export const KINDS: readonly Kind[] = ['claude', 'codex', 'pi', 'opencode', 'agy']
 export const NAMES: Record<Kind, string> = {
@@ -53,11 +55,8 @@ const CLAUDE: Table = {
     '--allow-dangerously-skip-permissions': 'none',
     '--allowedTools': 'many',
     '--allowed-tools': 'many',
-    '--append-system-prompt': 'one',
-    '--append-system-prompt-file': 'one',
     '--autocompact': 'one',
     '--ax-screen-reader': 'none',
-    '--bare': 'none',
     '--betas': 'many',
     '--brief': 'none',
     '--channels': 'many',
@@ -80,8 +79,6 @@ const CLAUDE: Table = {
     '--remote-control': 'opt',
     '--rc': 'opt',
     '--remote-control-session-name-prefix': 'one',
-    '--restricted': 'none',
-    '--safe-mode': 'none',
     '--setting-sources': 'one',
     '--strict-mcp-config': 'none',
     '--system-prompt-snapshot': 'one',
@@ -103,6 +100,9 @@ const CLAUDE: Table = {
     '--model': SET('the model'),
     '--effort': SET('the effort'),
     '--settings': SET('the hooks settings file (yours stay untouched)'),
+    '--bare': 'it skips the hooks Shepherdr uses to know when its agents work and need you',
+    '--safe-mode': 'it disables the hooks and customizations Shepherdr depends on',
+    '--restricted': 'it removes Bash and the other code-running tools a task agent needs',
     '--append-system-prompt': SET('the task instructions'),
     '--append-system-prompt-file': SET('the task instructions'),
     '--system-prompt': SET('the system prompt'),
@@ -336,27 +336,39 @@ const TABLES: Record<Kind, Table> = { claude: CLAUDE, codex: CODEX, pi: PI, open
 
 const isKind = (k: string): k is Kind => Object.hasOwn(TABLES, k)
 
-/** a cached `--help` per CLI. A test can set one with `setHelp(kind, text)` so no binary is needed. */
-const helps = new Map<string, string>()
+/** a cached `--help` per CLI, keyed to the binary's mtime so an update's new flags are seen without a restart.
+ *  A test can set one with `setHelp(kind, text)` so no binary is needed. */
+const helps = new Map<string, { text: string; at: number }>()
 
 /** install a help page for a CLI (tests, or a caller that already read it); `undefined` clears the cache. */
 export function setHelp(kind: string, text?: string) {
   if (text === undefined) helps.delete(kind)
-  else helps.set(kind, text)
+  else helps.set(kind, { text, at: -1 })
 }
 
-/** read a CLI's --help once, quietly, with a ceiling. A CLI that is missing or says nothing yields ''. */
+/** the installed binary's mtime, or 0 when there is none (a CLI not installed here keeps its documented table) */
+function binaryAt(kind: Kind): number {
+  try {
+    return statSync(Bun.which(TABLES[kind].bin) ?? TABLES[kind].bin).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/** read a CLI's --help quietly, with a short ceiling on the server's event loop. A failure is never cached, so a CLI
+ *  that was signed out or busy can be read again; an empty page yields '' and the tables still stand. */
 function helpOf(kind: Kind): string {
+  const at = binaryAt(kind)
   const hit = helps.get(kind)
-  if (hit !== undefined) return hit
+  if (hit && (hit.at === -1 || (hit.text && hit.at === at))) return hit.text
   let text = ''
   try {
-    const p = Bun.spawnSync([TABLES[kind].bin, '--help'], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 10_000 })
+    const p = Bun.spawnSync([TABLES[kind].bin, '--help'], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 3_000 })
     text = new TextDecoder().decode(p.stdout)
   } catch {
     // a CLI that isn't installed, or that can't be started here: its table still stands
   }
-  helps.set(kind, text)
+  if (text) helps.set(kind, { text, at })
   return text
 }
 
@@ -435,11 +447,14 @@ export function parseFlags(kind: string, given: string | string[], help?: string
     }
     let [name, eq, val] = [w.split('=')[0], w.includes('='), w.slice(w.indexOf('=') + 1)]
     if (!name.startsWith('--')) {
-      if (name.length > 2 && !eq) {
+      // a whole short name wins first: pi's -ne/-nbt/-na are one flag each, not -n with a value
+      const whole = table.short[name]
+      if (whole) name = whole
+      else if (name.length > 2 && !eq) {
         val = name.slice(2)
-        name = name.slice(0, 2)
+        name = table.short[name.slice(0, 2)] ?? name.slice(0, 2)
+        eq = true // an attached value (-nfoo) is a value, not the next word
       }
-      name = table.short[name] ?? name
     }
     const why = table.refused[name]
     if (why) throw new Error(`${name} can't be an extra flag: ${why}`)
@@ -511,25 +526,4 @@ export function cleanFlagsLine(kind: string, line: string): string[] {
 /** the flags as one shell line, quoted only where a shell needs it: for the brief's Agent line. */
 export function flagWords(flags: string[]): string {
   return (flags ?? []).map((w) => (/^[\w@%+=:,./-]+$/.test(String(w)) ? String(w) : `'${String(w).replace(/'/g, "'\\''")}'`)).join(' ')
-}
-
-/** the extra flags already in an agent's argv (those parseFlags keeps as written), for a chat's model button and for
- *  a restart. Shepherdr's own flags are all in the refused table, so they never come back as extra. */
-export function extraFlags(kind: string, argv: string[]): string[] {
-  if (!isKind(kind)) return []
-  const table = TABLES[kind]
-  const out: string[] = []
-  for (const a of argv ?? []) {
-    const w = String(a)
-    if (!w.startsWith('--')) continue
-    const name = w.split('=')[0]
-    if (!w.includes('=') && table.allowed[name] !== 'none') continue
-    if (Object.hasOwn(table.refused, name)) continue
-    if (kind === 'codex' && name === '--config') {
-      const key = (w.split('=')[1] ?? '').split(/[.=]/)[0]
-      if (Object.hasOwn(table.configKeys ?? {}, key)) continue
-    }
-    if (Object.hasOwn(table.allowed, name) || /^--[\w-]+=\S/.test(w)) out.push(w)
-  }
-  return out
 }

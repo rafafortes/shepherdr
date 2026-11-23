@@ -1301,7 +1301,9 @@ export class Settings {
     const kind = this.kindOf(role, l)!
     // no flags slot on a harness that has none: an older record, a test's exact object and a restart's words stay as
     // they were, while a space's flag row still reaches the launch through the one field it fills.
-    const flags = role === 'reviewer' ? [] : this.flagsAt(kind, l)
+    // these rows are for task agents only: a space's coordinator does not inherit them, and the brief's Agent line
+    // must not claim flags a coordinator never receives (SHEP-266)
+    const flags = role === 'task' ? this.flagsAt(kind, l) : []
     return { kind, ...this.modelAt(role, kind, l), ...(flags.length ? { flags } : {}) }
   }
 

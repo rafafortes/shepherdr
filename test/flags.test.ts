@@ -3,7 +3,7 @@
 // CLIs Shepherdr drives each get their own table and their own cases; the installed --help is injected with setHelp so
 // these tests never need a CLI on PATH (Codex is not installed on this host at all).
 import { afterEach, describe, expect, test } from 'bun:test'
-import { KINDS, cleanFlags, cleanFlagsLine, extraFlags, flagWords, parseFlags, setHelp } from '../server/live/flags.ts'
+import { KINDS, cleanFlags, cleanFlagsLine, flagWords, parseFlags, setHelp } from '../server/live/flags.ts'
 
 afterEach(() => {
   for (const kind of KINDS) setHelp(kind)
@@ -17,6 +17,16 @@ describe('the strict check, one case per CLI', () => {
 
   test('Codex: short aliases, repeated -c keys and image flags are kept whole', () => {
     expect(parseFlags('codex', '-c model_verbosity=high -i a.png --search')).toEqual(['--config=model_verbosity=high', '--image=a.png', '--search'])
+  })
+
+  test('a backslash keeps a space inside one value', () => {
+    expect(parseFlags('claude', '--name=my\\ task')).toEqual(['--name=my task'])
+  })
+
+  test('a whole short name wins over a split, and an attached value stays with its flag', () => {
+    expect(parseFlags('pi', ['-ne'])).toEqual(['--no-extensions'])
+    expect(parseFlags('pi', ['-nfoo'])).toEqual(['--name=foo'])
+    expect(() => parseFlags('pi', ['-na'])).toThrow('trusts a worktree')
   })
 
   test('pi: its own flags, never a model, session or print flag', () => {
@@ -56,6 +66,9 @@ describe('what is refused, and why', () => {
       ['--settings {}', 'hooks settings file'],
       ['--output-format json', 'print mode'],
       ['--worktree', 'own worktree'],
+      ['--bare', 'hooks'],
+      ['--safe-mode', 'hooks'],
+      ['--restricted', 'Bash'],
       ['--advisor', '--advisor needs a value'],
       ['--verbose=1', 'takes no value'],
       ['--no-such-flag', 'has no --no-such-flag flag'],
@@ -115,13 +128,5 @@ describe('launch-time guard, display and recovery', () => {
   test('flagWords quotes only where a shell needs it, for the brief', () => {
     expect(flagWords(['--advisor=opus', '--name=a b'])).toBe("--advisor=opus '--name=a b'")
     expect(flagWords([])).toBe('')
-  })
-
-  test('extraFlags reads back only the extras from an argv, for a chat and a restart', () => {
-    expect(extraFlags('claude', ['--advisor=opus', '--verbose', '--settings', '{}', '--model', 'sonnet', '--resume', 'abc'])).toEqual(['--advisor=opus', '--verbose'])
-    expect(extraFlags('codex', ['--search', '--config=model_verbosity=high', '-m', 'gpt-x', '-c', 'service_tier="fast"'])).toEqual(['--search', '--config=model_verbosity=high'])
-    expect(extraFlags('pi', ['--name=job', '--model', 'x'])).toEqual(['--name=job'])
-    expect(extraFlags('opencode', ['--log-level=debug', '--session', 'abc'])).toEqual(['--log-level=debug'])
-    expect(extraFlags('agy', ['--add-dir=/a', '--model', 'x'])).toEqual(['--add-dir=/a'])
   })
 })

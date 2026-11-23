@@ -1,6 +1,6 @@
 // The whole flow of extra CLI flags (upstream SHEP-266): the Settings row per CLI, --flags and --set flags= on task
 // add, validated against the CLI that will run, the brief's Agent line, and a space's default a task can override.
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
@@ -13,7 +13,7 @@ delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { CATALOG, refuse, Settings, setForTask } = await import('../server/live/settings.ts')
 const { settingsBlock } = await import('../server/live/prompts.ts')
-const { restartHint } = await import('../server/live/restart.ts')
+const { restartHint, sameHarness } = await import('../server/live/restart.ts')
 
 /** a value a test needs: fail with a name rather than tell TypeScript to trust a missing one */
 function need<T>(x: T | undefined, why: string): T {
@@ -91,6 +91,15 @@ describe('the brief and the restart hint name the flags', () => {
     expect(brief).toContain('Agent: Claude Code (model sonnet, high effort, extra flags --advisor=opus)')
   })
 
+  test('a flags row does not change which worker an agent is on', () => {
+    src.settings.set('tasks.claude_flags', '--advisor opus', { space: REPO_NAME })
+    const h = src.settings.harness('task', REPO_NAME)
+    expect(sameHarness({ kind: h.kind }, h)).toBe(true)
+    // coordinators never take a task's flags: their harness has no flags slot at all
+    expect(src.settings.harness('coordinator', REPO_NAME).flags).toBeUndefined()
+    src.settings.set('tasks.claude_flags', null, { space: REPO_NAME })
+  })
+
   test('a change of flags is a restart change, not a no-op', () => {
     const on = { kind: 'claude', flags: ['--advisor=opus'] }
     const want = { kind: 'claude', flags: ['--verbose'] }
@@ -120,6 +129,84 @@ describe('task add validates against the CLI it runs', () => {
     expect(b.out).toContain("can't be an extra flag")
     const c = await add('--agent', 'pi', '--set', 'flags=--thinking high')
     expect(c.out).toContain('Shepherdr sets the effort')
+  })
+
+  test('a switch takes the other CLI’s flags, never the old CLI’s', async () => {
+    src.settings.set('tasks.claude_flags', '--advisor opus', { space: REPO_NAME })
+    src.settings.set('tasks.codex_flags', '--search', { space: REPO_NAME })
+    const codex = await add('--agent', 'codex')
+    expect(need(codex.t, 'the Codex task').agent?.flags).toEqual(['--search'])
+    expect(codex.t?.desc).not.toContain('--advisor=opus')
+    src.settings.set('tasks.claude_flags', null, { space: REPO_NAME })
+    src.settings.set('tasks.codex_flags', null, { space: REPO_NAME })
+  })
+
+  test('a flag is validated against the space’s CLI, not the machine’s', async () => {
+    src.settings.set('task.agent', 'codex', { space: REPO_NAME })
+    const good = await add('--flags=--search')
+    expect(need(good.t, 'the Space Codex task').agent?.kind).toBe('codex')
+    expect(good.t?.agent?.flags).toEqual(['--search'])
+    const bad = await add('--flags=--advisor opus')
+    expect(bad.out).toContain('has no --advisor flag')
+    src.settings.set('task.agent', null, { space: REPO_NAME })
+  })
+
+  test('a restart on cleared settings clears the flags that were not the task’s own', async () => {
+    src.settings.set('tasks.claude_flags', '--advisor opus', { space: REPO_NAME })
+    const { t } = await add('--agent', 'claude')
+    const id = need(t, 'the task').id
+    const key = `${id}/Agent`
+    // no herdr here: put the record a real launch would have left back, to see what the restart passes on
+    src.agents.restore(key, {
+      key,
+      name: `shep-${id.toLowerCase()}`,
+      kind: 'claude',
+      cwd: t?.worktree ?? dir,
+      workspace: 'flags-flow',
+      flags: t?.agent?.flags,
+      logs: [],
+      started: Date.now(),
+    })
+    expect(src.agents.record(key)?.flags).toEqual(['--advisor=opus'])
+    src.settings.set('tasks.claude_flags', null, { space: REPO_NAME })
+    // a restart's launch: the sheet's harness has no flags, so a cleared Settings row must clear the record's too.
+    // herdr is not here, so the start itself fails; the record's flags are set before that, which is what this checks.
+    try {
+      await (src.engine as unknown as { launch: (t: unknown, first?: unknown, made?: unknown, as?: unknown) => Promise<unknown> }).launch(t, undefined, { path: t?.worktree }, { kind: 'claude' })
+    } catch {
+      // the start has no pane here; the record's flags were set before that
+    }
+    expect(src.agents.record(key)?.flags).toEqual([])
+  })
+
+  test('a switch to another CLI drops the old flags and says so', async () => {
+    const { t } = await add('--agent', 'claude', '--flags=--advisor opus')
+    const id = need(t, 'the task').id
+    const key = `${id}/Agent`
+    // let the add's own (failing) start settle before putting the record back, or it races with this launch
+    await Bun.sleep(300)
+    src.agents.restore(key, {
+      key,
+      name: `shep-${id.toLowerCase()}`,
+      kind: 'claude',
+      cwd: t?.worktree ?? dir,
+      workspace: 'flags-flow',
+      flags: ['--advisor=opus'],
+      logs: [],
+      started: Date.now(),
+    })
+    const info = spyOn(console, 'info').mockImplementation(() => undefined)
+    let calls: string[] = []
+    try {
+      await (src.engine as unknown as { launch: (t: unknown, first?: unknown, made?: unknown, as?: unknown) => Promise<unknown> }).launch(t, undefined, { path: t?.worktree }, { kind: 'codex' })
+    } catch {
+      // the start has no pane here
+    } finally {
+      calls = info.mock.calls.map((c) => String(c[0]))
+      info.mockRestore()
+    }
+    expect(src.agents.record(key)?.flags).toEqual([])
+    expect(calls.some((c) => c.includes('dropped') && c.includes('--advisor=opus'))).toBe(true)
   })
 
   test('a space default reaches a task, its own flags replace it, and none clears it', async () => {
