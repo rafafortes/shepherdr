@@ -23,17 +23,19 @@ own `v2.0.<n>` tags (Releases, below).
 
 **Last reviewed** (update these three lines at the end of every pass):
 
-- upstream `main`: `abd5a0f1` "SHEP-236: Release Shepherdr 3.1.35", 2026-11-15 12:19 +0100
-- upstream tag `v3.1.35` (`abd5a0f1`, 2026-11-15), the newest release
+- upstream `main`: `d2d40fb6` "Release Shepherdr 3.2.3 (#1358)", 2026-11-23 12:58 +0100 — the tip this pass read;
+  upstream has since moved on (`49409a3b` at this writing), and those commits are left for the next pass
+- upstream tag `v3.2.3` (`d2d40fb6`, 2026-11-23), the newest published release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
-Reviewed on 2026-11-16, the fifth pass: the 100 commits from `fc17865a` (where the last pass stopped) to `main`'s tip
-`abd5a0f1`, behind the seven tags of 3.1.29 to 3.1.35 (2026-11-09 15:29 to 2026-11-15 11:19 UTC) — 71 improvements,
-7 release commits and 22 `AGENTS.md` notes; every upstream commit after `v2.0.0` is weighed in
-[the ledger](upstream-ledger.md), the new ones in its 3.1.29 to 3.1.35 section, of which six ideas come back as worth a
-task (four ports, one of them later, and two verify-first) and the rest as skips for the reasons their rows give. The
-pass before it read 3.1.15 to 3.1.28 (2026-11-09), the one before that 3.1.11 to 3.1.14 (2026-11-06), the one before
-that 3.1.4 to 3.1.10, and the first the 60 commits after `dc1b6782`.
+Reviewed on 2026-11-23, the sixth pass: the 160 commits from `abd5a0f1` (where the last pass stopped, at 3.1.35) to
+`main`'s tip `d2d40fb6`, behind the tags of 3.1.36 to 3.2.3 (2026-11-16 19:44 to 2026-11-23 11:58 UTC) — 113
+improvements, 14 release commits and 33 `AGENTS.md` notes; every upstream commit after
+`v2.0.0` is weighed in [the ledger](upstream-ledger.md), the new ones in its 3.1.36 to 3.2.3 section, of which six
+ideas come back as worth a task (all ports, one verify-first) and the rest as skips for the reasons their rows give.
+The 3.2 rewrite is a skip on all four criteria. The pass before it read 3.1.29 to 3.1.35 (2026-11-16), the one before
+that 3.1.15 to 3.1.28 (2026-11-09), then 3.1.11 to 3.1.14 (2026-11-06), then 3.1.4 to 3.1.10, and the first the 60
+commits after `dc1b6782`.
 
 ## How we notice a new upstream release
 
