@@ -3,7 +3,10 @@
 // CLIs Shepherdr drives each get their own table and their own cases; the installed --help is injected with setHelp so
 // these tests never need a CLI on PATH (Codex is not installed on this host at all).
 import { afterEach, describe, expect, test } from 'bun:test'
+import { chmodSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { KINDS, cleanFlags, cleanFlagsLine, flagWords, parseFlags, setHelp } from '../server/live/flags.ts'
+import { tmp } from './tmp.ts'
 
 afterEach(() => {
   for (const kind of KINDS) setHelp(kind)
@@ -48,6 +51,22 @@ describe('the strict check, one case per CLI', () => {
     expect(parseFlags('pi', '--future-switch')).toEqual(['--future-switch'])
   })
 
+  test('a CLI that prints --help to stderr still contributes its newer flags', () => {
+    const bin = tmp('flags-stderr-bin')
+    const script = join(bin, 'agy')
+    writeFileSync(script, '#!/bin/sh\nprintf "  --future-thing <value>   A new flag\\n" >&2\n')
+    chmodSync(script, 0o755)
+    const path = process.env.PATH
+    process.env.PATH = `${bin}:${path ?? ''}`
+    setHelp('agy')
+    try {
+      expect(parseFlags('agy', '--future-thing x')).toEqual(['--future-thing=x'])
+    } finally {
+      process.env.PATH = path
+      setHelp('agy')
+    }
+  })
+
   test('a CLI that is missing or silent still uses its table', () => {
     setHelp('codex', '')
     expect(parseFlags('codex', '--search')).toEqual(['--search'])
@@ -83,6 +102,7 @@ describe('what is refused, and why', () => {
       ['-m o3', 'Shepherdr sets the model'],
       ['-c model_reasoning_effort=high', 'use its own setting or flag instead'],
       ['-c service_tier=fast', 'speed from Settings'],
+      ['-c shell_environment_policy.inherit=none', 'tool environment'],
       ['--full-auto', 'sandbox and approvals from Settings'],
       ['--advisor opus', 'Codex has no --advisor flag'],
       ['--no-daemon', 'Shepherdr passes it already'],
@@ -92,7 +112,8 @@ describe('what is refused, and why', () => {
   })
 
   test('pi: model, thinking, session, permissions and secrets', () => {
-    for (const words of ['--model x', '--thinking high', '--session abc', '--approve', '-p', '--api-key SECRET']) expect(() => parseFlags('pi', words)).toThrow()
+    for (const words of ['--model x', '--thinking high', '--session abc', '--session-dir /x', '--approve', '-p', '--api-key SECRET']) expect(() => parseFlags('pi', words)).toThrow()
+    expect(() => parseFlags('pi', '--session-dir /x')).toThrow('own folder')
   })
 
   test('OpenCode: session, server, permissions and prompt', () => {

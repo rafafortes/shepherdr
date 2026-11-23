@@ -205,6 +205,7 @@ const CODEX: Table = {
     approval_policy: SET('the sandbox and approvals from Settings'),
     projects: "Shepherdr trusts the task's folder itself",
     hooks: "Shepherdr sets the chat's question card's hook itself",
+    shell_environment_policy: 'Shepherdr sets the tool environment for this launch itself',
   },
 }
 
@@ -213,7 +214,6 @@ const CODEX: Table = {
 const PI: Table = {
   bin: 'pi',
   allowed: {
-    '--session-dir': 'one',
     '--name': 'one',
     '--models': 'one',
     '--no-tools': 'none',
@@ -260,6 +260,7 @@ const PI: Table = {
     '--append-system-prompt': SET('the task instructions'),
     '--thinking': SET('the effort'),
     '--mode': "it is pi's output mode, not the agent's mode",
+    '--session-dir': "Shepherdr reads and resumes the task's session from pi's own folder",
     '--session': "Shepherdr resumes the task's own session itself",
     '--session-id': "Shepherdr resumes the task's own session itself",
     '--resume': "Shepherdr resumes the task's own session itself",
@@ -338,12 +339,14 @@ const isKind = (k: string): k is Kind => Object.hasOwn(TABLES, k)
 
 /** a cached `--help` per CLI, keyed to the binary's mtime so an update's new flags are seen without a restart.
  *  A test can set one with `setHelp(kind, text)` so no binary is needed. */
-const helps = new Map<string, { text: string; at: number }>()
+const helps = new Map<string, { text: string; at: number; read: number }>()
+/** a failed read (a missing, slow or signed-out CLI) is remembered this long, so a hot path doesn't spawn it per word */
+const HELP_RETRY_MS = 60_000
 
 /** install a help page for a CLI (tests, or a caller that already read it); `undefined` clears the cache. */
 export function setHelp(kind: string, text?: string) {
   if (text === undefined) helps.delete(kind)
-  else helps.set(kind, { text, at: -1 })
+  else helps.set(kind, { text, at: -1, read: Date.now() })
 }
 
 /** the installed binary's mtime, or 0 when there is none (a CLI not installed here keeps its documented table) */
@@ -360,15 +363,19 @@ function binaryAt(kind: Kind): number {
 function helpOf(kind: Kind): string {
   const at = binaryAt(kind)
   const hit = helps.get(kind)
-  if (hit && (hit.at === -1 || (hit.text && hit.at === at))) return hit.text
+  const now = Date.now()
+  // agy prints --help to stderr, and a CLI that is missing or slow says nothing: remember that briefly too, so one
+  // read per minute (per binary version) is all a hot path pays, not one spawn per flag on every Settings access.
+  if (hit && (hit.at === -1 || (hit.at === at && (hit.text || now - hit.read < HELP_RETRY_MS)))) return hit.text
   let text = ''
   try {
     const p = Bun.spawnSync([TABLES[kind].bin, '--help'], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 3_000 })
-    text = new TextDecoder().decode(p.stdout)
+    const decode = new TextDecoder()
+    text = decode.decode(p.stdout) || decode.decode(p.stderr)
   } catch {
     // a CLI that isn't installed, or that can't be started here: its table still stands
   }
-  if (text) helps.set(kind, { text, at })
+  helps.set(kind, { text, at, read: now })
   return text
 }
 
