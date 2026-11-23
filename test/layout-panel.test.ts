@@ -301,6 +301,138 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.close()
   }, 30_000)
 
+  /** a card's Open terminal in a task's chat: how ui.term came to hold a task's chat key */
+  const terminalCard = {
+    id: 'term-way-back',
+    who: 'agent' as const,
+    at: Date.now(),
+    question: {
+      id: 'menu:term-way-back',
+      title: 'The terminal is waiting for you',
+      screen: 'A CLI asks for your input',
+      terminal: true,
+      noNote: true,
+      kind: 'Form' as const,
+      choices: [],
+      to: 'GTM-14 agent',
+    },
+  }
+  const openTerminalCard = (page: Page) => page.locator('[data-whole="term-way-back"] [data-card]').getByRole('button', { name: 'Open terminal', exact: true })
+
+  test('a task chat flipped to its terminal has a way back in its ⋯ menu (narrow window)', async () => {
+    const b = browser
+    if (!b) return
+    const chat = world.chats['GTM-14/Agent']
+    const page = await b.newPage({ viewport: { width: 500, height: 900 } })
+    try {
+      chat.messages.push(terminalCard)
+      await page.goto(task('GTM-14'))
+      const open = openTerminalCard(page)
+      await open.waitFor()
+      // the card's button flips the task's chat into its terminal: this is how a task chat gets stuck
+      await open.click()
+      const terminal = page.locator('[role=log][aria-label=Terminal]')
+      await terminal.waitFor()
+      expect(await page.getByRole('textbox', { name: /Message GTM-14/ }).count()).toBe(0)
+      // but its ⋯ menu now leads back, first of its rows
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      const menu = page.getByRole('menu', { name: 'More' })
+      expect((await menu.getByRole('menuitem').allTextContents())[0]).toBe('Back to the chat')
+      await menu.getByRole('menuitem', { name: 'Back to the chat' }).click()
+      await page.getByRole('textbox', { name: /Message GTM-14/ }).waitFor()
+      expect(await terminal.count()).toBe(0)
+    } finally {
+      chat.messages = chat.messages.filter((m) => m.id !== terminalCard.id)
+      await page.close()
+    }
+  }, 30_000)
+
+  test('Ctrl+` takes a task chat flipped to its terminal back to that chat, not the coordinator’s', async () => {
+    const b = browser
+    if (!b) return
+    const chat = world.chats['GTM-14/Agent']
+    const page = await b.newPage({ viewport: { width: 1600, height: 900 } })
+    try {
+      chat.messages.push(terminalCard)
+      await page.goto(task('GTM-14'))
+      const open = openTerminalCard(page)
+      await open.waitFor()
+      await open.click()
+      const terminal = page.locator('[role=log][aria-label=Terminal]')
+      await terminal.waitFor()
+      // both ways back are there on a desktop: the menu row and its shortcut
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      const menu = page.getByRole('menu', { name: 'More' })
+      const back = menu.getByRole('menuitem', { name: 'Back to the chat' })
+      await back.waitFor()
+      expect(await back.textContent()).toContain('Ctrl')
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.keyboard.press('Control+`')
+      await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label')?.startsWith('Message GTM-14'))
+      expect(await terminal.count()).toBe(0)
+      // the coordinator's own terminal was not opened in its place
+      expect(await page.getByRole('button', { name: 'Menu, terminal open' }).count()).toBe(0)
+    } finally {
+      chat.messages = chat.messages.filter((m) => m.id !== terminalCard.id)
+      await page.close()
+    }
+  }, 30_000)
+
+  test('Ctrl+` takes a pane’s task chat back from its terminal in split view', async () => {
+    const b = browser
+    const s = server
+    if (!b || !s) return
+    const chat = world.chats['GTM-14/Agent']
+    const page = await b.newPage({ viewport: { width: 1920, height: 900 } })
+    try {
+      chat.messages.push(terminalCard)
+      await page.goto(`http://127.0.0.1:${s.port}/?place=vm-str/home`)
+      await page
+        .getByRole('region', { name: 'Tasks', exact: true })
+        .getByRole('button', { name: /GTM-14/ })
+        .first()
+        .click({ modifiers: ['Control'] })
+      const pane = page.locator('[data-pane="1"]')
+      await pane.getByRole('textbox', { name: /Message GTM-14/ }).waitFor()
+      await pane.locator('[data-whole="term-way-back"] [data-card]').getByRole('button', { name: 'Open terminal', exact: true }).click()
+      await pane.locator('[role=log][aria-label=Terminal]').waitFor()
+      // no task is open on the right here: the key must find the pane's chat, not ui.task
+      await page.keyboard.press('Control+`')
+      const box = pane.getByRole('textbox', { name: /Message GTM-14/ })
+      await box.waitFor()
+      expect(await page.locator('[role=log][aria-label=Terminal]').count()).toBe(0)
+      // and the terminal is really closed: typing goes into this chat, not another chat's terminal
+      await box.focus()
+      await page.keyboard.type('x')
+      expect(await box.inputValue()).toBe('x')
+    } finally {
+      chat.messages = chat.messages.filter((m) => m.id !== terminalCard.id)
+      await page.close()
+    }
+  }, 30_000)
+
+  test('the coordinator keeps its terminal menu row and Ctrl+` toggle', async () => {
+    const b = browser
+    const s = server
+    if (!b || !s) return
+    const page = await b.newPage({ viewport: { width: 1600, height: 900 } })
+    await page.goto(`http://127.0.0.1:${s.port}/?place=p:vm-str:gtm`)
+    await page.getByRole('textbox', { name: /Message gtm/ }).waitFor()
+    await page.getByRole('button', { name: 'Menu', exact: true }).click()
+    await page.getByRole('menu', { name: 'Menu' }).getByRole('menuitem', { name: 'Terminal' }).click()
+    await page.locator('[role=log][aria-label=Terminal]').waitFor()
+    // its own menu says Back to the chat, as before
+    await page.getByRole('button', { name: 'Menu, terminal open' }).click()
+    await page.getByRole('menu', { name: 'Menu' }).getByRole('menuitem', { name: 'Back to the chat' }).click()
+    await page.getByRole('textbox', { name: /Message gtm/ }).waitFor()
+    // Ctrl+` still flips it both ways
+    await page.keyboard.press('Control+`')
+    await page.locator('[role=log][aria-label=Terminal]').waitFor()
+    await page.keyboard.press('Control+`')
+    await page.getByRole('textbox', { name: /Message gtm/ }).waitFor()
+    await page.close()
+  }, 30_000)
+
   /** a terminal's screen: its pane's columns, the font it draws at, its rows, how wide it is and its box */
   const drawn = (page: Page, sel: string) =>
     page.$eval(sel, (el) => {

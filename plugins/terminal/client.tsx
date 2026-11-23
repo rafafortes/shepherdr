@@ -1,13 +1,14 @@
 // Terminal: an agent's live herdr terminal. A task's is an item of its side panel (a tab beside its chat on a desktop,
 // a sheet from the task header's ⋯ on a phone); a coordinator's flips its chat, from the Terminal row of its top-right
-// menu. Ctrl+` opens either on a desktop. Every key goes in, Esc too: in a coordinator's while it shows, in a task's
-// while its screen has the focus (a click puts it there); Ctrl+` goes back to the chat. A phone gets a key row.
+// menu. A card's Open terminal can flip a task's chat too: its ⋯ then has a Back to the chat row. Ctrl+` opens either
+// on a desktop. Every key goes in, Esc too: in a coordinator's while it shows, in a task's while its screen has the
+// focus (a click puts it there); Ctrl+` goes back to the chat. A phone gets a key row.
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shownItem, useStore, useUI } from '@client/kernel.ts'
-import { CTRL, ic, MenuItem, shortcut, Small, TermIcon } from '@client/ui.tsx'
+import { BackIcon, CTRL, ic, MenuItem, shortcut, Small, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { colsOf, fitFont, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
 
@@ -296,10 +297,30 @@ function toChat(chat: string) {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`textarea[name=message][data-chat="${CSS.escape(chat)}"]`)?.focus())
 }
 
+/** A task's chat flipped to its terminal by a card's Open terminal: the way out, first in its ⋯ menu. Its own
+ *  Terminal stays an item of the side panel; this row only closes the chat body's terminal view. */
+function BackToChat({ chatKey }: { chatKey: string }) {
+  const ui = useUI()
+  if (ui.term !== chatKey) return null
+  return (
+    <MenuItem
+      icon={<BackIcon className={ic} />}
+      hint={ui.device === 'desktop' ? shortcut(CTRL, '`') : null}
+      onClick={() => {
+        setUI({ term: null, arts: null, kb: true, menu: false, taskMenu: false })
+        toChat(chatKey)
+      }}
+    >
+      Back to the chat
+    </MenuItem>
+  )
+}
+
 export default definePlugin({
   name: 'terminal',
   setup(reg) {
     reg.placeMenu.push({ order: 60, View: PlaceTerm })
+    reg.agentMenu.push({ order: 40, View: BackToChat })
     reg.taskPanel.push({ id: 'terminal', order: 10, label: 'Terminal', Icon: TermIcon, View: ({ chatKey }) => <TerminalView chatKey={chatKey} panel /> })
     reg.chatBody.push({ when: (ui, key) => ui.term === key, View: TerminalView })
     reg.keys.push({
@@ -310,6 +331,14 @@ export default definePlugin({
         const focused = (e.target as HTMLElement | null)?.closest?.<HTMLElement>(SCREEN)?.dataset.termScreen
         if (e.ctrlKey && e.key === '`') {
           e.preventDefault()
+          // a task chat body showing its terminal: back to that chat, not the coordinator's terminal. It may be a
+          // pane's task, not the open task on the right, so look through every task's chat key
+          const term = ui.term
+          if (term && snap.tasks.some((t) => t.agent?.chat === term)) {
+            setUI({ term: null, arts: null, kb: true })
+            toChat(term)
+            return true
+          }
           // a task's: its panel opens on the terminal, which takes the focus; pressed in it, back to the chat
           if (task && !ui.term) {
             if (focused) return (toChat(task), true)
