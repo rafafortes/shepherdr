@@ -45,7 +45,20 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
       // the headings in order: each role, its Backups sub-heading, then the way back's group
       expect(await headingsOf(settings)).toEqual(['Tasks', 'Backups', 'Coordinators', 'Backups', 'Advisor', 'Backups', 'Back to the primary'])
       // a role's own three rows, then its Backups sub-block with its rows and the add button, last inside the sub-block
-      expect(await rowNames(groupOf(settings, 'Tasks'))).toEqual(['Agent', 'Model', 'Effort', 'Backup', 'Backup model', 'Backup effort', 'Add a backup'])
+      expect(await rowNames(groupOf(settings, 'Tasks'))).toEqual([
+        'Agent',
+        'Model',
+        'Effort',
+        'Claude Code flags',
+        'Codex flags',
+        'pi flags',
+        'OpenCode flags',
+        'Antigravity (agy) flags',
+        'Backup',
+        'Backup model',
+        'Backup effort',
+        'Add a backup',
+      ])
       expect(await rowNames(backupsOf(groupOf(settings, 'Tasks')))).toEqual(['Backup', 'Backup model', 'Backup effort', 'Add a backup'])
       expect(await rowNames(groupOf(settings, 'Coordinators'))).toEqual(['Agent', 'Model', 'Effort', 'Backup', 'Backup model', 'Backup effort', 'Add a backup'])
       // the advisor's Backup is off: no add button yet, and its "Answers for you after" is back at the role's level

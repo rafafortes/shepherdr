@@ -1,5 +1,6 @@
 import { TaskIds } from '../task-ids.ts'
 import { trustWorktree } from '../trust.ts'
+import { cleanFlags, flagWords } from '../flags.ts'
 import { dropped, missing, retrying, startDelays } from '../herdr.ts'
 // The tasks engine. A task is added by a coordinator and at once gets one agent, in its own git worktree and branch
 // from main. The coordinator's brief is the agent's first message and decides everything else (wait for a go, plan
@@ -175,6 +176,9 @@ export interface TaskRec {
   /** task add's --agent, --model or --effort chose `agent`, not Settings: counted apart when Settings' task agent is
    *  applied to the waiting tasks (retuneWaiting); a worker picked later (Start with…) clears it */
   chosen?: true
+  /** the coordinator set this task's own extra flags with --flags/--set flags= (SHEP-266): they survive a restart on
+   *  the same CLI, unlike a space row's, which a restart re-reads from Settings */
+  flagsChosen?: true
   /** the CLI, model and effort its brief says reviews its change: from Settings, or task add's --reviewer flags */
   reviewer?: Harness
   /** task add's --reviewer flags chose `reviewer`, not Settings: counted apart when Settings' reviewer is applied to the
@@ -254,6 +258,8 @@ export interface Scheduled {
   /** the CLI, model and effort the coordinator chose for it when it was added */
   agent?: Partial<Harness>
   reviewer?: Partial<Harness>
+  /** its own extra launch flags, checked at add time against the CLI it will run */
+  flags?: string[]
 }
 
 /**
@@ -303,6 +309,9 @@ export interface Harness {
   kind: string
   model?: string
   effort?: string
+  /** extra launch flags for this CLI, normalized one word each (`--advisor=opus`): a choice is for one CLI, so flags
+   *  for another CLI never travel with it (SHEP-266) */
+  flags?: string[]
 }
 
 /** what retuneWaiting changed (or, a dry run, would change) and what it left alone */
@@ -2499,6 +2508,8 @@ export class Engine extends Emitter<Events> {
     at?: number
     agent?: Partial<Harness>
     reviewer?: Partial<Harness>
+    /** the task's own extra launch flags, already checked against its CLI; undefined: use its space's Settings row */
+    flags?: string[]
     set?: Record<string, string>
     priority?: boolean
   }) {
@@ -2535,9 +2546,11 @@ export class Engine extends Emitter<Events> {
           ...(o.set && Object.keys(o.set).length ? { set: o.set } : {}),
           ...(o.later ? { later: true } : {}),
           ...(Object.keys(o.agent ?? {}).length ? { agent: o.agent } : {}),
+          ...(o.flags !== undefined ? { flags: o.flags } : {}),
           ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: o.reviewer } : {}),
         },
         ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
+        ...(o.flags !== undefined ? { flagsChosen: true as const } : {}),
       }
       this.data.tasks.push(t)
       this.saveNow()
@@ -2548,6 +2561,7 @@ export class Engine extends Emitter<Events> {
     // its project's defaults: its own, else its machine's, else All machines'
     const reviewer = this.harness(o.reviewer, 'reviewer', p.name)
     const agent = this.harness(o.agent, 'task', p.name)
+    if (o.flags !== undefined) agent.flags = o.flags
     const set = o.set && Object.keys(o.set).length ? o.set : undefined
     // each line that differs from Shepherdr's own says who set it: the coordinator's flags, or a level of Settings
     const by = {
@@ -2578,6 +2592,7 @@ export class Engine extends Emitter<Events> {
       rounds: ways.rounds,
       ...(o.priority ? { priority: true as const } : {}),
       ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
+      ...(o.flags !== undefined ? { flagsChosen: true as const } : {}),
       ...(Object.keys(o.reviewer ?? {}).length ? { reviewerChosen: true as const } : {}),
     }
     if (after.length) t.after = after
@@ -2602,7 +2617,16 @@ export class Engine extends Emitter<Events> {
    *  nearest level the other CLI takes (models.ts). */
   private harness(chosen: Partial<Harness> = {}, role: 'task' | 'reviewer' = 'task', project?: string): Harness {
     const h = this.settings.harness(role, project)
-    return { ...h, ...(chosen.kind && chosen.kind !== h.kind ? { model: undefined } : {}), ...chosen }
+    const changed = !!chosen.kind && chosen.kind !== h.kind
+    const out: Harness = { ...h, ...(changed ? { model: undefined } : {}), ...chosen }
+    // a switch to another CLI drops Settings' model AND its flags, and takes that CLI's own row instead: a Claude
+    // flag must never ride onto a task that now runs Codex, even if a restart is still far away (SHEP-266)
+    if (changed) {
+      delete out.flags
+      const other = this.settings.flags(chosen.kind!, project)
+      if (other.length) out.flags = other
+    }
+    return out
   }
 
   /* ---------- scheduled: a task that starts by itself at a time (--at / --in) ---------- */
@@ -2623,6 +2647,7 @@ export class Engine extends Emitter<Events> {
     const p = this.proj(t)
     const reviewer = this.harness(s.reviewer, 'reviewer', p.name)
     const agent = this.harness(s.agent, 'task', p.name)
+    if (s.flags !== undefined) agent.flags = s.flags
     const set = s.set && Object.keys(s.set).length ? s.set : undefined
     const by = {
       ...this.settings.setBy(p.name, set),
@@ -2633,6 +2658,7 @@ export class Engine extends Emitter<Events> {
     t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, fallback: this.settings.reviewerBackups(p.name, set), agent, by })].filter(Boolean).join('\n\n')
     t.agent = agent
     t.chosen = Object.keys(s.agent ?? {}).length ? true : undefined
+    t.flagsChosen = s.flags !== undefined ? true : undefined
     t.reviewer = reviewer
     t.reviewerChosen = Object.keys(s.reviewer ?? {}).length ? true : undefined
     t.waitChecks = ways.waitChecks
@@ -2885,13 +2911,29 @@ export class Engine extends Emitter<Events> {
     // runs (a relaunch after a stop or a recovery), else the task's own --agent/--model/--effort, else Settings. Settings
     // only ever goes in `set` (the restart hint); it can never write kind/model/effort on a relaunch or a recovery, so
     // the record always shows the CLI and model that really run in the pane.
-    const own = as ?? (rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? set))
+    const own = as ?? (rec ? { kind: rec.kind, model: rec.model, effort: rec.effort, flags: rec.flags } : (t.agent ?? set))
+    // extra flags belong to one CLI. A restart is authoritative: a restart from cleared Settings has no flags, so it
+    // clears the old ones; a restart on the same CLI keeps the task's own --flags when the sheet brought none. Without
+    // a restart, the record's flags survive a relaunch, a resume and a crash's recovery. A switch to another CLI has no
+    // flags of its own here. cleanFlags drops what no longer validates.
+    const asked = as === undefined ? undefined : (as.flags ?? (as.kind === t.agent?.kind && t.flagsChosen ? t.agent.flags : undefined) ?? (set.kind === as.kind ? set.flags : undefined) ?? [])
+    const flags = cleanFlags(
+      own.kind,
+      asked ?? (rec && rec.kind === own.kind ? rec.flags : undefined) ?? (t.agent && t.agent.kind === own.kind ? t.agent.flags : undefined) ?? (set.kind === own.kind ? set.flags : undefined) ?? [],
+    ).keep
+    // say so when a switch left the old CLI's flags behind: without this they would just disappear, and the person
+    // could go on believing they still applied (SHEP-266)
+    if (rec && rec.kind !== own.kind && rec.flags?.length)
+      console.info(
+        `shepherdr: ${t.id} switched its agent from ${rec.kind} to ${own.kind}: its extra flags (${flagWords(rec.flags)}) were for ${rec.kind} and were dropped. Set flags for ${own.kind} in Settings or on the task.`,
+      )
     trustWorktree(t.worktree!, own.kind, env)
     const spec: Spec = {
       access: 'full',
       key,
       name: rec?.name ?? `shep-${t.id.toLowerCase()}`,
       kind: own.kind,
+      flags,
       // a restart to 'default' clears a model the record kept; otherwise what it ran is what it runs again
       ...(as ? { model: as.model ?? 'default', effort: as.effort } : { model: own.model, effort: own.effort }),
       // what Settings said when it started on them: a change since is offered as a restart (restart.ts)

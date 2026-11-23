@@ -49,6 +49,7 @@ import { Agents, hidden, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
 import { launchesAgents } from './launch-policy.ts'
+import { cleanFlags, flagWords } from './flags.ts'
 import { findModel, modelsOf } from './models.ts'
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { parseArgs, type Parsed } from './args.ts'
@@ -2131,6 +2132,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (hold && allBlocked(hold)) return this.refuseBlocked(id, hold, named)
     // full: one started by hand (or taken over) hears why; one started again by itself waits for room
     if (hold) return this.refuseFull(id, hold, named, !o.as)
+    const ownKind = h?.kind ?? rec!.kind
+    // extra flags for this CLI only (SHEP-266): a switch to another CLI has none of the old one's, and a hand-edited
+    // setting can't break the launch. The record's own flags survive a resume and a crash's recovery.
+    const flags = cleanFlags(ownKind, h?.flags ?? (rec && rec.kind === ownKind ? rec.flags : undefined) ?? (set.kind === ownKind ? set.flags : undefined) ?? []).keep
+    if (rec && rec.kind !== ownKind && rec.flags?.length)
+      console.info(`shepherdr: ${id} switched its coordinator from ${rec.kind} to ${ownKind}: its extra flags (${flagWords(rec.flags)}) were for ${rec.kind} and were dropped.`)
     const spec: Spec = {
       // Explicit, never undefined: a coordinator runs with the same access a task does on every CLI today, so no CLI
       // silently reads a missing value as 'full' and no CLI starts asking for approvals by accident. Whether it should
@@ -2138,7 +2145,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       access: 'full',
       key: id,
       name: c.name,
-      kind: h?.kind ?? rec!.kind,
+      kind: ownKind,
+      flags,
       // '' is the CLI's own default
       ...(h ? { model: h.model ?? '', effort: h.effort ?? '', set } : {}),
       cwd: c.cwd,
@@ -2409,7 +2417,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const space = t ? this.places.space(t.project)?.name : this.spaceKey(key)
     const want = this.settings.harness(role, space)
     const r = this.agents.record(key)
-    const on: Harness = r ? { kind: r.kind, model: r.model, effort: r.effort } : (t?.agent ?? want)
+    const on: Harness = r ? { kind: r.kind, model: r.model, effort: r.effort, flags: r.flags } : (t?.agent ?? want)
     return { t, role, space, want, on, set: r?.set }
   }
 

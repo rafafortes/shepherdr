@@ -9,6 +9,7 @@ import { orderByPicks } from '../../shared/picks.ts'
 import { chatProblem } from './readers/index.ts'
 import { liveOK } from './live-switch.ts'
 import { CLI_NAME } from './settings.ts'
+import { flagWords } from './flags.ts'
 import type { Harness } from './engine/engine.ts'
 
 export type { Harness }
@@ -20,21 +21,28 @@ const modelOf = (h: Harness) => (!h.model || h.model === 'default' ? '' : (findM
 /** an effort as compared: the level its model takes, '' for the CLI's own */
 const effortOf = (h: Harness) => (!h.effort || h.effort === 'default' ? '' : (effortFor(h.kind, h.effort, modelOf(h) || undefined) ?? h.effort.toLowerCase()))
 
+/** extra flags, compared and passed as the exact words parsed at set time (SHEP-266) */
+const flagsOf = (h: Harness) => h.flags ?? []
+const sameFlags = (a: Harness, b: Harness) => JSON.stringify(flagsOf(a)) === JSON.stringify(flagsOf(b))
+
+/** flags are deliberately NOT part of this comparison: it is also used to decide whether an agent is back on its
+ *  primary after a cap or a cut-off, and a space's flag row must not make that look like a different worker. Only the
+ *  restart hint compares flags, where a change of them is exactly what is being asked about. */
 export const sameHarness = (a: Harness, b: Harness) => a.kind === b.kind && modelOf(a) === modelOf(b) && effortOf(a) === effortOf(b)
 
 /** a harness as Shepherdr passes it: a model by its id, a level its model takes; nothing for the CLI's own */
 export function fitHarness(h: Harness): Harness {
   const model = modelOf(h) || undefined
   const effort = effortOf(h) || undefined
-  return { kind: h.kind, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  return { kind: h.kind, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(h.flags ? { flags: h.flags } : {}) }
 }
 
 /** Values actually passed by Agents.args, without inventing a model or effort for a CLI that takes none. */
 export function launchHarness(h: Harness): Harness {
-  if (!modelsOf(h.kind)) return { kind: h.kind }
+  if (!modelsOf(h.kind)) return { kind: h.kind, ...(h.flags ? { flags: h.flags } : {}) }
   const model = modelArg(h.kind, h.model)
   const effort = effortFor(h.kind, h.effort, h.model)
-  return { kind: h.kind, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  return { kind: h.kind, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(h.flags ? { flags: h.flags } : {}) }
 }
 
 /** "Codex (GPT-6-Sol, high)", "Claude Code" */
@@ -57,10 +65,16 @@ export function chainWords(h: Harness) {
  * add --agent, the + menu's model) is no change of Settings.
  */
 export function restartHint(on: Harness, set: Harness | undefined, want: Harness): RestartHint | undefined {
-  if (sameHarness(on, want) || (set && sameHarness(set, want))) return undefined
+  if (sameHarness(on, want) && (sameFlags(on, want) || (set && sameFlags(set, want)))) return undefined
+  if (set && sameHarness(set, want) && sameFlags(set, want)) return undefined
   if (on.kind !== want.kind) return { on: name(on.kind), want: name(want.kind) }
   const label = (h: Harness) => (modelOf(h) ? (findModel(h.kind, modelOf(h))?.label ?? modelOf(h)) : `${name(h.kind)}'s default model`)
   if (modelOf(on) !== modelOf(want)) return { on: label(on), want: label(want) }
+  if (!sameFlags(on, want))
+    return {
+      on: flagWords(flagsOf(on)) || 'no extra flags',
+      want: flagWords(flagsOf(want)) || 'no extra flags',
+    }
   return { on: `${effortOf(on) || 'default'} effort`, want: `${effortOf(want) || 'default'} effort` }
 }
 

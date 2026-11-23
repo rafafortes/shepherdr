@@ -32,6 +32,7 @@ import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 import { capture, end as endProcesses, endDeps, readTree, systemSource, type Source } from './orphans.ts'
 import { taskWorktreeKey } from './trust.ts'
 import { startInPane } from './pane-agent.ts'
+import { flagWords } from './flags.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -134,6 +135,9 @@ export interface AgentRecord {
   tab?: string
   model?: string
   effort?: string
+  /** extra launch flags for this CLI, normalized one word each (`--advisor=opus`): kept on the record so a resume, a
+   *  live model switch, a restart and a crash's recovery pass the same flags to the same CLI (SHEP-266) */
+  flags?: string[]
   /** instructions appended to the CLI's system prompt (or sent first, hidden, where it has no such option) */
   system?: string
   /** log files, oldest first: one per session */
@@ -157,7 +161,7 @@ export interface AgentRecord {
   hooks?: string
   /** the CLI, model and effort Settings said for its role when it last started on them: a change since is offered as
    *  a restart in its chat (restart.ts) */
-  set?: { kind: string; model?: string; effort?: string }
+  set?: { kind: string; model?: string; effort?: string; flags?: string[] }
   /** the pane its last run was started in, and whether herdr still had that launch pending when it was last seen: a
    *  launch herdr dropped can leave that pane behind, and a relaunch closes it rather than sit beside it */
   lastPane?: string
@@ -1464,6 +1468,13 @@ export class Agents extends Emitter<Events> {
     const r: AgentRecord = old ?? { ...spec, logs: [], started: Date.now() }
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
+    // extra flags belong to one CLI. A switch to another drops the old CLI's flags unless the caller brought new ones;
+    // say so, so a flag that silently stopped applying is not mistaken for one that still does (SHEP-266).
+    const switched = !!old && old.kind !== spec.kind
+    if (switched && !spec.flags && old.flags?.length)
+      console.info(
+        `shepherdr: ${r.name} switched from ${old.kind} to ${spec.kind}; its extra flags (${flagWords(old.flags)}) were for ${old.kind} and were dropped. Set flags for ${spec.kind} in Settings or on the task.`,
+      )
     Object.assign(r, {
       name: spec.name,
       kind: spec.kind,
@@ -1474,6 +1485,7 @@ export class Agents extends Emitter<Events> {
       access: spec.access ?? r.access,
       model: spec.model ?? r.model,
       effort: spec.effort ?? r.effort,
+      flags: spec.flags ?? (switched ? [] : r.flags),
       system: spec.system ?? r.system,
       set: spec.set ?? r.set,
       finished: false,
@@ -1616,7 +1628,9 @@ export class Agents extends Emitter<Events> {
   }
 
   args(r: AgentRecord, resume: boolean): string[] {
-    const a: string[] = []
+    // extra flags first, each already one word (`--advisor=opus`): what Shepherdr adds below then ends them, and a
+    // value can never be taken for a session id or a first message on a resume or a crash's recovery (SHEP-266).
+    const a: string[] = [...(r.flags ?? [])]
     // a model is kept by its id, or by its name when picked in the chat's menu (Opus 5.5); an effort its model lacks
     // goes in as the nearest it has
     const model = modelArg(r.kind, r.model)

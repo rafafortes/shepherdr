@@ -37,6 +37,14 @@
   - **From the command.** `shepherdr set task.model <model> --space NAME --apply-waiting` (also `task.agent` and `task.effort`, with
     `--machine`, or Everywhere without `--space`) makes the same change and says in one line what it did, with the same counts.
     Without `--apply-waiting` nothing waiting moves.
+  - **Extra CLI flags** (`tasks.claude_flags`, `tasks.codex_flags`, `tasks.pi_flags`, `tasks.opencode_flags`,
+    `tasks.agy_flags`): one row per agent CLI, extra launch flags for that CLI's task agents as you'd type them
+    (`--advisor opus` for Claude Code, `--search` for Codex). Only flags that CLI really offers are accepted (its own
+    `--help` is checked) and none Shepherdr sets itself (model, effort, permissions, session, settings, print mode);
+    a refusal says why. A task can set its own with `task add --flags="--advisor opus"` or `--set flags=...`, validated
+    against the CLI that task runs. "none" means no extra flags, an empty value inherits the level above. Flags belong
+    to one CLI: after a switch to another, the old CLI's flags are dropped and the server log says so. The brief's
+    Agent line names the flags that will be passed.
 - **Coordinators** (`coordinator.agent`, `coordinator.model`, `coordinator.effort`): the CLI, model and effort a new
   coordinator starts with, set and inherited the same way as the tasks' three. Its backup's own pair sits under
   Coordinators in [Backup agents](#backup-agents).
