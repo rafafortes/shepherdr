@@ -44,6 +44,7 @@ import { asMode, HOST, NAME, type Places, placeId, type Space, shortId } from '.
 import { type ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
 import { type Change, changeWords, PROFILES_ON_MAIN, type Profiles, previewWords, waitingPicks } from './profiles.ts'
 import { createSession } from './opencode.ts'
+import { parseFlags } from './flags.ts'
 import { reviewRunLine, reviewerWords, settingsBlock } from './prompts.ts'
 import { readPromptFile, runReviewInPane } from './review-pane.ts'
 import { reviewerPromptFile, reviewerPromptPath } from './reviewer-prompt.ts'
@@ -839,7 +840,21 @@ export class CliCommands {
         const pr = one(p, 'space') || op !== 'list' ? this.projectFor(p, ctx) : null
         const place = pr ? placeId.space(pr.name) : ''
         const name = rest[0]
-        const allowed = ['when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name', ...(op === 'add' || op === 'edit' ? ['set'] : []), ...(op === 'list' ? ['json'] : [])]
+        const allowed = [
+          'when',
+          'on',
+          'task',
+          'brief',
+          'desc',
+          'space',
+          'agent',
+          'model',
+          'effort',
+          'flags',
+          'name',
+          ...(op === 'add' || op === 'edit' ? ['set'] : []),
+          ...(op === 'list' ? ['json'] : []),
+        ]
         const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !allowed.includes(f))
         if (odd.length)
           throw new Error(
@@ -847,7 +862,11 @@ export class CliCommands {
           )
         // --set pairs, or a bare --set to clear them on edit; parse before the agent flags it can also name
         const sets = (op === 'add' || op === 'edit') && (p.flags.has('set') || p.opts.set?.length) ? automationSet(p, ctx.local) : undefined
-        const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
+        const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') || one(p, 'flags') ? harnessOf(p, this.settings) : undefined
+        if (agent) {
+          const flags = flagsOf(p, this.settings)
+          if (flags !== undefined) agent.flags = flags
+        }
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()
         const runs = (x: Automation) => (x.runs?.at(-1) ? `last ran ${age(x.runs.at(-1)!.at)} ago: ${x.runs.at(-1)!.task ?? `failed (${x.runs.at(-1)!.error})`}` : 'not run yet')
@@ -1239,11 +1258,11 @@ export class CliCommands {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
       const odd = [...Object.keys(p.opts), ...p.flags].filter(
-        (f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f),
+        (f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'flags', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f),
       )
       if (odd.length)
         throw new Error(
-          `Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`,
+          `Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --flags, --reviewer, --reviewer-model and --reviewer-effort`,
         )
       // --set key=value: a How tasks work setting for this task, or what --agent, --reviewer and the like set
       const set: Record<string, string> = {}
@@ -1296,6 +1315,9 @@ export class CliCommands {
       const when = at !== undefined || within !== undefined ? whenFrom(at, within, this.settings.zone()) : undefined
       const after = p.opts.after ?? []
       const agent = harnessOf(p, this.settings)
+      // --flags (or --set flags=) is checked against the CLI this task will actually run, once, here
+      const flags = flagsOf(p, this.settings)
+      if (flags !== undefined) agent.flags = flags
       const reviewer = reviewerOf(p, this.settings)
       const t = this.engine.add({
         project: pr.name,
@@ -1569,8 +1591,26 @@ function automationSet(p: Parsed, local?: boolean): Record<string, string> {
   return set
 }
 
+/** task add's --flags (or --set flags=): extra flags for this one task's agent CLI. Validated here, at set time,
+ *  against the CLI it will run (an explicit --agent, else the space's task agent). "none" means no flags; an empty
+ *  value or "default" leaves the space's Settings row to apply. */
+function flagsOf(p: Parsed, settings: Settings): string[] | undefined {
+  const given = one(p, 'flags')
+  if (given === undefined) return undefined
+  const v = given.trim()
+  if (!v || /^default$/i.test(v)) return undefined
+  if (/^none$/i.test(v)) return []
+  const cli = one(p, 'agent')
+  const kind = cli === undefined ? settings.harness('task').kind : (kindOf(cli) ?? cli)
+  try {
+    return parseFlags(kind, v)
+  } catch (e) {
+    throw new Error(`--flags: ${(e as Error).message}`)
+  }
+}
+
 /** task add's --agent, --model and --effort: what it sets for this one task, refused when it makes no sense */
-function harnessOf(p: Parsed, settings: Settings): { kind?: string; model?: string; effort?: string } {
+function harnessOf(p: Parsed, settings: Settings): { kind?: string; model?: string; effort?: string; flags?: string[] } {
   const cli = one(p, 'agent')
   const kind = cli === undefined ? undefined : kindOf(cli)
   if (cli !== undefined && !kind) throw new Error(`No CLI called ${cli}; herdr starts ${CLIS.join(', ')}`)

@@ -1144,7 +1144,7 @@ describe('settings', () => {
         .sections([], [], null)
         .find((x) => x.name === 'Agents')!
         .rows.map((r) => r.group),
-    ).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Back to the primary', 1)])
+    ).toEqual([...n('Tasks', 3 + 5 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Back to the primary', 1)])
     expect(
       s
         .sections([], [], null)

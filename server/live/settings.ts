@@ -7,6 +7,7 @@
 // The main machine keeps the Everywhere level; a worker for another machine (machines.ts) reads it from the main
 // machine's file as it changes, and its shepherdr set for Everywhere is run there.
 import { CHAT_KINDS, chatProblem } from './readers/index.ts'
+import { cleanFlagsLine, KINDS as FLAG_KINDS, NAMES as FLAG_NAMES, parseFlags } from './flags.ts'
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
 import { PLACE_MAX } from '../../shared/space-order.ts'
@@ -423,6 +424,16 @@ export const CATALOG: Section[] = [
       "What each kind of agent starts with. Default is the agent's own model or effort. Each role's backups sit under its own rows: a backup takes over when an agent can't go on, the same CLI again on its backup's model and effort (keeping its session), or another CLI taking over. Each backup has its own model and effort; the coordinators' backup follows the tasks' one until you set its own. When the primary is back applies to every backup. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
     rows: [
       ...agentRows('Tasks', 'task', [...CHAT_CLIS], 'default', 'default'),
+      // extra launch flags for each CLI's task agents (SHEP-266): one row per CLI, checked against its own --help
+      // when saved. A task's own --flags (or --set flags=) replaces the row's value for that task alone.
+      ...FLAG_KINDS.map((kind) => ({
+        group: 'Tasks',
+        label: `${FLAG_NAMES[kind]} flags`,
+        key: `tasks.${kind}_flags`,
+        value: '',
+        text: true,
+        hint: `Extra flags for ${FLAG_NAMES[kind]} when it runs a task, as you'd type them (e.g. ${kind === 'claude' ? '--advisor opus' : '--search'}): only flags that CLI really has, none Shepherdr sets itself. A task can set its own. Empty: the level above's; "none": no extra flags.`,
+      })),
       // a backup takes over where a task's or a coordinator's agent can't go on (engine.ts cantGoOn, source.ts
       // cannotGoOn): the same CLI again on the backup's model and effort, keeping its session, or another CLI taking over
       // each takes over in turn: the 2nd where the 1st can't go on either, and so on
@@ -1281,14 +1292,29 @@ export class Settings {
   }
 
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this
-   *  machine); nothing for a CLI's own default */
-  harness(role: 'task' | 'coordinator' | 'reviewer', space?: string): { kind: string; model?: string; effort?: string } {
+   *  machine); nothing for a CLI's own default. A task's or coordinator's harness also carries that CLI's extra flags. */
+  harness(role: 'task' | 'coordinator' | 'reviewer', space?: string): { kind: string; model?: string; effort?: string; flags?: string[] } {
     return this.harnessAt(role, space ? { space } : 'machine')
   }
 
   private harnessAt(role: 'task' | 'coordinator' | 'reviewer', l: Level) {
     const kind = this.kindOf(role, l)!
-    return { kind, ...this.modelAt(role, kind, l) }
+    // no flags slot on a harness that has none: an older record, a test's exact object and a restart's words stay as
+    // they were, while a space's flag row still reaches the launch through the one field it fills.
+    const flags = role === 'reviewer' ? [] : this.flagsAt(kind, l)
+    return { kind, ...this.modelAt(role, kind, l), ...(flags.length ? { flags } : {}) }
+  }
+
+  /** extra launch flags for `kind` at this level (SHEP-266): the nearest space/machine/Everywhere row, or none.
+   *  A hand-edited value that no longer passes is left out rather than breaking a launch. */
+  flags(kind: string, space?: string): string[] {
+    return this.flagsAt(kind, space ? { space } : 'machine')
+  }
+
+  private flagsAt(kind: string, l: Level): string[] {
+    const v = this.pick(`tasks.${kind}_flags`, l).value
+    if (!v || /^(none|default)$/i.test(v.trim())) return []
+    return cleanFlagsLine(kind, v)
   }
 
   /** the backup reviewer's CLI, model and effort, for a space (none: this machine), with what the coordinator set for one
@@ -1647,6 +1673,19 @@ export function refuse(key: string, value: string): string | undefined {
     const p = parseMaxAtOnce(value)
     if (!p.ok) return p.error
   }
+  // a space's extra launch flags (SHEP-266): checked against that CLI at set time, like a task's --flags. An empty
+  // value goes back to the level above; "none"/"default" mean no flags / this CLI's own. refuse is sync, as is flags.ts.
+  const extraFlags = /^tasks\.(claude|codex|pi|opencode|agy)_flags$/.exec(key)
+  if (extraFlags && value.trim()) {
+    const v = value.trim()
+    if (!/^(none|default)$/i.test(v)) {
+      try {
+        parseFlags(extraFlags[1], v)
+      } catch (e) {
+        return (e as Error).message
+      }
+    }
+  }
   if (key === 'opencode.models') {
     try {
       scopePatterns(value)
@@ -1689,7 +1728,10 @@ const ONE_BACKUP: Record<string, string> = {
   // the rest of its chain, by their own keys
   ...Object.fromEntries(EXTRA.flatMap((n) => Object.values(extraPair('task', n)).map((k) => [k.toLowerCase(), k]))),
 }
+/** aliases the coordinator can write in --set for a task's extra CLI flags (SHEP-266) */
+const FLAG_ALIAS: Record<string, string> = { flags: 'flags', 'extra-flags': 'flags', extra_flags: 'flags' }
 const FLAG_OF: Record<string, string> = {
+  'task.flags': 'flags',
   'task.agent': 'agent',
   'task.model': 'model',
   'task.effort': 'effort',
@@ -1714,10 +1756,11 @@ export function setForTask(pair: string): { key: string; value: string } | { fla
     ONE_TASK[short] ??
     ONE_BACKUP[short] ??
     (FLAG_OF[`task.${short}`] && `task.${short}`) ??
+    (FLAG_ALIAS[short] && 'task.flags') ??
     (short === 'reviewer' ? 'reviewer.agent' : Object.keys(FLAG_OF).find((k) => k.toLowerCase() === short))
   if (eq < 1 || !key)
     return {
-      error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), ...Object.keys(ONE_BACKUP), 'agent', 'model', 'effort', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)`,
+      error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), ...Object.keys(ONE_BACKUP), 'agent', 'model', 'effort', 'flags', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)`,
     }
   if (FLAG_OF[key]) return { flag: FLAG_OF[key], value }
   const err = refuse(key, value)

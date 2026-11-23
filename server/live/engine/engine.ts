@@ -1,5 +1,6 @@
 import { TaskIds } from '../task-ids.ts'
 import { trustWorktree } from '../trust.ts'
+import { cleanFlags } from '../flags.ts'
 import { dropped, missing, retrying, startDelays } from '../herdr.ts'
 // The tasks engine. A task is added by a coordinator and at once gets one agent, in its own git worktree and branch
 // from main. The coordinator's brief is the agent's first message and decides everything else (wait for a go, plan
@@ -303,6 +304,9 @@ export interface Harness {
   kind: string
   model?: string
   effort?: string
+  /** extra launch flags for this CLI, normalized one word each (`--advisor=opus`): a choice is for one CLI, so flags
+   *  for another CLI never travel with it (SHEP-266) */
+  flags?: string[]
 }
 
 /** what retuneWaiting changed (or, a dry run, would change) and what it left alone */
@@ -2885,13 +2889,25 @@ export class Engine extends Emitter<Events> {
     // runs (a relaunch after a stop or a recovery), else the task's own --agent/--model/--effort, else Settings. Settings
     // only ever goes in `set` (the restart hint); it can never write kind/model/effort on a relaunch or a recovery, so
     // the record always shows the CLI and model that really run in the pane.
-    const own = as ?? (rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? set))
+    const own = as ?? (rec ? { kind: rec.kind, model: rec.model, effort: rec.effort, flags: rec.flags } : (t.agent ?? set))
+    // extra flags belong to one CLI. A restart's or a Start with… choice wins; otherwise the flags the record ran
+    // (a relaunch, a crash's recovery), then the task's own and its space's for that CLI. A switch to another CLI has
+    // no flags of its own here, so nothing from the old CLI is passed on. cleanFlags drops what no longer validates.
+    const flags = cleanFlags(
+      own.kind,
+      own.flags ??
+        (rec && rec.kind === own.kind ? rec.flags : undefined) ??
+        (t.agent && t.agent.kind === own.kind ? t.agent.flags : undefined) ??
+        (set.kind === own.kind ? set.flags : undefined) ??
+        [],
+    ).keep
     trustWorktree(t.worktree!, own.kind, env)
     const spec: Spec = {
       access: 'full',
       key,
       name: rec?.name ?? `shep-${t.id.toLowerCase()}`,
       kind: own.kind,
+      flags,
       // a restart to 'default' clears a model the record kept; otherwise what it ran is what it runs again
       ...(as ? { model: as.model ?? 'default', effort: as.effort } : { model: own.model, effort: own.effort }),
       // what Settings said when it started on them: a change since is offered as a restart (restart.ts)

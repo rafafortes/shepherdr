@@ -113,8 +113,8 @@ export const TOPIC = {
   tasks: `Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--after SHE-12,SHE-13] [--later]
                                                  [--at "tomorrow 9:00" | --in 6h] [--set KEY=VALUE ...] [--agent CLI]
-                                                 [--model ID] [--effort LEVEL] [--reviewer CLI] [--reviewer-model ID]
-                                                 [--reviewer-effort LEVEL]
+                                                 [--model ID] [--effort LEVEL] [--flags "..."] [--reviewer CLI]
+                                                 [--reviewer-model ID] [--reviewer-effort LEVEL]
                                                  the title at most ${TITLE_MAX} characters (it fits one line on a phone);
                                                  its agent starts at once, in its own worktree. Shepherdr ends the
                                                  brief with its Settings block (shepherdr show has the defaults); the
@@ -133,6 +133,10 @@ export const TOPIC = {
                                                  --agent, --model and --effort pick the CLI (claude, codex, pi, …),
                                                  model and effort for this task instead of Settings': only what
                                                  that CLI and model take (shepherdr models), or default.
+                                                 --flags passes extra flags to the agent's CLI, as you'd type them
+                                                 (--flags="--advisor opus"): only flags that CLI really has, none
+                                                 Shepherdr sets itself; "none" means none, empty means Settings'
+                                                 (one row per CLI, under Tasks). --set flags=... does the same.
                                                  --reviewer, --reviewer-model and --reviewer-effort pick who reviews
                                                  its change (codex, claude, pi), named in its brief's Review line.
                                                  --after queues it with no agent, worktree or herdr space: its agent

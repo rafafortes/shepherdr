@@ -6,6 +6,7 @@ import { type Mode } from '../../shared/types.ts'
 import { ROOT } from '../root.ts'
 import { has } from '../plugins.ts'
 import { BOX, helperDir } from './box.ts'
+import { flagWords } from './flags.ts'
 
 /** where an agent finds Shepherdr's files: its checkout here; on another machine the helper's copy (install.ts) */
 const OWN = BOX ? helperDir(BOX.home) : ROOT
@@ -41,6 +42,8 @@ export interface Reviewer {
   kind: string
   model?: string
   effort?: string
+  /** extra launch flags for this CLI (SHEP-266), shown on the brief's Agent line */
+  flags?: string[]
 }
 
 const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', opencode: 'OpenCode', agy: 'Antigravity' }
@@ -205,11 +208,12 @@ export interface Told {
 
 const plural = (xs: string[]) => (xs.length === 1 ? xs[0] : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`)
 
-/** "Claude Code (its default model and effort)", "Codex (model gpt-5.5, high effort)" */
+/** "Claude Code (its default model and effort)", "Codex (model gpt-5.5, high effort; extra flags --advisor=opus)" */
 function onWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
-  if (!r.model && !r.effort) return `${name} (its default model and effort)`
-  return `${name} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
+  const flags = r.flags?.length ? `extra flags ${flagWords(r.flags)}` : ''
+  if (!r.model && !r.effort) return `${name} (${['its default model and effort', flags].filter(Boolean).join('; ')})`
+  return `${name} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort', flags].filter(Boolean).join(', ')})`
 }
 
 /** the Settings block's lines, each with what it comes from: plain words, each with its value first */
