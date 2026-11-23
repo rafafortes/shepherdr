@@ -6,6 +6,7 @@
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { keyOf } from '../server/live/models-summary.ts'
 import { reviewerPromptPath } from '../server/live/reviewer-prompt.ts'
 import { repo, sh, started, world } from './engine-world.ts'
 
@@ -386,12 +387,16 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(refusal).toContain('base moved')
     expect(refusal).toContain('short review')
     expect(refusal).toContain('counted apart')
+    expect(refusal).toContain("hash.txt: - const HASH = 'aaaa") // the exact differing line is named
     // out of normal rounds, the delta still gets its review, and it costs nothing against the cap
     const r = await w.engine.reviewRound(t.id)
     if ('wait' in r) throw new Error('no reviewer free')
     expect(r.rebase).toBe(true)
     expect(w.engine.reviewWords(t.id, r)).toContain('not counted against')
-    expect(readFileSync(reviewerPromptPath(t.id, r.round), 'utf8')).toContain('Short rebase review')
+    const prompt = readFileSync(reviewerPromptPath(t.id, r.round), 'utf8')
+    expect(prompt).toContain('Short rebase review: judge only the delta below')
+    expect(prompt).toContain("hash.txt: - const HASH = 'aaaa")
+    expect(prompt).not.toContain('review the whole change above again')
     expect(w.engine.reviewDone(t.id)).toBe(true)
     expect(t.reviewed!.at(-1)).toMatchObject({ commit: head(t), rebase: true })
     expect(t.rebaseReviews).toBe(1)
@@ -423,5 +428,82 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(refusal).not.toContain('short review')
     // the gate catches it, so a cheap rebase review is not offered: restore the work and take a normal round
     await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test('an own edit in a file the base also changed still needs a normal round', async () => {
+    const w = world()
+    const dir = repo()
+    writeFileSync(join(dir, 'notes.md'), 'a\nb\nc\nd\ne\nf\n')
+    sh('git add -A && git commit -qm "add notes"', dir)
+    const { t } = await started(w, dir, 'own-in-base-file')
+    writeFileSync(join(t.worktree!, 'notes.md'), 'task a\nb\nc\nd\ne\nf\n')
+    sh('git add -A && git commit -qm "change a"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // the base changes a distant line; the task's rebase is clean, then it adds a new line of its own
+    writeFileSync(join(dir, 'notes.md'), 'a\nb\nc\nd\ne\nbase f\n')
+    sh('git add -A && git commit -qm "base f"', dir)
+    sh('git rebase main', t.worktree!)
+    writeFileSync(join(t.worktree!, 'notes.md'), 'task a\nb\nc\nd\ne\nbase f\nnew own line\n')
+    sh('git add -A && git commit -qm "own edit after rebase"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test("a resolution that undoes the task's own deletion is refused as dropped work", async () => {
+    const w = world()
+    const dir = repo()
+    writeFileSync(join(dir, 'docs.md'), 'a\nb\nremove-me\nc\nd\ne\nf\n')
+    sh('git add -A && git commit -qm "add docs"', dir)
+    const { t } = await started(w, dir, 'restored-deletion')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    writeFileSync(join(t.worktree!, 'docs.md'), 'a\nb\nc\nd\ne\nf\n')
+    sh('git add -A && git commit -qm "remove a line"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // the base changes a distant line; the rebase is clean, then a new commit puts the task's deletion back
+    writeFileSync(join(dir, 'docs.md'), 'a\nb\nremove-me\nc\nd\ne\nbase f\n')
+    sh('git add -A && git commit -qm "base f"', dir)
+    sh('git rebase main', t.worktree!)
+    writeFileSync(join(t.worktree!, 'docs.md'), 'a\nb\nremove-me\nc\nd\ne\nbase f\n')
+    sh('git add -A && git commit -qm "restore the line"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('dropped')
+    expect(refusal).toContain('remove-me')
+    expect(refusal).not.toContain('short review')
+  })
+
+  test('a rebase round that waited for a reviewer stays a rebase round when it is woken', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'waited-rebase')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n")
+    sh('git add -A && git commit -qm "add hello and derived hash"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    writeFileSync(join(dir, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && git commit -qm "base moves the hash"', dir)
+    sh('git rebase main || true', t.worktree!)
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
+    // hold the reviewer so the rebase round has to wait, then wake it once it is free
+    const h = w.engine.reviewChain(t)[0].h
+    const key = keyOf(h.kind, h.model)
+    expect(w.settings.set('models.maxAtOnce', `${h.kind}=1`, 'all').ok).toBe(true)
+    w.engine.lease('hold-reviewer', 'reviewer', key, '')
+    w.engine.reviewDeadline = 20
+    w.engine.reviewPoll = 5
+    const waited = await w.engine.reviewRound(t.id)
+    expect('wait' in waited).toBe(true)
+    expect(t.reviewWait?.rebase).toBe(true)
+    w.engine.unlease('hold-reviewer')
+    w.engine.retryReviews()
+    expect(t.rebaseReviews).toBe(1)
+    expect(t.reviews).toBe(2)
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+    expect(w.engine.reviewWords(t.id, { round: 2, rounds: 1, reviewer: h, n: 0, key, rebase: true })).toContain('not counted against')
   })
 })

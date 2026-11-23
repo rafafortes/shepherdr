@@ -1396,7 +1396,10 @@ export class CliCommands {
         const v = this.engine.view(t)
         if (p.flags.has('json')) return JSON.stringify(v, null, 2)
         // the rounds its agent counted, the one its coordinator may have added, and the commit the last one reviewed
-        const rounds = t.reviews === undefined ? undefined : `Review rounds: ${t.reviews} of ${this.engine.roundsOf(t)} used${t.reviewsAdded ? ', one added by its coordinator' : ''}`
+        const rounds =
+          t.reviews === undefined
+            ? undefined
+            : `Review rounds: ${this.engine.normalReviews(t)} of ${this.engine.roundsOf(t)} used${t.reviewsAdded ? ', one added by its coordinator' : ''}${t.rebaseReviews ? `, plus ${t.rebaseReviews} rebase review${t.rebaseReviews === 1 ? '' : 's'}` : ''}`
         const last = t.reviewed?.at(-1)
         const reviewed = last ? `Reviewed: round ${last.round} on ${last.commit.slice(0, 7)} (${last.reviewer.kind}${last.reviewer.model ? `/${last.reviewer.model}` : ''})` : undefined
         return [
