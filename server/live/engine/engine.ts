@@ -4354,19 +4354,14 @@ export class Engine extends Emitter<Events> {
     return { p, g }
   }
 
-  /** live tasks with the repo each works in, so a number in another repo cannot claim another task's pull request */
+  /** every task with the repo it works in, so a number in another repo cannot claim another task's pull request */
   private async prOwners() {
-    const repos = new Map<string, string | undefined>()
     return Promise.all(
-      this.tasks
-        .filter((t) => !t.merged && !t.closed && !t.doneAt)
-        .map(async (t) => {
-          if (!repos.has(t.project)) {
-            const p = this.places.space(t.project)
-            repos.set(t.project, p ? (await G.githubs(p.path).catch(() => []))[0]?.repo : undefined)
-          }
-          return { ...t, repo: repos.get(t.project) ?? t.pr?.repo }
-        }),
+      this.tasks.map(async (t) => {
+        const p = this.places.space(t.project)
+        const repo = p ? (await G.githubs(p.path).catch(() => []))[0]?.repo : undefined
+        return { ...t, repo: repo ?? t.pr?.repo }
+      }),
     )
   }
 
@@ -4393,24 +4388,14 @@ export class Engine extends Emitter<Events> {
     }
     const { g } = await this.hubFor(p.name)
     const taken = await resolveTakenPr({ g, cwd: p.path, number, base: t.base ?? p.base ?? 'main', tasks: await this.prOwners(), self: t.id })
-    // switching from a pull request the task already has would leave that one open with nothing to own it
-    if (t.pr && t.pr.number !== taken.number)
-      throw new Error(
-        `${t.id} already has pull request #${t.pr.number} (${t.pr.url}): close or merge it on GitHub before taking #${taken.number}, or let it go with shepherdr ready --pr "" if it is no longer yours.`,
-      )
-    // a branch that does not hold the pull request's latest commit cannot be pushed to its head without force.
-    // An empty worktree still at the base is clean and has no work to lose: start it from the pull request's tip.
-    if (t.worktree && existsSync(t.worktree)) {
+    // a branch that does not hold the pull request's latest commit cannot be pushed to its head without force; say so
+    // before the task follows it, and say how to bring the two together.
+    if (t.worktree && existsSync(t.worktree) && t.base && (await G.aheadCount(t.worktree, t.base)) > 0) {
       const holds = await G.git(t.worktree, 'merge-base', '--is-ancestor', taken.head, 'HEAD')
-      if (!holds.ok) {
-        const ahead = t.base ? await G.aheadCount(t.worktree, t.base) : 0
-        const from = ahead === 0 && !(await G.dirty(t.worktree)) ? await this.prStart({ ...t, pr: takenPrRecord(taken) }, p) : undefined
-        if (from) await G.git(t.worktree, 'reset', '--hard', from)
-        else
-          throw new Error(
-            `Your branch does not hold pull request #${taken.number}'s latest commit (${taken.head.slice(0, 7)}): merge it in first (git fetch origin ${taken.branch}, then git merge FETCH_HEAD), then take it again.`,
-          )
-      }
+      if (!holds.ok)
+        throw new Error(
+          `Your branch does not hold pull request #${taken.number}'s latest commit (${taken.head.slice(0, 7)}): merge it in first (git fetch origin ${taken.branch}, then git merge FETCH_HEAD), then take it again.`,
+        )
     }
     if (t.pr?.number !== taken.number) t.watch = undefined
     t.pr = takenPrRecord(taken)

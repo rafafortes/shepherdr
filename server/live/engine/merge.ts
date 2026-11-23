@@ -1011,15 +1011,13 @@ export class MergeRunner {
     const m = await G.mergePr(g, wt, n, head, `${t.id}: ${t.title} (#${n})`, [t.said, t.facts && `Facts: ${t.facts}`, gate?.line].filter(Boolean).join('\n\n'))
     if ((await G.viewPr(g, wt, n))?.state !== 'MERGED') {
       const said = (m.err || m.out || 'it did not say why').split('\n')[0]
-      // main moved on GitHub since it was fetched: merging again brings it in if it now conflicts (Merging meanwhile)
+      // main moved on GitHub since it was fetched: merging again rebases it if it now conflicts (Merging meanwhile)
       if (/conflict|not mergeable/i.test(said)) this.land(t, 'rebase')
-      const conflictHelp =
-        t.pr?.taken && t.pr.branch
-          ? `Pull request #${t.pr.number}'s branch ${t.pr.branch} conflicts with ${t.base} on GitHub: merge ${t.base} into that branch by hand, resolve the conflict, commit, push with shepherdr pr ${t.id}, then merge again.`
-          : `Conflict with ${t.base} on GitHub: run shepherdr merge ${t.id} again, which rebases ${t.branch} on ${base} (or rebase it by hand, push with shepherdr pr ${t.id}, then merge again).`
       return {
         ok: false,
-        error: /conflict|not mergeable/i.test(said) ? conflictHelp : `GitHub did not merge PR #${n}: ${said}`,
+        error: /conflict|not mergeable/i.test(said)
+          ? `Conflict with ${t.base} on GitHub: run shepherdr merge ${t.id} again, which rebases ${t.branch} on ${base} (or rebase it by hand, push with shepherdr pr ${t.id}, then merge again).`
+          : `GitHub did not merge PR #${n}: ${said}`,
       }
     }
     // a taken pull request's head belongs to someone else: it stays on GitHub; the task's own branch was never pushed
