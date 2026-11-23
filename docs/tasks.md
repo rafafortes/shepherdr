@@ -479,10 +479,11 @@
   set: when the task archives, files older than that are removed from its chat and a removed picture or video says so in
   place of the tile. Off, the default, keeps them until the task is deleted, which still removes its chat's files.
 - While a task's agent works, it says itself what it is doing and how far along it is, at the start, at each natural
-  step and at least every 5 minutes, asked for at most 30 characters ("Fixing the two failing tests", not "Rebasing
-  onto main, then running the whole test suite") for a 360 px phone's task row, revising its time left honestly
-  when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
-  to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Past
+  step and at least every 5 minutes, asked for at most 30 characters ("Fixing the two failing tests", not
+  "Rebasing onto main, then running the whole test suite") for a 360 px phone's task row, revising its time left
+  honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left
+  5m` (its instructions tell it to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes
+  left down while it works. Past
   five minutes (or its own time left), that line reads as older instead: `· 12m ago` takes the place of the countdown,
   under the dot too, so an old line never looks current. Its dot fills like a pie with
   the % done and the minutes left sit small under it in the same orange (`6m`, `<1m`); its row's second line says

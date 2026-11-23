@@ -154,7 +154,8 @@ merge** waits for the human; **Merging** runs until it is in.
 
 ## QC
 
-- Every title asked for is at most 30 characters, about a 360 px phone's row (32 still accepted); every brief holds all the human said about the work.
+- Every title asked for is at most 30 characters, about a 360 px phone's row (32 still accepted); every brief holds
+  all the human said about the work.
 - Nothing from the plain-word list done without the human's word; Autopilot within any limit its HEARTBEAT.md sets.
 - No news card is the last message in your chat; no reply runs past two short lines.
 
