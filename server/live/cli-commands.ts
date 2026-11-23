@@ -647,7 +647,6 @@ export class CliCommands {
       case 'done': {
         const t = this.engine.task(a1)
         if (!t) throw new Error(`No task ${a1}`)
-        if (p.flags.has('pr')) throw new Error('--pr needs a pull request number, or "" to let go')
         const { said, facts } = summaryOpts(p, rest)
         const r = await this.engine.done(t.id, said ?? '', facts, one(p, 'pr'))
         if (r.state === 'ended') return `Noted. ${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).`
@@ -1278,7 +1277,6 @@ export class CliCommands {
         if ('flag' in r) (p.opts[r.flag] ??= []).push(r.value)
         else set[r.key] = r.value
       }
-      if (p.flags.has('pr')) throw new Error('--pr needs a pull request number, or "" to let go')
       const bare = [...p.flags].filter((f) => f !== 'later' && f !== 'priority')[0]
       if (bare) throw new Error(`--${bare} needs a value`)
       const title = checkTitle(rest[0])
@@ -1433,7 +1431,6 @@ export class CliCommands {
         // yours alone: a coordinator puts one first in line with task priority, and the machine starts it at its turn
         if (ctx.chat) throw new Error(`Only the human starts a task now. To put ${t.id} first in line, run shepherdr task priority ${t.id}.`)
         // --pr on a waiting task takes an open pull request before its worktree is made
-        if (p.flags.has('pr')) throw new Error('--pr needs a pull request number, or "" to let go')
         if (one(p, 'pr') !== undefined) await this.engine.takePr(t.id, one(p, 'pr')!)
         const on = harnessOf(p, this.settings)
         const r = await this.engine.startNow(t.id, on.kind ? (on as Harness) : undefined)

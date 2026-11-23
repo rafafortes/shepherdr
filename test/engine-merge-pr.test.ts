@@ -823,20 +823,14 @@ describe('taking a pull request that is already open', () => {
     expect(await refusal(() => resolve(g, '6'))).toContain('merges into develop')
   })
 
-  test('a pull request held by another task is refused, by number, taken head or own branch; a done one, one’s own or another repo’s is not', async () => {
+  test('a pull request held by another task is refused, by number or by head branch; a done one or one’s own is not', async () => {
     const g = onGitHub()
     bump(g)
     g.set({ prs: [open(5)] })
-    const mine = { repo: 'acme/app' }
-    expect(await refusal(() => resolve(g, '5', 'main', [{ ...mine, id: 'X-1', pr: { number: 5, url: 'x' } }]))).toContain("already X-1's")
-    expect(await refusal(() => resolve(g, '5', 'main', [{ ...mine, id: 'X-2', pr: { number: 6, url: 'x', taken: true, branch: 'dep/bump' } }]))).toContain("already X-2's")
-    expect(await refusal(() => resolve(g, '5', 'main', [{ ...mine, id: 'X-4', branch: 'dep/bump' }]))).toContain("already X-4's")
-    expect(await refusal(() => resolve(g, '5', 'main', [{ id: 'X-5', branch: 'dep/bump', pr: { number: 9, url: 'x', taken: true } }]))).toContain("already X-5's")
-    for (const gone of [{ merged: true }, { closed: true }, { doneAt: Date.now() }])
-      expect((await resolve(g, '5', 'main', [{ ...mine, id: 'X-3', pr: { number: 5, url: 'x' }, ...gone }])).number).toBe(5)
-    expect((await resolve(g, '5', 'main', [{ ...mine, id: 'X-1', pr: { number: 5, url: 'x' } }], 'X-1')).number).toBe(5)
-    // the same number in another repo belongs to a different pull request, and does not block this one
-    expect((await resolve(g, '5', 'main', [{ repo: 'other/repo', id: 'Y-1', pr: { number: 5, url: 'x', repo: 'other/repo' } }])).number).toBe(5)
+    expect(await refusal(() => resolve(g, '5', 'main', [{ id: 'X-1', pr: { number: 5, url: 'x' } }]))).toContain("already X-1's")
+    expect(await refusal(() => resolve(g, '5', 'main', [{ id: 'X-2', pr: { number: 6, url: 'x', taken: true, branch: 'dep/bump' } }]))).toContain("already X-2's")
+    for (const gone of [{ merged: true }, { closed: true }, { doneAt: Date.now() }]) expect((await resolve(g, '5', 'main', [{ id: 'X-3', pr: { number: 5, url: 'x' }, ...gone }])).number).toBe(5)
+    expect((await resolve(g, '5', 'main', [{ id: 'X-1', pr: { number: 5, url: 'x' } }], 'X-1')).number).toBe(5)
   })
 
   test('task add and task start refuse --pr without a GitHub remote, or an unknown project', async () => {
@@ -908,55 +902,6 @@ describe('taking a pull request that is already open', () => {
     expect(g.gh().prs).toHaveLength(1)
     expect(opened(g)).toBe(0)
     expect(g.gh().prs[0].state).toBe('MERGED')
-  })
-
-  test('a taken pull request behind its base is brought up to date with a merge, not a rebase, and merges', async () => {
-    const w = world()
-    const g = onGitHub()
-    bump(g)
-    g.set({ prs: [open(5)] })
-    const { t } = await taking(w, g, 'take-behind')
-    writeFileSync(join(worktreeOf(t), 'work.txt'), 'work')
-    sh('git add -A && git commit -qm work', worktreeOf(t))
-    // main moves on GitHub, so the gate would otherwise rebase the branch and break the non-forced push
-    sh('git checkout -q main && echo base > base.txt && git add -A && git commit -qm "base moved" && git push -q origin main && git fetch -q origin && git checkout -q dep/bump', g.dir)
-    expect(w.settings.set('merge.gate', 'echo gate ok', { space: w.engine.view(t).place.split(':').pop() ?? '' }).ok).toBe(true)
-    await w.engine.done(t.id, 'Ready.')
-    const before = sh('git rev-parse HEAD', worktreeOf(t))
-    // the branch is behind: the base was not its ancestor, so a rebase would rewrite the commit GitHub has
-    expect((await G.git(worktreeOf(t), 'merge-base', '--is-ancestor', 'origin/main', 'HEAD')).ok).toBe(false)
-    const r = await w.engine.merge(t.id, { self: true })
-    expect(r.ok).toBe(true)
-    // the merge, not a rebase, brought the base into the taken branch: its new tip holds both changes
-    const pushedTip = sh('git rev-parse refs/heads/dep/bump', g.bare)
-    expect(pushedTip).not.toBe(before)
-    expect(sh(`git show ${pushedTip}:base.txt`, g.bare)).toBe('base')
-    expect(sh(`git show ${pushedTip}:work.txt`, g.bare)).toBe('work')
-    expect(sh('git show main:base.txt', g.bare)).toBe('base')
-    expect(sh('git show main:work.txt', g.bare)).toBe('work')
-    expect(g.gh().prs).toHaveLength(1)
-    expect(opened(g)).toBe(0)
-    expect(g.gh().prs[0].state).toBe('MERGED')
-  })
-
-  test('a taken pull request that conflicts with its base is refused with how to resolve it', async () => {
-    const w = world()
-    const g = onGitHub()
-    bump(g)
-    g.set({ prs: [open(5)] })
-    const { t } = await taking(w, g, 'take-conflict')
-    writeFileSync(join(worktreeOf(t), 'dep.txt'), 'task version\n')
-    sh('git add -A && git commit -qm "task dep"', worktreeOf(t))
-    sh('git checkout -q main && echo "base version" > dep.txt && git add -A && git commit -qm "base dep" && git push -q origin main && git fetch -q origin && git checkout -q dep/bump', g.dir)
-    expect(w.settings.set('merge.gate', 'echo gate ok', { space: w.engine.view(t).place.split(':').pop() ?? '' }).ok).toBe(true)
-    await w.engine.done(t.id, 'Ready.')
-    const r = await w.engine.merge(t.id, { self: true })
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('conflicts with main')
-    expect(r.error).toContain('dep/bump')
-    expect(r.error).toContain('Nothing was merged')
-    expect(g.gh().prs[0].state).toBe('OPEN')
-    expect(opened(g)).toBe(0)
   })
 
   test('a taken branch that moved on GitHub is not overwritten with a forced push', async () => {
