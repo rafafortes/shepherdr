@@ -86,6 +86,7 @@ describe.skipIf(!browser)('reordering a model chain', () => {
     const page = await browser.newPage({ viewport: { width: 1800, height: 900 } })
     try {
       await openModels(page)
+      await page.locator(`[data-chain="${ROW}|task.0"]`).waitFor()
       expect(await order(page)).toEqual(['Claude Code', 'Codex', 'pi', 'OpenCode', 'Antigravity'])
 
       const source = page.locator(`[data-chain="${ROW}|task.4"]`)
@@ -136,11 +137,15 @@ describe.skipIf(!browser)('reordering a model chain', () => {
 
       // a cancelled pointer leaves the chain where it was
       const beforeCancel = await order(page)
-      const cancelFrom = await box(page.locator(`[data-chain="${ROW}|task.2"]`))
+      const cancelCell = page.locator(`[data-chain="${ROW}|task.2"]`)
+      await cancelCell.scrollIntoViewIfNeeded()
+      const cancelFrom = await box(cancelCell)
       await page.mouse.move(cancelFrom.x + cancelFrom.width / 2, cancelFrom.y + cancelFrom.height / 2)
       await page.mouse.down()
       await page.mouse.move(cancelFrom.x + cancelFrom.width / 2 + 30, cancelFrom.y + cancelFrom.height / 2)
+      expect(await page.evaluate(() => document.documentElement.style.cursor)).toBe('grabbing')
       await page.locator(`[data-chain="${ROW}|task.2"]`).dispatchEvent('pointercancel', { pointerId: 1 })
+      expect(await page.evaluate(() => document.documentElement.style.cursor)).toBe('')
       await page.mouse.up()
       expect(await order(page)).toEqual(beforeCancel)
     } finally {
@@ -160,6 +165,7 @@ describe.skipIf(!browser)('reordering a model chain', () => {
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Models', exact: true }).tap()
       await settled(page)
+      await page.locator(`[data-chain="${ROW}|task.0"]`).waitFor()
       expect(await order(page)).toEqual(['Claude Code', 'Codex', 'pi', 'OpenCode', 'Antigravity'])
 
       await page.getByRole('button', { name: 'Chain actions for gtm · Tasks · Primary', exact: true }).tap()
