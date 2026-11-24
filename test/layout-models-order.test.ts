@@ -8,12 +8,14 @@ import { layout, settled, until } from './layout.ts'
 const { browser, world, url } = await layout()
 const vm = () => world.stores['vm-str']
 const TASK_KEYS = rolePairs('task').flatMap((p) => [p.cli, p.model, p.effort])
+const COORDINATOR_KEYS = rolePairs('coordinator').flatMap((p) => [p.cli, p.model, p.effort])
+const CHAIN_KEYS = [...TASK_KEYS, ...COORDINATOR_KEYS]
 const ROW = 'p:vm-str:gtm'
 
 /** a mixed chain in gtm, with a value owned by each of the five CLIs Shepherdr supports */
 async function mixed() {
   const store = vm()
-  for (const level of ['all', 'machine', { space: 'gtm' }] as const) for (const key of TASK_KEYS) store.set(key, null, level)
+  for (const level of ['all', 'machine', { space: 'gtm' }] as const) for (const key of CHAIN_KEYS) store.set(key, null, level)
   for (const [key, value] of Object.entries({
     'task.agent': 'Claude Code',
     'task.model': 'claude-opus-5-5',
@@ -36,7 +38,7 @@ async function mixed() {
 
 async function reset() {
   const store = vm()
-  for (const level of ['all', 'machine', { space: 'gtm' }] as const) for (const key of TASK_KEYS) store.set(key, null, level)
+  for (const level of ['all', 'machine', { space: 'gtm' }] as const) for (const key of CHAIN_KEYS) store.set(key, null, level)
   store.set('task.agent', 'Codex', { space: 'gtm' })
   world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
   world.emit('snapshot')
@@ -134,6 +136,33 @@ describe.skipIf(!browser)('reordering a model chain', () => {
       await page.getByRole('menuitem', { name: 'Move up', exact: true }).click()
       await page.getByRole('status').filter({ hasText: 'gtm · Coordinators:' }).waitFor()
       expect(vm().get('coordinator.fallback', 'gtm')).toBe(reviewer)
+
+      // A default entry moved into Coordinator Backup 1 keeps its own CLI default instead of following the tasks' model.
+      const store = vm()
+      for (const [key, value] of Object.entries({
+        'task.fallback': 'Codex',
+        'backup.model': 'gpt-6-sol',
+        'backup.effort': 'xhigh',
+        'coordinator.agent': 'Claude Code',
+        'coordinator.fallback': 'off',
+        'coordinator.fallback2': 'Codex',
+      }))
+        store.set(key, value, { space: 'gtm' })
+      world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+      world.emit('snapshot')
+      await page.getByRole('button', { name: 'Chain actions for gtm · Coordinators · Backup 2', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Move up', exact: true }).click()
+      await until(
+        async () => store.get('coordinator.fallback', 'gtm'),
+        (v) => v === 'Codex',
+      )
+      expect(store.readAt('coordinator.fallbackModel', { space: 'gtm' }).value).toBe('default')
+      expect(store.readAt('coordinator.fallbackEffort', { space: 'gtm' }).value).toBe('default')
+      await until(
+        async () => page.getByRole('button', { name: 'Chain actions for gtm · Coordinators · Backup 1', exact: true }).isDisabled(),
+        (disabled) => !disabled,
+      )
+      expect(await page.getByRole('status').filter({ hasText: 'gtm · Coordinators:' }).count()).toBe(0)
 
       // a cancelled pointer leaves the chain where it was
       const beforeCancel = await order(page)

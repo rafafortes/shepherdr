@@ -1,3 +1,6 @@
+import { taskIdsSection } from './task-ids.ts'
+import { coordinatorRequestIds } from '../../shared/attention.ts'
+import { providerOfKey } from '../../shared/model-caps.ts'
 // The live source: herdr is the truth for agents and their states; the CLIs' own logs are the chats; Shepherdr keeps
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
@@ -5,140 +8,139 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
-import { INSTALL_AGE_MS, type InstallIO, installLines, staleInstalls, systemInstallIO } from '../../scripts/supervisor.ts'
-import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, TITLE_MAX } from '../../shared/alerts.ts'
-import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
-import { coordinatorRequestIds } from '../../shared/attention.ts'
-import { fileType } from '../../shared/files.ts'
 import { stripControl } from '../../shared/keys.ts'
-import { providerOfKey } from '../../shared/model-caps.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import {
+  asEmoji,
+  modeCard,
+  NAME_MAX,
+  nameProblem,
+  slugify,
   type Action,
   type ActivityAnswer,
   type ActivityAsk,
   type AddSpace,
   type Alert,
   type Artifact,
-  asEmoji,
   type CardAsk,
   type Chat,
+  type Peer,
+  type Question,
   type Folders,
   type LimitsView,
   type Machine,
   type ModelsSummary,
-  modeCard,
-  NAME_MAX,
   type Need,
-  nameProblem,
-  type Peer,
   type Place,
-  type Question,
   type Section,
   type Snapshot,
-  slugify,
   type TaskStatus,
   type UpdateCard,
   type WorktreeAsk,
 } from '../../shared/types.ts'
-import { clockWords, span } from '../../shared/when.ts'
-import { wrapPage } from '../frame.ts'
-import { parseHosts } from '../hosts.ts'
-import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
-import { ROOT } from '../root.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
+import { chatDir } from './inbox.ts'
+import { parseHosts } from '../hosts.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
-import { type Advice, type AdviceQuestion, type AdviceRec, Advices, adviceWords, advisorPrompt, advisorWords, canAdvise, parseAdvice, runAdvisor } from './advisor.ts'
+import { ROOT } from '../root.ts'
+import { wrapPage } from '../frame.ts'
 import { Agents, hidden, type Spec } from './agents.ts'
-import { type Parsed, parseArgs } from './args.ts'
-import { type ArtifactRec, Artifacts, browserChecker, type Checker } from './artifacts.ts'
-import { type Automation, Automations, type Template } from './automations.ts'
-import { agentEnv, BOX, boxHome, notifiesWith, run } from './box.ts'
-import { type BrowserBridge, type BrowserClient, Browsers } from './browser.ts'
-import { excerpt, type FromAgent, line, tag } from './chatlines.ts'
-import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
-import { type CliCommands, createCliCommands } from './cli-commands.ts'
-import { HOME_NO_PLACE, statusLine } from './cli-shared.ts'
-import { SECRET as COMMANDCODE_KEY, readCommandCode as readCommandCodeQuota } from './command-code-quota.ts'
+import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
-import { dictate as dictation } from './dictate.ts'
+import { launchesAgents } from './launch-policy.ts'
+import { cleanFlags, flagWords } from './flags.ts'
+import { findModel, modelsOf } from './models.ts'
+import { picksOf, pinModel, rememberModel } from './model-picks.ts'
+import { parseArgs, type Parsed } from './args.ts'
+import { Automations, type Automation, type Template } from './automations.ts'
+import { Heartbeats, SKIPPED_LINE, Wakes, wakeProblem, wakesAnyway } from './heartbeat.ts'
+import { eventRules, matches, timeRule, type Happened, type TriggerEvent } from './trigger.ts'
+import { clockWords, span } from '../../shared/when.ts'
+import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
+import {
+  end as endOrphans,
+  endDeps,
+  newsLine as orphanNews,
+  proofPids,
+  readRows as readOrphanRows,
+  scan as scanOrphans,
+  scanOpts,
+  systemSource as orphanSystemSource,
+  type Finding,
+  type ScanOpts,
+  type Source as ProcessSource,
+} from './orphans.ts'
+import { excerpt, line, tag, type FromAgent } from './chatlines.ts'
+import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
-import { allBlocked, type Blocked, blockedOnly, type Run, waitWords } from './engine/choose.ts'
+import { dictate as dictation } from './dictate.ts'
 import {
   age,
   askOf,
-  type BackupPlan,
   backupHarness,
   capWords,
   checkTitle,
-  Engine,
   ended,
-  type HeldWhy,
-  type Retune,
+  Engine,
   retuneLine,
   reviewRetuneLine,
+  type BackupPlan,
+  type HeldWhy,
+  type Retune,
   type StartLine,
   type TaskRec,
 } from './engine/engine.ts'
-import { sh } from './engine/git.ts'
-import { cleanFlags, flagWords } from './flags.ts'
+import { allBlocked, blockedOnly, waitWords, type Blocked, type Run } from './engine/choose.ts'
+import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
-import { type HealthEvent, type HealthKept, type Kind, levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs } from './health.ts'
-import { Heartbeats, SKIPPED_LINE, Wakes, wakeProblem, wakesAnyway } from './heartbeat.ts'
-import { herdr } from './herdr.ts'
-import { chatDir } from './inbox.ts'
-import { launchesAgents } from './launch-policy.ts'
-import { entryPatterns, type HeldFact, knownOf, limitsView } from './limits-view.ts'
-import { liveOK, type SwitchIO, switchLive } from './live-switch.ts'
+import { sh } from './engine/git.ts'
+import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
 import { Machines } from './machines.ts'
-import { type Small, smaller } from './media.ts'
-import * as task from './mfs.ts'
-import { boxDir } from './mfs.ts'
+import { agentEnv, BOX, boxHome, notifiesWith, run } from './box.ts'
+import { WaitAlerts, type Wait } from './wait-alerts.ts'
+import { fileType } from '../../shared/files.ts'
+import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
-import { picksOf, pinModel, rememberModel } from './model-picks.ts'
-import { findModel, modelsOf } from './models.ts'
-import { modelsMatrix } from './models-matrix.ts'
-import { keyOf, type LiveAgent, modelsSummary, patternName, providerWords, roleOfChat, type SummaryInput, type TaskFact } from './models-summary.ts'
-import {
-  endDeps,
-  end as endOrphans,
-  type Finding,
-  newsLine as orphanNews,
-  systemSource as orphanSystemSource,
-  type Source as ProcessSource,
-  proofPids,
-  readRows as readOrphanRows,
-  type ScanOpts,
-  scanOpts,
-  scan as scanOrphans,
-} from './orphans.ts'
-import { asMode, HOME_SPACE, HOST, NAME, Places, placeId, type Space } from './places.ts'
-import { type Reading, readClaude } from './plan-limits.ts'
-import { ProfileSchedules } from './profile-schedule.ts'
-import { type Change, PROFILES_ON_MAIN, ProfileStore, Profiles, type Site, waitingPicks } from './profiles.ts'
-import { type BackWhy, backupCardWords, backupKeptLine, coordinatorHandOverLine, coordinatorPrompt, privatePrompt, relaunchedLine, restartLine, resumedLine, wentBackCardWords } from './prompts.ts'
-import { alertShare, Quotas } from './quotas.ts'
 import { claudeHome, claudeProjectDirs, piSessionDirs } from './readers/find.ts'
-import { RequestedNewsMailbox } from './requested-news.ts'
-import { agentCounts, FOLDERS, folderSize, orphanChromes, type Resources } from './resources.ts'
-import { chainWords, fitHarness, type Harness, harnessProblem, harnessWords, type RestartAllRow, recentChat, restartAllWords, restartHint, restartInfo, sameHarness } from './restart.ts'
-import { type Cut, carryOn, momentOf, Retries, type Retry, resetOf, runOutOf } from './retry.ts'
-import { backCard, canProbe, FIRST_WAIT, FRESH, type Outage, type Probe, QUIET, Returns, returnMode } from './return.ts'
+import { boxDir } from './mfs.ts'
+import * as task from './mfs.ts'
+import { agentCounts, folderSize, FOLDERS, orphanChromes, type Resources } from './resources.ts'
+import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, type Space } from './places.ts'
+import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine } from './prompts.ts'
+import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { liveOK, switchLive, type SwitchIO } from './live-switch.ts'
+import { withRooms, type RoomInput } from './rooms.ts'
+import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
+import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
-import { type RoomInput, withRooms } from './rooms.ts'
-import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
-import { type Chain, CLI_NAME, EXECUTABLE_KEYS, kindOf, type Level, MAX_BACKUPS, repositorySection, Settings } from './settings.ts'
+import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
-import { RESUME_SETTLE, type StartStep, Starts } from './start.ts'
-import { taskIdsSection } from './task-ids.ts'
-import { eventRules, type Happened, matches, type TriggerEvent, timeRule } from './trigger.ts'
-import { Unread } from './unread.ts'
+
+import { carryOn, momentOf, Retries, resetOf, runOutOf, type Cut, type Retry } from './retry.ts'
+import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
+import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
+import { readClaude, type Reading } from './plan-limits.ts'
+import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } from './command-code-quota.ts'
+import { alertShare, Quotas } from './quotas.ts'
 import { UsageFeed } from './usage-feed.ts'
 import { providerOf, UsageLedger } from './usage-ledger.ts'
+import { CLI_NAME, EXECUTABLE_KEYS, kindOf, MAX_BACKUPS, repositorySection, Settings, type Chain, type Level } from './settings.ts'
+import { modelsMatrix } from './models-matrix.ts'
+import { Profiles, ProfileStore, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
+import { ProfileSchedules } from './profile-schedule.ts'
 import { startVoice } from './voice.ts'
-import { type Wait, WaitAlerts } from './wait-alerts.ts'
+import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
+import { RequestedNewsMailbox } from './requested-news.ts'
+import { Unread } from './unread.ts'
+import { levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type HealthKept, type Kind } from './health.ts'
+import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
+import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+import { installLines, INSTALL_AGE_MS, staleInstalls, systemInstallIO, type InstallIO } from '../../scripts/supervisor.ts'
+
+import { createCliCommands, type CliCommands } from './cli-commands.ts'
+import { HOME_NO_PLACE, statusLine } from './cli-shared.ts'
 
 /** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
  *  on the model `on` */
@@ -3949,7 +3951,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private async actLocal(a: Action): Promise<unknown> {
     switch (a.type) {
-      case 'send': {
+      case 'send':
         // a slash command goes into the CLI as you typed it, for the CLI to run
         if (isCommand(a.text) && !a.reply) return this.slashCommand(a.chat, a.text.trim(), a.attachments ?? [], a.cid)
         const space = this.spaceOf(a.chat, a.space)
@@ -3957,7 +3959,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // your words answer the choice cards still open there: they quote them
         if (this.chats.closeAsks(a.chat, a.text)) this.emit('snapshot')
         return this.send(a.chat, this.replying(a.chat, a.text, a.reply), a.attachments ?? [], false, a.cid)
-      }
       case 'react':
         return this.react(a.chat, a.message, a.emoji)
       case 'answer':

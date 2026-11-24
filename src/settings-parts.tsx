@@ -1,10 +1,9 @@
 // The pieces Settings shares with the pages it loads on demand (Models, Limits and the tables under them). The shell
 // owns them and the pages import them from here, never from Settings itself: no page holds the shell, and the shell
 // reaches a page only through React.lazy, so the first-load chunk keeps no page body.
-
-import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import clsx from 'clsx'
-import { type ComponentType, type FC, lazy, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
+import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import { getState, registry, setUI, type UI } from './kernel.ts'
 import { LimitChoice } from './LimitChoice.tsx'
 import type { Appearance } from './theme.ts'
@@ -19,7 +18,6 @@ import {
   DownIcon,
   Ghost,
   GlobeIcon,
-  ic,
   KeyIcon,
   MachineIcon,
   Menu,
@@ -36,6 +34,7 @@ import {
   TasksIcon,
   TextBox,
   UpDownIcon,
+  ic,
 } from './ui.tsx'
 
 /** the two heavy page bodies, brought in only when their page is opened */

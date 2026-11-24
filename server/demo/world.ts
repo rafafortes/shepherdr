@@ -2,50 +2,50 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
-import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
-import { type Picks, pickKey, picksIn, withPin, withRecent } from '../../shared/picks.ts'
 import {
+  apart,
+  asEmoji,
+  artifactQuote,
+  cardMessage,
+  modeCard,
+  nameProblem,
+  slugify,
   type Action,
   type ActivityAsk,
   type AddSpace,
   type Artifact,
-  apart,
-  artifactQuote,
-  asEmoji,
   type Chat,
-  cardMessage,
   type FolderEntry,
   type Folders,
   type LimitsQueue,
   type Machine,
   type Message,
-  modeCard,
   type Need,
-  nameProblem,
   type Place,
   type Snapshot,
-  slugify,
   type Task,
   type TaskStatus,
   type TermScreen,
   type UpdateCard,
   type WorktreeAsk,
 } from '../../shared/types.ts'
-import { clockWords } from '../../shared/when.ts'
-import { pilotLine } from '../live/heartbeat.ts'
-import { liveOK } from '../live/live-switch.ts'
-import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
-import { harnessProblem, harnessWords, type RestartAllRow, restartAllWords, restartClis } from '../live/restart.ts'
-import { type RoomInput, withRooms } from '../live/rooms.ts'
-import { secretPages, Vault } from '../live/secrets.ts'
-import { CLI_NAME, defaultOf, kindOf, type Level, repositorySection } from '../live/settings.ts'
-import { nextWords } from '../live/trigger.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
-import { demoActivity } from './activity.ts'
+import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
+import * as D from './data.ts'
 import { ARTIFACT_DATA, ARTIFACT_HTML, thumb } from './artifacts.ts'
 import { DEMO_PRS, demoWorktree } from './code.ts'
-import * as D from './data.ts'
+import { demoActivity } from './activity.ts'
+import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
+import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
+import { CLI_NAME, repositorySection, defaultOf, kindOf, type Level } from '../live/settings.ts'
+import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
+import { liveOK } from '../live/live-switch.ts'
+import { withRooms, type RoomInput } from '../live/rooms.ts'
+import { clockWords } from '../../shared/when.ts'
+import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
+import { nextWords } from '../live/trigger.ts'
+import { pilotLine } from '../live/heartbeat.ts'
+import { secretPages, Vault } from '../live/secrets.ts'
 
 const DEFAULT_WAYS = {
   review: defaultOf('brief.review') !== 'off',
@@ -55,19 +55,18 @@ const DEFAULT_WAYS = {
   waitChecks: defaultOf('brief.merge') === 'after GitHub checks',
 }
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
-
-import { shortUrl } from '../../shared/browser.ts'
-import { deleteSection, moveSpace, newSection, PINNED, type PlaceOrder, renameSection, type SectionDefs, sectionProblem, setOrder, sortPlaces } from '../../shared/order.ts'
-import { Browsers } from '../live/browser.ts'
 import { excerpt } from '../live/chatlines.ts'
-import { entryPatterns, type HeldFact, knownOf, limitsView } from '../live/limits-view.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
-import { keyOf, type LiveAgent, modelsSummary, type TaskFact } from '../live/models-summary.ts'
-import { ProfileSchedules } from '../live/profile-schedule.ts'
-import { ProfileStore, Profiles, type Site } from '../live/profiles.ts'
+import { keyOf, modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
+import { entryPatterns, knownOf, limitsView, type HeldFact } from '../live/limits-view.ts'
 import { providerOf } from '../live/usage-ledger.ts'
 import { demoQuota, demoUsage } from './usage.ts'
+import { ProfileSchedules } from '../live/profile-schedule.ts'
+import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
+import { Browsers } from '../live/browser.ts'
+import { shortUrl } from '../../shared/browser.ts'
+import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
 
 let seq = 1000
 const id = () => `d${++seq}`

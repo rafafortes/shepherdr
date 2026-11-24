@@ -6,21 +6,20 @@
 // Settings come in two groups: what agents are told (only words in their prompts) and how Shepherdr runs (the rest).
 // The main machine keeps the Everywhere level; a worker for another machine (machines.ts) reads it from the main
 // machine's file as it changes, and its shepherdr set for Everywhere is run there.
-
+import { CHAT_KINDS, chatProblem } from './readers/index.ts'
+import { cleanFlagsLine, KINDS as FLAG_KINDS, NAMES as FLAG_NAMES, parseFlags } from './flags.ts'
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
-import type { SetBy } from '../../shared/brief.ts'
-import { fitToProviders, formatMaxAtOnce, type Lowered, loweredWords, type MaxEntry, parseMaxAtOnce, toHarnessPatterns } from '../../shared/model-caps.ts'
-import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { PLACE_MAX } from '../../shared/space-order.ts'
 import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
-import { cleanFlagsLine, KINDS as FLAG_KINDS, NAMES as FLAG_NAMES, parseFlags } from './flags.ts'
-import { picksOf, rememberModel } from './model-picks.ts'
+import type { SetBy } from '../../shared/brief.ts'
+import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, offers, scopeOpencodeText, scopePatterns } from './models.ts'
-import { type Reviewer, type Said, SEVERITIES, settingsBlock, settingsLines, type Ways } from './prompts.ts'
-import { CHAT_KINDS, chatProblem } from './readers/index.ts'
-import { type EventRule, eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone } from './trigger.ts'
+import { picksOf, rememberModel } from './model-picks.ts'
+import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
+import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, toHarnessPatterns, type Lowered, type MaxEntry } from '../../shared/model-caps.ts'
+import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
 const FALLBACK_KINDS = [
@@ -185,10 +184,13 @@ export const ALERT_AFTER = ['10 s', '30 s', '1 min', '2 min', '5 min']
 /** the key a backup pair key is read from while it is at default: the coordinators' backup has its own model and effort,
  *  and follows the tasks' pair until the human sets one, so every configuration in use keeps its meaning */
 const FOLLOWS: Record<string, string> = { 'coordinator.fallbackModel': 'backup.model', 'coordinator.fallbackEffort': 'backup.effort' }
+/** an explicit CLI-default written by a chain move: plain default still follows the tasks' backup at Coordinator → Backup 1 */
+const OWN_DEFAULT = 'own default'
 
 /** a pair's model (or effort) as it is read: its own, or the key it follows while it is at default (FOLLOWS) */
 const pairValue = (get: (key: string) => string, pair: Pair, what: 'model' | 'effort'): string => {
   const own = get(pair[what])
+  if (own === OWN_DEFAULT) return 'default'
   const up = FOLLOWS[pair[what]]
   return up && own.trim().toLowerCase() === 'default' ? get(up) : own
 }
@@ -974,6 +976,7 @@ export class Settings {
    *  and says which (rows, shepherdr show) */
   readAt(key: string, l: Level = 'machine'): { value: string; from: LevelKind | 'default'; follows?: string } {
     const p = this.pick(key, l)
+    if (p.value === OWN_DEFAULT) return { ...p, value: 'default' }
     const up = FOLLOWS[key]
     if (!up || p.value.trim().toLowerCase() !== 'default') return p
     const q = this.pick(up, l)
@@ -1096,6 +1099,7 @@ export class Settings {
       role,
       (entries) => {
         if (!Number.isInteger(at) || at < 0 || at >= entries.length) return { ok: false, error: 'Choose a position in this chain.' }
+        if (!kindOf(cli)) return { ok: false, error: 'Choose an agent CLI for the new entry.' }
         if (entries.every((x) => !!kindOf(x.cli))) return { ok: false, error: 'This chain already has a primary and five backups.' }
         const drop = entries.findLastIndex((x) => !kindOf(x.cli))
         const next = entries.filter((_, i) => i !== drop)
@@ -1116,11 +1120,17 @@ export class Settings {
     const next = change(this.chainAt(role, l))
     if (!next.ok) return next
     return this.setMany(
-      rolePairs(role).flatMap((p, i) => [
-        { key: p.cli, value: next.entries[i].cli, level: l },
-        { key: p.model, value: next.entries[i].model, level: l },
-        { key: p.effort, value: next.entries[i].effort, level: l },
-      ]),
+      rolePairs(role).flatMap((p, i) => {
+        const entry = next.entries[i]
+        // Coordinator → Backup 1 still follows the tasks' pair while its value is plain default. A moved or inserted
+        // entry that means this CLI's own default must say so explicitly, or the slot would silently change its model.
+        const own = (what: 'model' | 'effort') => (p.cli === PAIRS.coordinatorBackup.cli && entry[what].trim().toLowerCase() === 'default' ? OWN_DEFAULT : entry[what])
+        return [
+          { key: p.cli, value: entry.cli, level: l },
+          { key: p.model, value: own('model'), level: l },
+          { key: p.effort, value: own('effort'), level: l },
+        ]
+      }),
     )
   }
 
@@ -1188,7 +1198,7 @@ export class Settings {
   /** why a model or effort doesn't fit the CLI its own pair of keys names at a level: it lists what does */
   private unfit(key: string, value: string, l: Level): string | undefined {
     const own = pairOfKey(key)
-    if (!own || value.trim().toLowerCase() === 'default') return undefined
+    if (!own || value.trim().toLowerCase() === 'default' || value === OWN_DEFAULT) return undefined
     const kinds = this.pairKinds(own.pair, own.what, l).filter((k) => !!modelsOf(k))
     // no CLI to ask (its own or none set): an effort is one of the levels Shepherdr knows
     if (!kinds.length) return own.what === 'effort' && !EFFORTS.includes(value.trim().toLowerCase()) ? `Pick one of: ${EFFORTS.join(' · ')}.` : undefined
@@ -1474,11 +1484,12 @@ export class Settings {
   /** what a row's reset goes back to: its value one level up or, while that is default, the key a backup key follows there
    *  (the followed key's own value at this level, where it may be set) */
   private resetTo(key: string, l: Level, up: Level): { value: string; from: LevelKind | 'default' } {
+    const shown = (p: { value: string; from: LevelKind | 'default' }) => (p.value === OWN_DEFAULT ? { ...p, value: 'default' } : p)
     const above = this.pick(key, up)
     const peer = FOLLOWS[key]
-    if (!peer || above.value.trim().toLowerCase() !== 'default') return above
+    if (!peer || above.value.trim().toLowerCase() !== 'default') return shown(above)
     const q = this.pick(peer, l)
-    return q.value.trim().toLowerCase() === 'default' ? above : q
+    return shown(q.value.trim().toLowerCase() === 'default' ? above : q)
   }
 
   /** a backup's Model row whose CLI has no model for the value it reads — its own, or the tasks' pair's while it follows:

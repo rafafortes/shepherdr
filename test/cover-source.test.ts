@@ -330,6 +330,18 @@ describe('the screen acts', () => {
     expect(src.settings.chainAt('task', { space: sp.p.name })).toEqual(before)
   })
 
+  test('a model chain can be moved at Everywhere or for this machine without changing the other scope', async () => {
+    src.settings.set('task.agent', 'Claude Code', 'all')
+    src.settings.set('task.fallback', 'Codex', 'all')
+    src.settings.set('task.fallback2', 'pi', 'all')
+    expect(await src.act({ type: 'model-chain', role: 'task', place: 'all', op: 'move', from: 2, to: 0 })).toEqual({ ok: true })
+    expect(src.settings.pick('task.agent', 'all')).toEqual({ value: 'pi', from: 'all' })
+    const everywhere = src.settings.everywhere()
+    expect(await src.act({ type: 'model-chain', role: 'task', place: placeId.machine(), op: 'move', from: 1, to: 0 })).toEqual({ ok: true })
+    expect(src.settings.pick('task.agent', 'machine')).toEqual({ value: 'Claude Code', from: 'machine' })
+    expect(src.settings.everywhere()).toEqual(everywhere)
+  })
+
   test('a task is archived and brought back, paused, and a stop that fails says why', async () => {
     const sp = await space('acts')
     const t = task(sp)

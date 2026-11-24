@@ -3,21 +3,20 @@
 // opens a small popover (a phone: the same controls under its line) with the CLI, model and effort it runs on, and
 // writes the same setting keys at that row's level, through the setting action. The bulk actions: a column's "Set for
 // every space…" and a space's "Copy models to…", each confirmed first. The table comes from one read (models-matrix.ts).
-
-import type { MatrixRow, MatrixSlot, ModelsMatrix, SettingRow, ModelsSummary as Summary } from '@shared/types.ts'
 import clsx from 'clsx'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { Anchored, OnTop } from './anchored.tsx'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { MatrixRow, MatrixSlot, ModelsMatrix, ModelsSummary as Summary, SettingRow } from '@shared/types.ts'
+import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
+import { Anchored, OnTop } from './anchored.tsx'
 import { Pop } from './cell-pop.tsx'
 import { press } from './drag.ts'
-import { act, useSnap } from './kernel.ts'
-import ModelsSummary from './ModelsSummary.tsx'
 import { ProfilesBar } from './Profiles.tsx'
-import QuotaSettings from './QuotaSettings.tsx'
+import { Control, Editor, Refused, openPage } from './settings-parts.tsx'
 import { Dialog } from './rowmenu.tsx'
-import { Control, Editor, openPage, Refused } from './settings-parts.tsx'
-import { DownIcon, Ghost, ic, Menu, MenuItem, MoreIcon, PlusIcon, Primary, Small, UpIcon } from './ui.tsx'
+import ModelsSummary from './ModelsSummary.tsx'
+import QuotaSettings from './QuotaSettings.tsx'
+import { DownIcon, Ghost, Menu, MenuItem, MoreIcon, PlusIcon, Primary, Small, UpIcon, ic } from './ui.tsx'
 
 /** a CLI's name when it is off: a backup that doesn't run */
 const OFF = 'off'
@@ -27,7 +26,7 @@ type Target = { slot: MatrixSlot } | { plain: Plain }
 /** one setting key written, its value (null: reset to what the level above gives) */
 type Write = [key: string, value: string | null]
 /** a chain shown in its new order until the matrix read has caught up */
-type PendingOrder = { order: number[]; words: string[] }
+type PendingOrder = { order: number[]; words: string[]; settled: boolean }
 type ChainOp = { op: 'move'; from: number; to: number } | { op: 'insert'; at: number; cli: string }
 
 const chainKey = (row: MatrixRow, role: MatrixSlot['role']) => `${row.id}|${role}`
@@ -184,7 +183,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       for (const [key, pending] of Object.entries(current)) {
         const [rowId, role] = key.split('|') as [string, MatrixSlot['role']]
         const cells = m?.rows.find((r) => r.id === rowId)?.cells
-        if (!pending.order.every((_, i) => cells?.[`${role}.${i}`]?.words === pending.words[i])) continue
+        if (!pending.settled && !pending.order.every((_, i) => cells?.[`${role}.${i}`]?.words === pending.words[i])) continue
         if (next === current) next = { ...current }
         delete next[key]
       }
@@ -213,7 +212,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   }
   const showOrder = (row: MatrixRow, g: Group, order: number[]) => {
     const words = order.map((n) => cellOf(row, g.all[n]).words)
-    setOrders((o) => ({ ...o, [chainKey(row, g.role)]: { order, words } }))
+    setOrders((o) => ({ ...o, [chainKey(row, g.role)]: { order, words, settled: false } }))
   }
   /** one whole-chain write at this row's scope; a refusal puts the shown order back */
   const writeChain = async (row: MatrixRow, g: Group, op: ChainOp) => {
@@ -227,6 +226,14 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       setOrders((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key)))
       setChainError(`${row.name} · ${g.title}: ${r?.error ?? "That didn't go through."}`)
       return false
+    }
+    if (op.op === 'move') {
+      // The server may normalize an entry (Coordinator → Backup 1's explicit CLI-default, for example). Keep the shown
+      // order through the write, then let the first matrix read after it take over, whatever words it brings back.
+      setOrders((o) => (o[key] ? { ...o, [key]: { ...o[key], settled: true } } : o))
+      void act({ type: 'models-matrix' })
+        .then((next) => setM(next as ModelsMatrix))
+        .catch(() => setOrders((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key))))
     }
     void askWaitingMany(m.slots.filter((x) => x.role === g.role).flatMap((x) => [x.cli, x.model, x.effort].map((key) => ({ key, place: row.id }))))
     return true
@@ -351,7 +358,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
               </MenuItem>
               <MenuItem
                 icon={<PlusIcon className={ic} />}
-                disabled={count >= g.all.length}
+                disabled={topOf(row, g.all) >= g.all.length - 1 || row.values[slot.cli].value.trim().toLowerCase() === OFF}
                 className="disabled:pointer-events-none disabled:text-fg3"
                 onClick={() => {
                   setMenu(null)

@@ -24,8 +24,8 @@
 // Machines, sections and spaces, the home spaces too, show A to Z (a home space first, a new section last) until dragged
 // into another order (drag.ts; Alt+Shift+↑/↓ on a focused space), which the main machine keeps for every device.
 // Alt+↑/↓ (Option on a Mac) goes to the space above or below as they show, from anywhere.
-
-import { dragging, press } from '@client/drag.ts'
+import clsx from 'clsx'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import {
   act,
   counts,
@@ -34,31 +34,30 @@ import {
   goPlace,
   manyMachines,
   openSplit,
-  type Pane,
-  pausedMachine,
-  pausedPlace,
   pauseMachine,
   pausePlace,
+  pausedMachine,
+  pausedPlace,
   placeOf,
   removeSpace,
   setUI,
   splitClick,
-  type UI,
   useSnap,
   useUI,
+  type Pane,
+  type UI,
 } from '@client/kernel.ts'
-import { ConfirmRestartAll, RestartAllItem, RestartItem } from '@client/restart.tsx'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
 import {
-  AttentionBadge,
   BackIcon,
   BellIcon,
   BellSlashIcon,
+  AttentionBadge,
   DeleteIcon,
   DownIcon,
   HashIcon,
-  IconButton,
   ic,
+  IconButton,
   List,
   MenuItem,
   MenuLabel,
@@ -75,8 +74,8 @@ import {
   ReadIcon,
   RemoveProjectIcon,
   RenameIcon,
-  RowText,
   rowClass,
+  RowText,
   SectionIcon,
   ServerIcon,
   SplitIcon,
@@ -84,12 +83,12 @@ import {
   UnpinIcon,
 } from '@client/ui.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
+import { ConfirmRestartAll, RestartAllItem, RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
-import { kept, PINNED, type PlaceOrder, sectionsIn, TOP } from '@shared/order.ts'
-import { type Machine, machineName, NAME_MAX, nameProblem, type Place, type Section, type Snapshot, slugify } from '@shared/types.ts'
-import clsx from 'clsx'
-import { Fragment, type LiHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { kept, PINNED, sectionsIn, TOP, type PlaceOrder } from '@shared/order.ts'
+import { machineName, NAME_MAX, nameProblem, slugify, type Machine, type Place, type Section, type Snapshot } from '@shared/types.ts'
 import { AddSpace, asTyped, openAddSpace } from './add.tsx'
+import { dragging, press } from '@client/drag.ts'
 import { openDeleteSection, openNewSection, openRename, SectionDialogs } from './section.tsx'
 
 /* ---------- folded sections (Pinned, the machines), remembered on this device ---------- */

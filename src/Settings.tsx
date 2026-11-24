@@ -5,40 +5,39 @@
 // Alerts and voice are one for all; a task has none of its own. Appearance is each device's own, as are the pages
 // plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
 // the list; a wider screen keeps the list down its side.
-
-import { type MatrixRole, machineName, type Place, type SettingRow, type SettingSection } from '@shared/types.ts'
 import clsx from 'clsx'
-import { Component, Fragment, type ReactNode, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import { askWaiting } from './apply-waiting.tsx'
+import { Component, Fragment, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { machineName, type Place, type SettingRow, type SettingSection } from '@shared/types.ts'
 import { useClock } from './clock.ts'
-import { PlacesToggle } from './Frame.tsx'
+import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
-import { act, registry, setUI, type UI, useSnap, useUI } from './kernel.ts'
+import { PlacesToggle } from './Frame.tsx'
+import { askWaiting } from './apply-waiting.tsx'
 import { Stack } from './Stack.tsx'
+import { APPEARANCES, setAppearance, useAppearance } from './theme.ts'
+import { BackIcon, CheckIcon, Empty, Ghost, Head, IconButton, NextIcon, PhoneTop, PlaceIcon, PlusIcon, RoundButton, SecretField, Small, Who, XIcon, field, ic } from './ui.tsx'
 import {
   APPEARANCE,
   Control,
-  card,
   DocValue,
+  LOOKS,
+  Pick,
+  SEGMENTS,
+  TriggerValue,
+  card,
   groupsOf,
   heading,
   iconOf,
-  LOOKS,
   levelHint,
   levelName,
-  levelOf,
   levelsOf,
+  levelOf,
   numShown,
-  type Page,
-  Pick,
   rowLook,
-  SEGMENTS,
   shown,
   subHeading,
-  TriggerValue,
+  type Page,
 } from './settings-parts.tsx'
-import { APPEARANCES, setAppearance, useAppearance } from './theme.ts'
-import { BackIcon, CheckIcon, Empty, field, Ghost, Head, IconButton, ic, NextIcon, PhoneTop, PlaceIcon, PlusIcon, RoundButton, SecretField, Small, Who, XIcon } from './ui.tsx'
 
 // the shared names keep the old import path too: main.tsx and the human's own plugins import pieces from here
 export * from './settings-parts.tsx'
@@ -130,7 +129,7 @@ function AutopilotRunNow({ place }: { place: Place }) {
 const follows = (row: SettingRow, value: string) => (row.inherits && value === row.inherits.value ? null : value)
 
 /** a page's row, or the button that adds the next backup of a role's chain under its last one */
-type Item = SettingRow | { add: { key: string; value: string; label: string; role: MatrixRole; n: number }; group?: string; sub?: string }
+type Item = SettingRow | { add: { key: string; value: string; label: string }; group?: string; sub?: string }
 
 /** a group's rows in runs: each role's backups (sub) as one run of their own, the rows around them as the others */
 const runsOf = (rows: Item[]) =>
@@ -160,7 +159,6 @@ function PageBody({
   page,
   phone,
   set,
-  insert,
   refused,
   clear,
   hint,
@@ -168,7 +166,6 @@ function PageBody({
   page: Page
   phone: boolean
   set: (key: string, value: string | null) => void
-  insert: (role: MatrixRole, at: number, cli: string, key: string) => Promise<void>
   refused: (key: string) => string | undefined
   clear: (key: string) => void
   hint?: string
@@ -189,15 +186,10 @@ function PageBody({
   visible.forEach((r, i) => {
     items.push(r)
     if (!r.chain || visible[i + 1]?.chain?.of === r.chain.of || !on(cliOf(r.chain.of, 1))) return
-    const chain = r.chain
-    const next = page.rows.find((x) => x.chain?.of === chain.of && x.chain.cli && !shows(x))
+    const next = page.rows.find((x) => x.chain?.of === r.chain!.of && x.chain.cli && !shows(x))
     if (!next) return
-    const last = visible.slice(0, i + 1).findLast((x) => x.chain?.of === chain.of && x.chain.cli && on(x))
-    items.push({
-      add: { key: next.key, value: last?.value ?? next.options?.find((o) => o !== 'off') ?? 'off', label: next.chain?.add ?? 'Add a backup', role: chain.of as MatrixRole, n: next.chain?.n ?? 0 },
-      group: r.group,
-      sub: r.sub,
-    })
+    const last = visible.slice(0, i + 1).findLast((x) => x.chain?.of === r.chain!.of && x.chain.cli && on(x))
+    items.push({ add: { key: next.key, value: last?.value ?? next.options?.find((o) => o !== 'off') ?? 'off', label: next.chain!.add ?? 'Add a backup' }, group: r.group, sub: r.sub })
   })
   const groups: { name?: string; rows: Item[] }[] = []
   for (const row of items) {
@@ -279,7 +271,7 @@ function PageBody({
             data-add-backup={row.add.key}
             onClick={() => {
               setAdded((a) => [...a, row.add.key])
-              void insert(row.add.role, row.add.n, row.add.value, row.add.key)
+              set(row.add.key, row.add.value)
             }}
             className="press-dim relative flex min-h-9 items-center gap-1.5 font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:min-h-11"
           >
@@ -618,16 +610,6 @@ export default function Settings() {
     // a task's agent or reviewer saved: the tasks already waiting may take it too, asked first (none asked when none would change)
     if (r?.ok && !r.waiting) void askWaiting(key, page.targets?.[key] ?? page.level)
   }
-  const insert = async (role: MatrixRole, position: number, cli: string, key: string) => {
-    const place = page.targets?.[key] ?? page.level
-    const r = (await act({ type: 'model-chain', role, op: 'insert', at: position, cli, ...(place ? { place } : {}) }).catch((e: Error) => ({ ok: false, error: e.message }))) as {
-      ok?: boolean
-      error?: string
-      waiting?: boolean
-    }
-    setRefused((x) => ({ ...x, [at(key)]: r?.ok === false ? (r.error ?? 'Refused.') : r?.waiting ? `Set once ${machineName(snap.machines, page.machine)} is back.` : '' }))
-    if (r?.ok && !r.waiting) void askWaiting(`${role}.agent`, place)
-  }
   const close = () => setUI({ settings: null })
   const scroller = useRef<HTMLElement>(null)
   const go = (section: number) => {
@@ -655,7 +637,6 @@ export default function Settings() {
         page={page}
         phone={phone}
         set={set}
-        insert={insert}
         refused={(key) => refused[at(key)]}
         clear={clear}
         hint={

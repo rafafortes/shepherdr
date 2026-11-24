@@ -64,6 +64,28 @@ describe('a model chain moves and inserts whole entries', () => {
     expect(s.moveChain('coordinator', 1, 2, 'all')).toEqual({ ok: true })
     expect(chain(s, 'coordinator')[2]).toEqual(before[1])
   })
+
+  test('a default entry moved to Coordinator Backup 1 keeps meaning its own CLI default, not the tasks backup model', () => {
+    const s = fresh({
+      everywhere: {
+        'backup.model': 'gpt-6-sol',
+        'backup.effort': 'xhigh',
+        'coordinator.agent': 'Claude Code',
+        'coordinator.fallback2': 'Codex',
+      },
+    })
+    expect(s.moveChain('coordinator', 2, 1, 'all')).toEqual({ ok: true })
+    expect(chain(s, 'coordinator')[1]).toEqual({ cli: 'Codex', model: 'default', effort: 'default' })
+    expect(s.modelOf('coordinatorBackup', 'codex')).toEqual({ model: undefined, effort: undefined })
+    expect(s.readAt('coordinator.fallbackModel', 'all')).toEqual({ value: 'default', from: 'all' })
+  })
+
+  test('Insert above Coordinator Backup 1 starts on its row CLI without adopting a model that CLI cannot run', () => {
+    const s = fresh({ everywhere: { 'backup.model': 'gpt-6-sol', 'backup.effort': 'xhigh', 'coordinator.agent': 'Claude Code' } })
+    expect(s.insertChain('coordinator', 1, 'Claude Code', 'all')).toEqual({ ok: true })
+    expect(chain(s, 'coordinator')[1]).toEqual({ cli: 'Claude Code', model: 'default', effort: 'default' })
+    expect(s.modelOf('coordinatorBackup', 'claude')).toEqual({ model: undefined, effort: undefined })
+  })
 })
 
 describe('a model chain writes only the scope being edited', () => {
@@ -89,6 +111,7 @@ describe('a model chain writes only the scope being edited', () => {
     expect(chain(s)).toEqual(before)
     expect(s.moveChain('task', -1, 0, 'all')).toEqual({ ok: false, error: 'Choose two positions in this chain.' })
     expect(s.insertChain('task', 6, 'pi', 'all')).toEqual({ ok: false, error: 'Choose a position in this chain.' })
+    expect(s.insertChain('task', 1, 'off', 'all')).toEqual({ ok: false, error: 'Choose an agent CLI for the new entry.' })
 
     const full = mixed()
     full.set('task.fallback5', 'Claude Code', 'all')
