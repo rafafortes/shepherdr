@@ -1104,3 +1104,21 @@ a task's own Terminal stays its side-panel item. PR #756's reset-on-open is not 
 to reset — a chat is stuck only while its own key is in `ui.term`, and the new row clears exactly that.
 `test/layout-panel.test.ts` proves the card repro failing before and passing after (the narrow window's ⋯ menu, the
 desktop's Ctrl+`, and a split pane's Ctrl+`), with the coordinator's toggle still tested.
+
+## Not from upstream: a CLI retrying inside its turn (SHE-200)
+
+Checked 2026-11-24 on `upstream/main` (`bcfd3fde`) and `upstream/v2.0` (`ebb17d58`), their code, history and public
+issues and pull requests (read only). Neither line reads a CLI's in-turn retry state: provider errors are read only
+when a turn ends (`9b8b0a5e` introduced retry.ts, `24106315` the fallback agent, `74da1e63` the 2.0 copy), and 3.2
+(`a1d90086`, `mods/tasks/bin/herdr_task/provider.py`) drops auto-retry altogether — "it is never retried by itself:
+3.2". The closest anything gets is pi's reader note that a CLI retrying an error starts a new turn
+(`upstream/v2.0:server/live/readers/pi.ts`), the blind spot here: OpenCode 2 retries inside the turn with growing
+backoff ("Retrying in 836s · attempt 7 · Rate limit exceeded") and herdr still says `working`, so no cut reaches
+retry.ts and no backup goes in. Issue and PR searches for retry, rate limit, backoff and quota found nothing on this.
+
+**not from upstream** (ours): read the retry state a CLI keeps while its turn runs — OpenCode's own session status and
+messages through its API where the version has them, then its waiting line, and the same line for Claude Code, pi and
+agy — classify it with retry.ts's rules, and hand a loop past the passing-error window (or one whose next wait is
+beyond it, or an allowance that is out) to the same backup chain a cut uses, stopping the old CLI's pane. A short
+retry that recovers leaves the task alone. Three.x's "never retried by itself" is not taken: our fork keeps the
+wait-and-nudge policy and its backup chain by design. No upstream code ports: the mechanism does not exist there.

@@ -45,7 +45,7 @@ import { parseHosts } from '../hosts.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
 import { wrapPage } from '../frame.ts'
-import { Agents, hidden, type Spec } from './agents.ts'
+import { Agents, hidden, type AgentRecord, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
 import { launchesAgents } from './launch-policy.ts'
@@ -117,7 +117,8 @@ import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
 
-import { carryOn, momentOf, Retries, resetOf, runOutOf, type Cut, type Retry } from './retry.ts'
+import { carryOn, momentOf, Retries, resetOf, runOutOf, type Cut, type LoopState, type Retry } from './retry.ts'
+import { opencodeRetry, screenRetry } from './retry-loop.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
@@ -221,6 +222,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   lateCutFor = 60_000
   /** the chats whose turn ended and whose log is looked at again for a cut, and until when */
   private lateCuts = new Map<string, number>()
+  /** a working CLI's own retry state is read on this pace; a cut at the end of a turn is watched separately */
+  loopEvery = 5_000
+  private looping = false
+  /** a test puts its own reader here so no CLI or herdr is reached; by default OpenCode's API first, then the screen */
+  loopReader: (key: string, rec: AgentRecord, now: number) => Promise<LoopState | undefined> = (key, rec, now) => this.readLoop(key, rec, now)
   usageFeed = new UsageFeed(this.usage, () => this.agents.records)
   /** Settings → Models → Quotas (quotas.ts): Claude Code's /usage, Command Code's account (its key from Secrets), and the
    *  alerts of every window at the warning share. A test puts its own Claude read and Command Code's fetch here, so no
@@ -524,6 +530,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.sayTookOver()
     // watched chats: read new log lines once a second; schedules once a minute
     this.timers.push(setInterval(() => this.stall.run('pollChats', () => this.pollChats()), 1000))
+    // a provider retrying inside a CLI's turn: herdr still says "working", so only the CLI's own state tells us
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('watchRetryLoops', () => void this.watchRetryLoops().catch(() => undefined)), this.loopEvery))
     // parsed chat events are bounded: idle chats put theirs away every ten minutes (PERFS-07)
     this.timers.push(setInterval(() => this.stall.run('chatMemory', () => this.chats.sweep()), 600_000))
     // a ledger from before the harness keys: its run-outs take the keys of their chats' CLIs (usage-ledger.ts), then the feed reads on
@@ -2840,6 +2848,39 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       go: { place: key, focus: id },
       tag: `revive:${key}`,
     })
+  }
+
+  /** its own retry state, before anything on the screen: OpenCode's status/messages where its version has them, then
+   *  the waiting line every CLI prints. Reading a screen of an agent with no pane gives nothing, as it should. */
+  private async readLoop(key: string, rec: AgentRecord, now: number): Promise<LoopState | undefined> {
+    if (rec.kind === 'opencode' && rec.sessionId) {
+      const fromApi = await opencodeRetry(rec.sessionId, rec.cwd, undefined, now).catch(() => undefined)
+      if (fromApi) return fromApi
+    }
+    return screenRetry(await this.agents.screenText(key), now)
+  }
+
+  /**
+   * A provider retrying inside a CLI's turn never ends it, so no cut reaches checkCut and no backup goes in. Read the
+   * agents that herdr says are working, feed what their CLI says to the same retry policy, and clear a loop that
+   * stopped: the handover that follows (engine.ts cantGoOn, coordinatorCantGoOn) closes the old pane, so two agents
+   * never run on one task. One pass at a time; a slow CLI read never holds another agent's state back.
+   */
+  async watchRetryLoops(now = Date.now()) {
+    if (this.looping) return
+    this.looping = true
+    try {
+      for (const [key, rec] of Object.entries(this.agents.records)) {
+        if (this.peers?.owner(key)) continue
+        if (this.agents.status(key) !== 'working') continue
+        if (!key.includes('/') && !this.places.coordinator(key)) continue
+        const state = await this.loopReader(key, rec, now).catch(() => undefined)
+        if (state) this.retries.loop(key, state, now)
+        else this.retries.loopEnded(key)
+      }
+    } finally {
+      this.looping = false
+    }
   }
 
   /** what cut off an agent's last turn, if its log says the provider did */
