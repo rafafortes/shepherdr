@@ -125,7 +125,7 @@ import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } fr
 import { alertShare, Quotas } from './quotas.ts'
 import { UsageFeed } from './usage-feed.ts'
 import { providerOf, UsageLedger } from './usage-ledger.ts'
-import { CLI_NAME, EXECUTABLE_KEYS, kindOf, MAX_BACKUPS, repositorySection, Settings, type Level } from './settings.ts'
+import { CLI_NAME, EXECUTABLE_KEYS, kindOf, MAX_BACKUPS, repositorySection, Settings, type Chain, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { Profiles, ProfileStore, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
 import { ProfileSchedules } from './profile-schedule.ts'
@@ -4126,6 +4126,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a space's place is a setting the Limits view shows: dropped, as the setting action's own writes are
         if (r.ok) {
           this.limitsKept = undefined
+          this.emit('snapshot')
+        }
+        return r
+      }
+      case 'model-chain': {
+        // the row's own scope only; Settings writes the whole chain after every entry has passed validation
+        const pr = a.place?.startsWith('p:') ? this.spaceKey(a.place) : undefined
+        if (a.place?.startsWith('p:') && !pr) return { ok: false, error: 'No such space.' }
+        const level: Level = pr ? { space: pr } : a.place?.startsWith('m:') ? 'machine' : 'all'
+        const r = a.op === 'move' ? this.settings.moveChain(a.role, a.from, a.to, level) : this.settings.insertChain(a.role, a.at, a.cli, level)
+        if (r.ok) {
+          this.limitsKept = undefined
+          if (a.role === 'task' || a.role === 'coordinator') for (const k of this.watched) this.emit('chat', k)
           this.emit('snapshot')
         }
         return r

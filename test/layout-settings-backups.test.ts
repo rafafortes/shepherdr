@@ -92,6 +92,44 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
     }
   })
 
+  test('Add a backup in a space writes only the new CLI key and leaves the inherited chain unpinned', async () => {
+    if (!browser) return
+    await reset()
+    const store = world.stores['vm-str']
+    for (const level of ['all', { space: 'gtm' }] as const)
+      for (const key of ['task.agent', 'task.model', 'task.effort', 'task.fallback', 'backup.model', 'backup.effort', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort'])
+        store.set(key, null, level)
+    await setChains({
+      'task.agent': 'Claude Code',
+      'task.model': 'claude-opus-5-5',
+      'task.effort': 'high',
+      'task.fallback': 'Codex',
+      'backup.model': 'gpt-6-sol',
+      'backup.effort': 'xhigh',
+    })
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: /^Editing:/ }).click()
+      await page.getByRole('menuitemradio', { name: 'gtm · vm-str', exact: true }).click()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      await settled(page)
+      await backupsOf(groupOf(settings, 'Tasks')).getByRole('button', { name: 'Add a backup', exact: true }).click()
+      await backupsOf(groupOf(settings, 'Tasks')).getByRole('button', { name: 'Backup 2: Codex', exact: true }).waitFor()
+      const store = world.stores['vm-str']
+      expect(store.pick('task.fallback2', { space: 'gtm' }).from).toBe('space')
+      for (const key of ['task.agent', 'task.model', 'task.effort', 'task.fallback', 'backup.model', 'backup.effort']) expect(store.pick(key, { space: 'gtm' }).from).not.toBe('space')
+    } finally {
+      for (const level of ['all', { space: 'gtm' }] as const)
+        for (const key of ['task.agent', 'task.model', 'task.effort', 'task.fallback', 'backup.model', 'backup.effort', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort'])
+          store.set(key, null, level)
+      await reset()
+      await page.close()
+    }
+  })
+
   test('phone: the sub-block is indented inside its own rounded group, and the way back sits last', async () => {
     await setChains({ 'task.fallback': 'Codex', 'task.fallback2': 'off', 'coordinator.fallback': 'off', 'advisor.fallback': 'off' })
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })

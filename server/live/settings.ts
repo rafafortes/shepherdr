@@ -184,10 +184,13 @@ export const ALERT_AFTER = ['10 s', '30 s', '1 min', '2 min', '5 min']
 /** the key a backup pair key is read from while it is at default: the coordinators' backup has its own model and effort,
  *  and follows the tasks' pair until the human sets one, so every configuration in use keeps its meaning */
 const FOLLOWS: Record<string, string> = { 'coordinator.fallbackModel': 'backup.model', 'coordinator.fallbackEffort': 'backup.effort' }
+/** an explicit CLI-default written by a chain move: plain default still follows the tasks' backup at Coordinator → Backup 1 */
+const OWN_DEFAULT = 'own default'
 
 /** a pair's model (or effort) as it is read: its own, or the key it follows while it is at default (FOLLOWS) */
 const pairValue = (get: (key: string) => string, pair: Pair, what: 'model' | 'effort'): string => {
   const own = get(pair[what])
+  if (own === OWN_DEFAULT) return 'default'
   const up = FOLLOWS[pair[what]]
   return up && own.trim().toLowerCase() === 'default' ? get(up) : own
 }
@@ -973,6 +976,7 @@ export class Settings {
    *  and says which (rows, shepherdr show) */
   readAt(key: string, l: Level = 'machine'): { value: string; from: LevelKind | 'default'; follows?: string } {
     const p = this.pick(key, l)
+    if (p.value === OWN_DEFAULT) return { ...p, value: 'default' }
     const up = FOLLOWS[key]
     if (!up || p.value.trim().toLowerCase() !== 'default') return p
     const q = this.pick(up, l)
@@ -1028,27 +1032,32 @@ export class Settings {
     if (typeof l === 'object' && !Object.keys(at).length) delete this.d.spaces[l.space]
     this.save()
     if (key === 'opencode.models') this.scopeOpencode()
-    // a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
-    // own, the demo's, keeps its picks to itself)
-    const own = pairOfKey(key)
-    if (!this.seed && value !== null && own?.what === 'model') {
-      // the tasks' backup model is one the tasks' backup CLI has, and the coordinators' one while it follows it; the
-      // coordinators' own model, one its own backup CLI has
-      const kinds =
-        own.pair === PAIRS.backup
-          ? [this.kindOf('backup', l), this.pick(PAIRS.coordinatorBackup.model, l).value.trim().toLowerCase() === 'default' ? this.kindOf('coordinatorBackup', l) : undefined]
-          : [kindOf(this.pick(own.pair.cli, l).value)]
-      for (const kind of kinds) {
-        const picked = kind ? findModel(kind, value) : undefined
-        if (kind && picked) rememberModel(kind, picked.id)
-      }
-    }
+    this.choseModel(key, value, l)
     return note ? { ok: true, note } : { ok: true }
   }
 
+  /** a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
+   *  own, the demo's, keeps its picks to itself) */
+  private choseModel(key: string, value: string | null, l: Level) {
+    if (this.seed || value === null) return
+    const own = pairOfKey(key)
+    if (own?.what !== 'model') return
+    // the tasks' backup model is one the tasks' backup CLI has, and the coordinators' one while it follows it; the
+    // coordinators' own model, one its own backup CLI has
+    const kinds =
+      own.pair === PAIRS.backup
+        ? [this.kindOf('backup', l), this.pick(PAIRS.coordinatorBackup.model, l).value.trim().toLowerCase() === 'default' ? this.kindOf('coordinatorBackup', l) : undefined]
+        : [kindOf(this.pick(own.pair.cli, l).value)]
+    for (const kind of kinds) {
+      const picked = kind ? findModel(kind, value) : undefined
+      if (kind && picked) rememberModel(kind, picked.id)
+    }
+  }
+
   /**
-   * Set several values as one write (a space's move up or down the queue): each is tried on a copy of every level first,
-   * so a value any of them refuses leaves none of them written, and two moves can never interleave their values.
+   * Set several values as one write (a space's move up or down the queue, a model chain's reorder): each is tried on a
+   * copy of every level first, so a value any of them refuses leaves none of them written. The copy becomes this one only
+   * after every value passed, and the file is saved once: no reader can see a half-shifted chain.
    */
   setMany(moves: { key: string; value: string | null; level: Level }[]): { ok: boolean; error?: string } {
     const trial = this.copy()
@@ -1056,8 +1065,73 @@ export class Settings {
       const r = trial.set(m.key, m.value, m.level)
       if (!r.ok) return { ok: false, error: r.error }
     }
-    for (const m of moves) this.set(m.key, m.value, m.level)
+    this.d = trial.d
+    this.save()
+    for (const m of moves) {
+      if (m.key === 'opencode.models') this.scopeOpencode()
+      this.choseModel(m.key, m.value, m.level)
+    }
     return { ok: true }
+  }
+
+  /** a role's whole chain as this level reads it, Primary first: moving it carries each CLI with its own model and effort */
+  chainAt(role: Chain, l: Level): { cli: string; model: string; effort: string }[] {
+    return rolePairs(role).map((p) => ({ cli: this.readAt(p.cli, l).value, model: this.readAt(p.model, l).value, effort: this.readAt(p.effort, l).value }))
+  }
+
+  /** move one whole entry to another position, writing the chain only at this level and all of it in one save */
+  moveChain(role: Chain, from: number, to: number, l: Level): { ok: boolean; error?: string } {
+    return this.writeChain(
+      role,
+      (entries) => {
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= entries.length || to >= entries.length) return { ok: false, error: 'Choose two positions in this chain.' }
+        const next = entries.filter((_, i) => i !== from)
+        next.splice(to, 0, entries[from])
+        return { ok: true, entries: next }
+      },
+      l,
+    )
+  }
+
+  /** insert a new entry above a position, starting on the CLI of the row it was opened from; a full chain refuses whole */
+  insertChain(role: Chain, at: number, cli: string, l: Level): { ok: boolean; error?: string } {
+    return this.writeChain(
+      role,
+      (entries) => {
+        if (!Number.isInteger(at) || at < 0 || at >= entries.length) return { ok: false, error: 'Choose a position in this chain.' }
+        if (!kindOf(cli)) return { ok: false, error: 'Choose an agent CLI for the new entry.' }
+        if (entries.every((x) => !!kindOf(x.cli))) return { ok: false, error: 'This chain already has a primary and five backups.' }
+        const drop = entries.findLastIndex((x) => !kindOf(x.cli))
+        const next = entries.filter((_, i) => i !== drop)
+        next.splice(at - (drop < at ? 1 : 0), 0, { cli, model: 'default', effort: 'default' })
+        return { ok: true, entries: next }
+      },
+      l,
+    )
+  }
+
+  /** the one writer behind a move and an insert: the trial checks every CLI, model and effort before any key changes */
+  private writeChain(
+    role: Chain,
+    change: (entries: { cli: string; model: string; effort: string }[]) => { ok: true; entries: { cli: string; model: string; effort: string }[] } | { ok: false; error: string },
+    l: Level,
+  ): { ok: boolean; error?: string } {
+    if (!CHAINS.includes(role)) return { ok: false, error: 'No such model chain.' }
+    const next = change(this.chainAt(role, l))
+    if (!next.ok) return next
+    return this.setMany(
+      rolePairs(role).flatMap((p, i) => {
+        const entry = next.entries[i]
+        // Coordinator → Backup 1 still follows the tasks' pair while its value is plain default. A moved or inserted
+        // entry that means this CLI's own default must say so explicitly, or the slot would silently change its model.
+        const own = (what: 'model' | 'effort') => (p.cli === PAIRS.coordinatorBackup.cli && entry[what].trim().toLowerCase() === 'default' ? OWN_DEFAULT : entry[what])
+        return [
+          { key: p.cli, value: entry.cli, level: l },
+          { key: p.model, value: own('model'), level: l },
+          { key: p.effort, value: own('effort'), level: l },
+        ]
+      }),
+    )
   }
 
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
@@ -1103,8 +1177,10 @@ export class Settings {
       // only a level that will read this value has to fit it: one whose own key is stored would win over it
       if (x !== l && !this.readsAt(x, l, pair[what])) return []
       const get = (k: string) => this.pick(k, x).value
-      // the tasks' pair is read by their backup, and by the coordinators' while their own is at default
-      if (pair === PAIRS.backup) return get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default' ? fallbackKinds(get) : [kindOf(get(PAIRS.backup.cli))]
+      // the tasks' pair is read by their first backup, and by the coordinators' first backup while its own is at default;
+      // later backups have their own model and effort keys and must not constrain this pair
+      if (pair === PAIRS.backup)
+        return get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default' ? [kindOf(get(PAIRS.backup.cli)), kindOf(get(PAIRS.coordinatorBackup.cli))] : [kindOf(get(PAIRS.backup.cli))]
       return [kindOf(get(PAIRS.coordinatorBackup.cli))]
     })
     return [...new Set(kinds.filter((k): k is string => !!k))]
@@ -1122,7 +1198,7 @@ export class Settings {
   /** why a model or effort doesn't fit the CLI its own pair of keys names at a level: it lists what does */
   private unfit(key: string, value: string, l: Level): string | undefined {
     const own = pairOfKey(key)
-    if (!own || value.trim().toLowerCase() === 'default') return undefined
+    if (!own || value.trim().toLowerCase() === 'default' || value === OWN_DEFAULT) return undefined
     const kinds = this.pairKinds(own.pair, own.what, l).filter((k) => !!modelsOf(k))
     // no CLI to ask (its own or none set): an effort is one of the levels Shepherdr knows
     if (!kinds.length) return own.what === 'effort' && !EFFORTS.includes(value.trim().toLowerCase()) ? `Pick one of: ${EFFORTS.join(' · ')}.` : undefined
@@ -1408,11 +1484,12 @@ export class Settings {
   /** what a row's reset goes back to: its value one level up or, while that is default, the key a backup key follows there
    *  (the followed key's own value at this level, where it may be set) */
   private resetTo(key: string, l: Level, up: Level): { value: string; from: LevelKind | 'default' } {
+    const shown = (p: { value: string; from: LevelKind | 'default' }) => (p.value === OWN_DEFAULT ? { ...p, value: 'default' } : p)
     const above = this.pick(key, up)
     const peer = FOLLOWS[key]
-    if (!peer || above.value.trim().toLowerCase() !== 'default') return above
+    if (!peer || above.value.trim().toLowerCase() !== 'default') return shown(above)
     const q = this.pick(peer, l)
-    return q.value.trim().toLowerCase() === 'default' ? above : q
+    return shown(q.value.trim().toLowerCase() === 'default' ? above : q)
   }
 
   /** a backup's Model row whose CLI has no model for the value it reads — its own, or the tasks' pair's while it follows:

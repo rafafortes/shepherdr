@@ -313,6 +313,35 @@ describe('the screen acts', () => {
     expect(src.limitsBuilds).toBe(builds + 1)
   })
 
+  test('a model chain moves and inserts at the named scope, and a bad place writes none', async () => {
+    const sp = await space('chain-order')
+    src.settings.set('task.agent', 'Claude Code', 'all')
+    src.settings.set('task.fallback', 'Codex', 'all')
+    src.settings.set('task.fallback2', 'pi', 'all')
+    const everywhere = src.settings.everywhere()
+    expect(await src.act({ type: 'model-chain', role: 'task', place: sp.place, op: 'move', from: 2, to: 0 })).toEqual({ ok: true })
+    expect(src.settings.harness('task', sp.p.name).kind).toBe('pi')
+    expect(src.settings.everywhere()).toEqual(everywhere)
+    expect(await src.act({ type: 'model-chain', role: 'task', place: sp.place, op: 'insert', at: 1, cli: 'OpenCode' })).toEqual({ ok: true })
+    expect(src.settings.pick('task.fallback', { space: sp.p.name })).toEqual({ value: 'OpenCode', from: 'space' })
+    const before = src.settings.chainAt('task', { space: sp.p.name })
+    expect(await src.act({ type: 'model-chain', role: 'task', place: 'p:here:none', op: 'move', from: 0, to: 1 })).toEqual({ ok: false, error: 'No such space.' })
+    expect(await src.act({ type: 'model-chain', role: 'nope' as never, place: sp.place, op: 'move', from: 0, to: 1 })).toEqual({ ok: false, error: 'No such model chain.' })
+    expect(src.settings.chainAt('task', { space: sp.p.name })).toEqual(before)
+  })
+
+  test('a model chain can be moved at Everywhere or for this machine without changing the other scope', async () => {
+    src.settings.set('task.agent', 'Claude Code', 'all')
+    src.settings.set('task.fallback', 'Codex', 'all')
+    src.settings.set('task.fallback2', 'pi', 'all')
+    expect(await src.act({ type: 'model-chain', role: 'task', place: 'all', op: 'move', from: 2, to: 0 })).toEqual({ ok: true })
+    expect(src.settings.pick('task.agent', 'all')).toEqual({ value: 'pi', from: 'all' })
+    const everywhere = src.settings.everywhere()
+    expect(await src.act({ type: 'model-chain', role: 'task', place: placeId.machine(), op: 'move', from: 1, to: 0 })).toEqual({ ok: true })
+    expect(src.settings.pick('task.agent', 'machine')).toEqual({ value: 'Claude Code', from: 'machine' })
+    expect(src.settings.everywhere()).toEqual(everywhere)
+  })
+
   test('a task is archived and brought back, paused, and a stop that fails says why', async () => {
     const sp = await space('acts')
     const t = task(sp)

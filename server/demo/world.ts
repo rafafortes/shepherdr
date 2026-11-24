@@ -947,6 +947,18 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return { ok: true }
       }
+      case 'model-chain': {
+        const [kind, machine, space] = (a.place ?? 'all').split(':')
+        const level = kind === 'p' ? { space } : kind === 'm' ? ('machine' as const) : ('all' as const)
+        const on = kind === 'all' ? Object.values(this.stores) : [this.stores[machine as keyof typeof this.stores]].filter(Boolean)
+        for (const st of on) {
+          const r = a.op === 'move' ? st.moveChain(a.role, a.from, a.to, level) : st.insertChain(a.role, a.at, a.cli, level)
+          if (!r.ok) return r
+        }
+        this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
+        this.emit('snapshot')
+        return { ok: true }
+      }
       case 'models-matrix':
         // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())

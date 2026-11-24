@@ -88,7 +88,7 @@ import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
 import { kept, PINNED, sectionsIn, TOP, type PlaceOrder } from '@shared/order.ts'
 import { machineName, NAME_MAX, nameProblem, slugify, type Machine, type Place, type Section, type Snapshot } from '@shared/types.ts'
 import { AddSpace, asTyped, openAddSpace } from './add.tsx'
-import { dragging, press } from './drag.ts'
+import { dragging, press } from '@client/drag.ts'
 import { openDeleteSection, openNewSection, openRename, SectionDialogs } from './section.tsx'
 
 /* ---------- folded sections (Pinned, the machines), remembered on this device ---------- */

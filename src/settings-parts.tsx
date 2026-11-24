@@ -580,7 +580,7 @@ export const APPEARANCE: Page = { name: 'Appearance', device: true, about: 'How 
 export const MODELS: Page = {
   name: 'Models',
   about:
-    "Every level's agent settings in one table: each space's tasks, coordinator, reviewer and advisor, with their backups, and this machine's and Everywhere's. Click a cell to change it; a value set in that row is drawn strong, one it inherits faint with where it comes from.",
+    "Every level's agent settings in one table: each space's tasks, coordinator, reviewer and advisor, with their backups, and this machine's and Everywhere's. Click a cell to change it; drag a chain entry or use its menu to move it or insert above. A value set in that row is drawn strong, one it inherits faint with where it comes from.",
   rows: [],
   matrix: true,
   View: ModelsPage,
