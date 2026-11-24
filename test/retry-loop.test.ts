@@ -105,6 +105,27 @@ describe("a CLI's own retry state", () => {
     forgetOpencodeRetry()
   })
 
+  test('a held session can be forgotten alone, and a messages operation that is absent is not asked twice', async () => {
+    forgetOpencodeRetry()
+    const call = async (args: string[]) => (args[0] === 'session.status' ? { type: 'retry', attempt: 3, message: 'Rate Limited' } : undefined)
+    expect(await opencodeRetry('ses-a', '/repo', call, T0)).toMatchObject({ attempt: 3 })
+    forgetOpencodeRetry('ses-a')
+    // the cached state is gone for that session only, so it is read again
+    expect(await opencodeRetry('ses-a', '/repo', call, T0 + 1_000)).toMatchObject({ attempt: 3 })
+    forgetOpencodeRetry()
+
+    const asked: string[] = []
+    const none = async (args: string[]) => {
+      asked.push(args[0]!)
+      if (args[0] === 'session.message.list') throw new Error('Operation not found: session.message.list')
+      return undefined
+    }
+    expect(await opencodeRetry('ses-b', '/repo', none, T0)).toBeUndefined()
+    expect(await opencodeRetry('ses-c', '/repo', none, T0)).toBeUndefined()
+    expect(asked).toEqual(['session.status', 'session.message.list', 'session.status'])
+    forgetOpencodeRetry()
+  })
+
   test('the words use the cut-off rules: rate limit waits, an allowance hands over at once', () => {
     expect(loopError({ attempt: 1, message: 'Rate limit exceeded. Please try again later.', source: 'screen' })).toEqual({ passing: true, reason: 'Rate limited' })
     expect(loopError({ attempt: 1, message: 'Go usage limit exceeded', source: 'screen' })).toMatchObject({ passing: false, reason: 'Out of allowance' })
