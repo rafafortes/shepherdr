@@ -367,6 +367,8 @@ export interface Retry {
   loopSince?: number
   /** when the CLI says its next try is */
   next?: number
+  /** consecutive reads that saw no retry: a countdown at zero and a request in flight show no line, so a loop holds */
+  loopMisses?: number
   /** where the in-turn state came from */
   source?: LoopState['source']
 }
@@ -480,6 +482,7 @@ export class Retries {
       ...(state.next !== undefined ? { next: state.next } : {}),
       source: state.source,
     }
+    r.loopMisses = 0
     this.data[key] = r
     // the pass reads this every few seconds: save and wake the screen only when the retry actually changed
     if (!was || was.attempt !== state.attempt || was.next !== state.next || was.reason !== e.reason) {
@@ -488,10 +491,18 @@ export class Retries {
     }
   }
 
-  /** a read of its own retry state says it is no longer waiting: a short retry recovered, so nothing to hand over */
-  loopEnded(key: string) {
+  /** A read that saw no retry may be a request in flight between attempts, not a recovery. Only several in a row
+   *  clear the loop; a rising attempt with a gap in between still counts the window from the first sighting. */
+  loopEnded(key: string, misses = 3) {
     const r = this.data[key]
-    if (r?.inTurn && !r.over) this.clear(key)
+    if (!r?.inTurn || r.over) return
+    const n = (r.loopMisses ?? 0) + 1
+    if (n < misses) {
+      r.loopMisses = n
+      this.save()
+      return
+    }
+    this.clear(key)
   }
 
   /** told by what comes next: a backup agent takes over, or the human hears */

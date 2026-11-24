@@ -76,6 +76,33 @@ describe("a coordinator's loop", () => {
     }
   })
 
+  test('the default reader reads a CLI waiting line and clears a stale one on a non-working agent', async () => {
+    const { key } = await coordinatorSpace('read-loop')
+    src.agents.records[key] = { key, name: 'shep', kind: 'claude', cwd: tmp('read'), logs: [], started: Date.now() } as never
+    const screen = src.agents.screenText
+    const status = src.agents.status
+    const reader = src.loopReader
+    src.agents.screenText = async () => '● working\n · retrying in 25s · attempt 2/5'
+    src.agents.status = ((k: string) => (k === key ? 'working' : 'gone')) as never
+    // the default readLoop (API only for opencode) is reached because loopReader is restored here
+    src.loopReader = reader
+    try {
+      await src.watchRetryLoops(T0)
+      expect(src.retries.get(key)).toMatchObject({ inTurn: true, attempt: 2, reason: 'Provider retrying', source: 'screen' })
+      // an agent that stopped or blocked can no longer wait in a provider retry: three quiet reads clear the row
+      src.agents.status = ((k: string) => (k === key ? 'blocked' : 'gone')) as never
+      await src.watchRetryLoops(T0 + 10_000)
+      await src.watchRetryLoops(T0 + 20_000)
+      await src.watchRetryLoops(T0 + 30_000)
+      expect(src.retries.get(key)).toBeUndefined()
+    } finally {
+      src.agents.screenText = screen
+      src.agents.status = status
+      src.retries.clear(key)
+      delete src.agents.records[key]
+    }
+  })
+
   test('the pass reads a CLI state through loopReader and keeps it for the status line', async () => {
     const { key } = await coordinatorSpace('watch-loop')
     src.agents.records[key] = { key, name: 'shep', kind: 'opencode', cwd: tmp('coord'), logs: [], started: Date.now() } as never

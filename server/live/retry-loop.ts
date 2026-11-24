@@ -4,6 +4,19 @@
 // reaches the log and retry.ts's cut-off policy (and the backup chain behind it) never starts. This reads the state
 // while the turn runs: OpenCode's own status from its API where the version has one, else its session messages, else
 // the line on the screen. It is a small pure reader; retry.ts decides what the state means and when it is a cut-off.
+//
+// What was checked for each CLI, on this host in Nov 2026 (its own binary, log or screen):
+//   opencode 2.3.2: `opencode api --standalone session.status` answers "Operation not found";
+//     `session.message.list` answers with user/assistant/idle rows; the TUI shows "⚠ Retrying in Ns · attempt N ·
+//     <reason>" and "⚠ Retry due · attempt N · <reason>". A host-local plugin (opencode-retry-cap) now caps a long
+//     loop by ending the turn, but Shepherdr still has to catch sessions started before it and other machines.
+//   claude 2.1.331: its bundle has "retrying in ${n}s" and "attempt ${n}/${max}" (a dim status line), so the
+//     anchored "· retrying in Ns · attempt N/M" is read; no API status is used.
+//   pi 1.5.2: dist/modes/interactive/components/status-indicator.js prints "Retrying (n/m) in Ns..."; pi's log
+//     reader already ends its own retry turn, so this is a screen-only fallback.
+//   agy: its bundle has "Retrying in %v... (attempt %d/%d)"; screen-only, it has no quiet session API here.
+//   codex: not installed on this host (removed 2026-10-15); its reconnect is a transport retry of the CLI, not a
+//     provider backoff that keeps a turn open with an attempt count — no reader, and a test says so.
 import { api } from './opencode.ts'
 import type { LoopState } from './retry.ts'
 
@@ -15,78 +28,76 @@ const span = (n: string, unit: string): number => {
   return Math.round(value * ms)
 }
 
-/** "Retrying in 836s · attempt 7 · Rate limit exceeded. Please try again later." (OpenCode), the same in Claude
- *  Code's dimmer "· retrying in 25s · attempt 2/5", agy's "Retrying in 12s (attempt 3/8)", and pi's "Retrying
- *  (2/5) in 30s...". The reason is the rest of that one line, never the next status line. */
-const IN = /\bretry(?:ing)?\s+in\s+(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b([^\n]*)/i
-const PARENS = /\bretrying\s*\(\s*(\d+)\s*\/\s*\d+\s*\)\s+in\s+(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b/i
-const NO_WAIT = /\bretrying[….]*(?:\s|\u00b7|-)*attempt\s+(\d+)(?:\s*\/\s*\d+)?/i
-const ATTEMPT = /\battempt\s+(\d+)(?:\s*\/\s*\d+)?\s*(?:[\u00b7|:\u2013\u2014-]\s*([^\n]*))?/i
-/** a waiting line with no reason of its own (Claude Code and pi) still says the CLI is retrying */
-const BARE = /\bretrying\s*…|\bretrying\s*\.\.\.|\bretrying\s*$/i
+/** Each CLI's own status line, with its own marker so prose in a diff or chat is never mistaken for a retry.
+ *  Only the last few lines of the pane are read: above them is the agent's chat and tool output. */
+const FORMATS: Record<string, RegExp[]> = {
+  // OpenCode prints an amber ⚠ before "Retrying in Ns · attempt N · reason"; at zero it says "Retry due".
+  opencode: [
+    /retry(?:ing)? in (?<amount>\d+(?:\.\d+)?)(?<unit>ms|s|m|h)\b\s*·\s*attempt (?<attempt>\d+)\s*·\s*(?<reason>[^\n]*)/i,
+    /retry due\s*·\s*attempt (?<attempt>\d+)(?:\s*·\s*(?<reason>[^\n]*))?/i,
+  ],
+  // Claude Code's dim line is "· retrying in Ns · attempt N/M"; its countdown may say "seconds" (handled by span).
+  claude: [/·\s*retrying in (?<amount>\d+(?:\.\d+)?)(?<unit>ms|s|m|h)\b\s*·\s*attempt (?<attempt>\d+)(?:\/\d+)?\s*·?\s*(?<reason>[^\n]*)/i, /·\s*retrying…\s*·\s*attempt (?<attempt>\d+)(?:\/\d+)?/i],
+  pi: [/retrying \((?<attempt>\d+)\/\d+\) in (?<amount>\d+(?:\.\d+)?)(?<unit>ms|s|m|h)\b/i],
+  agy: [/retrying in (?<amount>\d+(?:\.\d+)?)(?<unit>ms|s|m|h)\b\s*\(attempt (?<attempt>\d+)\/\d+\)/i],
+  // Codex is not installed here and has no in-turn provider retry line with an attempt count: no pattern, by design.
+  codex: [],
+}
+const SCREEN_LINES = 5
 
 /**
- * The retry line a CLI's screen shows now, read from the end (the newest line wins). Nothing when the screen says no
- * retry, so a loop that recovered is seen as over. The message is the provider's own words where the CLI prints them:
- * retry.ts classifies them the same way it classifies a cut at the end of a turn.
+ * The retry line a CLI's screen shows now, read from the foot upwards (newest line wins). Nothing when the screen says
+ * no retry, so one that recovered is seen as over. A line that only mentions a retry further up (in chat, a diff or
+ * tool output) is not the CLI's own status. The reason is the provider's words where the CLI prints them: retry.ts
+ * classifies them as it does a cut at the end of a turn.
  */
-export function screenRetry(text: string, now = Date.now()): LoopState | undefined {
-  const lines = text.replace(/\r/g, '').split('\n')
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!.trim()
-    const paren = PARENS.exec(line)
-    if (paren) {
-      const wait = span(paren[2]!, paren[3]!)
-      return { attempt: Number(paren[1]), message: '', ...(Number.isFinite(wait) ? { next: now + wait } : {}), source: 'screen' }
-    }
-    const inLine = IN.exec(line)
-    if (inLine) {
-      const wait = span(inLine[1]!, inLine[2]!)
-      const attempt = ATTEMPT.exec(inLine[3] ?? '')
-      const reason = (attempt?.[2] ?? inLine[3] ?? '').replace(/^[\s\u00b7|:\u2013\u2014-]+/, '').trim()
+export function screenRetry(text: string, now = Date.now(), kind = 'opencode'): LoopState | undefined {
+  const lines = text.replace(/\r/g, '').split('\n').slice(-SCREEN_LINES)
+  for (const line of lines.reverse()) {
+    for (const re of FORMATS[kind] ?? []) {
+      const g = re.exec(line.trim())?.groups
+      if (!g) continue
+      const wait = g.amount && g.unit ? span(g.amount, g.unit) : NaN
       return {
-        attempt: attempt ? Number(attempt[1]) : 1,
-        message: reason,
+        attempt: Number(g.attempt) || 1,
+        message: (g.reason ?? '').trim(),
         ...(Number.isFinite(wait) ? { next: now + wait } : {}),
         source: 'screen',
       }
     }
-    const bare = NO_WAIT.exec(line)
-    if (bare) return { attempt: Number(bare[1]), message: '', source: 'screen' }
-    if (BARE.test(line)) return { attempt: 1, message: '', source: 'screen' }
   }
   return undefined
 }
 
-/** OpenCode's session status: `{type:'retry', attempt, message, next}` (next is an absolute ms timestamp). Newer
- *  versions return one state per session, older ones the single state; both are read. */
-export function statusRetry(data: unknown): LoopState | undefined {
+/** OpenCode's session status: `{type:'retry', attempt, message, next}` or a map keyed by sessionID (`next`/`retry.at`
+ *  is an absolute ms timestamp). A sibling session's retry is never attributed to this one. */
+export function statusRetry(data: unknown, sessionId?: string): LoopState | undefined {
   const own = (data as { type?: string })?.type === 'retry' ? data : undefined
-  const found = own ?? Object.values((data ?? {}) as Record<string, unknown>).find((x) => (x as { type?: string })?.type === 'retry')
-  const state = found as { attempt?: unknown; message?: unknown; next?: unknown } | undefined
-  if (!state || typeof state.attempt !== 'number' || !state.message) return undefined
+  const found = own ?? (sessionId ? (data as Record<string, unknown>)?.[sessionId] : undefined)
+  const state = found as { attempt?: unknown; message?: unknown; next?: unknown; error?: { message?: unknown } } | undefined
+  if (!state || typeof state.attempt !== 'number') return undefined
+  const message = state.message ?? state.error?.message
+  if (!message) return undefined
   const next = typeof state.next === 'number' ? state.next : undefined
-  return { attempt: state.attempt, message: String(state.message), ...(next ? { next } : {}), source: 'api' }
+  return { attempt: state.attempt, message: String(message), ...(next ? { next } : {}), source: 'api' }
 }
 
-/** a RetryPart kept in a session's messages: newer OpenCodes store the attempt and the provider's error with it */
+/** a RetryPart kept in a session's messages: only the newest part of the newest message is current. An old retry
+ *  followed by text, a tool or an idle row is a turn that went on: it must never read as a retry now. */
 export function messagesRetry(data: unknown): LoopState | undefined {
   const rows = Array.isArray(data) ? data : []
-  for (const row of rows.slice().reverse()) {
-    const parts = [...((row as { parts?: unknown[] })?.parts ?? []), ...((row as { content?: unknown[] })?.content ?? [])]
-    for (const part of parts.reverse()) {
-      const p = part as { type?: string; attempt?: number; error?: { message?: string }; message?: string }
-      if (p?.type !== 'retry' || typeof p.attempt !== 'number') continue
-      const message = p.error?.message ?? p.message ?? ''
-      return { attempt: p.attempt, message: String(message), source: 'messages' }
-    }
-  }
-  return undefined
+  const row = rows.at(-1) as { type?: string; parts?: unknown[]; content?: unknown[] } | undefined
+  if (!row || row.type === 'idle' || row.type === 'user') return undefined
+  const parts = [...(row.parts ?? []), ...(row.content ?? [])]
+  const part = parts.at(-1) as { type?: string; attempt?: number; error?: { message?: string }; message?: string } | undefined
+  if (part?.type !== 'retry' || typeof part.attempt !== 'number') return undefined
+  const message = part.error?.message ?? part.message ?? ''
+  return { attempt: part.attempt, message: String(message), source: 'messages' }
 }
 
 /** an API call OpenCode does not have in this version: no point asking again until it is upgraded */
 const unavailable = new Set<string>()
-/** "no retry" answers are held briefly: a polling pass must not spawn a CLI for every agent every few seconds */
+/** "no retry" answers are held briefly, so a polling pass must not spawn a CLI for every agent every few seconds */
 const quiet = new Map<string, { until: number; state?: LoopState }>()
 
 /** how long a "no retry" answer (or a state) is trusted, per session */
@@ -122,6 +133,7 @@ export async function opencodeRetry(
           if (/Operation not found|404/.test(e.message)) unavailable.add('status')
           return undefined
         }),
+        sessionId,
       )
   if (status) {
     quiet.set(sessionId, { until: now + 10_000, state: status })

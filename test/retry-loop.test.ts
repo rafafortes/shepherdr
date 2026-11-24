@@ -26,21 +26,32 @@ describe("a CLI's own retry state", () => {
   test('Claude Code, pi and agy have their own waiting line, read by the same rule', () => {
     // checked in each CLI's own screen strings (Nov 2026): Claude's dim "· retrying in 25s · attempt 2/5", pi's
     // "Retrying (2/5) in 30s..." status indicator and agy's "Retrying in 12s (attempt 3/8)"
-    expect(screenRetry('● working\n · retrying in 25s · attempt 2/5', T0)).toMatchObject({ attempt: 2, next: T0 + 25_000, source: 'screen' })
-    expect(screenRetry('Retrying (2/5) in 30s... (Ctrl+C to interrupt)', T0)).toMatchObject({ attempt: 2, next: T0 + 30_000, source: 'screen' })
-    expect(screenRetry('Retrying in 12s (attempt 3/8)...', T0)).toMatchObject({ attempt: 3, next: T0 + 12_000, source: 'screen' })
+    expect(screenRetry('● working\n · retrying in 25s · attempt 2/5', T0, 'claude')).toMatchObject({ attempt: 2, next: T0 + 25_000, source: 'screen' })
+    expect(screenRetry('Retrying (2/5) in 30s... (Ctrl+C to interrupt)', T0, 'pi')).toMatchObject({ attempt: 2, next: T0 + 30_000, source: 'screen' })
+    expect(screenRetry('Retrying in 12s (attempt 3/8)...', T0, 'agy')).toMatchObject({ attempt: 3, next: T0 + 12_000, source: 'screen' })
     // Claude's countdown that still says only "retrying…" has no wait to read; the next pass will
-    expect(screenRetry('· retrying… · attempt 4/5', T0)).toMatchObject({ attempt: 4, message: '' })
-    // a pane that says nothing about a retry is not one
+    expect(screenRetry('· retrying… · attempt 4/5', T0, 'claude')).toMatchObject({ attempt: 4, message: '' })
+    // OpenCode's countdown that reached zero still says it is retrying, with no wait to read
+    expect(screenRetry('⚠ Retry due · attempt 7 · Rate limit exceeded', T0)).toMatchObject({ attempt: 7, message: 'Rate limit exceeded' })
+    expect(screenRetry('⚠ Retry due · attempt 7 · Rate limit exceeded', T0)?.next).toBeUndefined()
+    // a pane that says nothing about a retry is not one; a line of prose 20 lines up in a diff is not a status
     expect(screenRetry('Build · HungerG Free\n> doing the work', T0)).toBeUndefined()
+    expect(screenRetry(['Retrying in 836s · attempt 7 · Rate limit exceeded', ...Array(20).fill('diff --git'), 'done'].join('\n'), T0)).toBeUndefined()
+    // an ordinary sentence is not a retry; an in-turn retry needs its own line with an attempt
+    expect(screenRetry('I am retrying the build now', T0)).toBeUndefined()
+    // Codex is not installed here and has no in-turn retry status line of its own
+    expect(screenRetry('Reconnecting to server...', T0, 'codex')).toBeUndefined()
     // the latest waiting line wins
     expect(screenRetry('Retrying in 8s · attempt 2 · Rate limit exceeded\nRetrying in 836s · attempt 7 · Rate limit exceeded', T0)).toMatchObject({ attempt: 7, next: T0 + 836_000 })
   })
 
   test('OpenCode status and session messages hold the same state where the version keeps it', () => {
     expect(statusRetry({ type: 'retry', attempt: 7, message: 'Rate Limited', next: T0 + 836_000 })).toEqual({ attempt: 7, message: 'Rate Limited', next: T0 + 836_000, source: 'api' })
-    expect(statusRetry({ 'ses-1': { type: 'idle' }, 'ses-2': { type: 'retry', attempt: 2, message: 'Too Many Requests' } })).toMatchObject({ attempt: 2, message: 'Too Many Requests' })
-    expect(statusRetry({ 'ses-1': { type: 'busy' } })).toBeUndefined()
+    const map = { 'ses-1': { type: 'idle' }, 'ses-2': { type: 'retry', attempt: 2, message: 'Too Many Requests' } }
+    expect(statusRetry(map, 'ses-2')).toMatchObject({ attempt: 2, message: 'Too Many Requests' })
+    // a sibling's retry is never attributed to this session
+    expect(statusRetry(map, 'ses-1')).toBeUndefined()
+    expect(statusRetry({ 'ses-1': { type: 'busy' } }, 'ses-1')).toBeUndefined()
     expect(messagesRetry([{ type: 'user' }, { content: [{ type: 'retry', attempt: 4, error: { message: 'Rate limit exceeded. Please try again later.' } }] }])).toMatchObject({
       attempt: 4,
       message: 'Rate limit exceeded. Please try again later.',
@@ -65,7 +76,8 @@ describe("a CLI's own retry state", () => {
     expect(await opencodeRetry('ses-2', '/repo', async () => undefined, T0 + 5_000)).toBeUndefined()
     expect(calls.length).toBe(0)
     expect(await opencodeRetry('ses-2', '/repo', async () => undefined, T0 + QUIET_FOR + 1)).toBeUndefined()
-    // OpenCode 2.3.2 has neither operation: asked once each, then only the screen is read
+    // OpenCode 2.3.2 has no session.status (checked by running it); session.message.list exists but keeps no retry
+    // part (checked on its own database). Each is then asked only once, and the screen reader takes over.
     forgetOpencodeRetry()
     calls.length = 0
     const none = async (args: string[]) => {
@@ -111,6 +123,11 @@ describe('the retry window for a loop', () => {
     expect(w.r.get('P/Agent')).toMatchObject({ inTurn: true, attempt: 7, reason: 'Rate limited', loopSince: T0, next: T0 + 836_000, source: 'screen' })
     expect(w.over).toEqual([])
     // a reading that says no retry ended the loop: it went on by itself
+    // a request in flight or a countdown at zero shows no line for a moment: hold the loop for two misses
+    w.r.loopEnded('P/Agent')
+    expect(w.r.get('P/Agent')).toMatchObject({ attempt: 7, loopMisses: 1, loopSince: T0 })
+    w.r.loopEnded('P/Agent')
+    expect(w.r.get('P/Agent')).toMatchObject({ loopMisses: 2 })
     w.r.loopEnded('P/Agent')
     expect(w.r.get('P/Agent')).toBeUndefined()
     w.r.stop()

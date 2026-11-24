@@ -83,7 +83,10 @@ describe('an OpenCode task agent retrying inside its turn', () => {
     await until(() => w.started.some((s) => s.key === key))
     const retries = taskWorld(w)
     retries.loop(key, state(3, 'Rate limit exceeded. Please try again later.', T0 + 40_000), T0)
-    // the CLI answered: no retry state on the next read, so nothing to hand over
+    // two quiet reads are a request in flight; the third is a recovery, so nothing to hand over
+    retries.loopEnded(key)
+    retries.loopEnded(key)
+    expect(retries.get(key)).toMatchObject({ attempt: 3, loopMisses: 2 })
     retries.loopEnded(key)
     expect(retries.get(key)).toBeUndefined()
     expect(w.started.filter((s) => s.key === key)).toHaveLength(1)
