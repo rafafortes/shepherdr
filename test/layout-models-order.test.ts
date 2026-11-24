@@ -124,7 +124,25 @@ describe.skipIf(!browser)('reordering a model chain', () => {
       expect(vm().get('task.fallback2Model', 'gtm')).toBe('gemini-4-hydrogen')
       expect(vm().everywhere()).toEqual(everywhere)
       await onlyNew(page)
-      await page.keyboard.press('Escape')
+      const inserted = page.locator(`[data-cell="${ROW}|task.1"]`)
+      if ((await inserted.getAttribute('aria-expanded')) === 'true') await inserted.click()
+
+      // an off backup cannot become the reviewer's Primary: the whole move is refused and the row says why
+      const reviewer = vm().get('coordinator.fallback', 'gtm')
+      await page.getByRole('button', { name: 'Chain actions for gtm · Coordinators · Backup 1', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Move up', exact: true }).click()
+      await page.getByRole('status').filter({ hasText: 'gtm · Coordinators:' }).waitFor()
+      expect(vm().get('coordinator.fallback', 'gtm')).toBe(reviewer)
+
+      // a cancelled pointer leaves the chain where it was
+      const beforeCancel = await order(page)
+      const cancelFrom = await box(page.locator(`[data-chain="${ROW}|task.2"]`))
+      await page.mouse.move(cancelFrom.x + cancelFrom.width / 2, cancelFrom.y + cancelFrom.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(cancelFrom.x + cancelFrom.width / 2 + 30, cancelFrom.y + cancelFrom.height / 2)
+      await page.locator(`[data-chain="${ROW}|task.2"]`).dispatchEvent('pointercancel', { pointerId: 1 })
+      await page.mouse.up()
+      expect(await order(page)).toEqual(beforeCancel)
     } finally {
       await page.close()
       await reset()
@@ -181,6 +199,12 @@ describe.skipIf(!browser)('reordering a model chain', () => {
       expect(vm().get('task.model', 'gtm')).toBe('claude-opus-5-5')
       expect(await page.locator(`[data-cell="${ROW}|task.0"]`).getAttribute('aria-expanded')).toBe('false')
       await onlyNew(page)
+
+      const reviewer = vm().get('coordinator.fallback', 'gtm')
+      await page.getByRole('button', { name: 'Chain actions for gtm · Coordinators · Backup 1', exact: true }).tap()
+      await page.getByRole('menuitem', { name: 'Move up', exact: true }).tap()
+      await page.getByRole('status').filter({ hasText: 'gtm · Coordinators:' }).waitFor()
+      expect(vm().get('coordinator.fallback', 'gtm')).toBe(reviewer)
     } finally {
       await page.close()
       await reset()
