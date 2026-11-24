@@ -300,7 +300,11 @@ export const runOutOf = (reason: string) => /^out of (?:allowance|credit)/i.test
  */
 export function loopError(s: LoopState): ProviderError {
   if (!s.message.trim()) return { passing: true, reason: 'Provider retrying' }
-  return providerError(s.message)
+  const e = providerError(s.message)
+  // the CLI is already retrying: only an allowance that ran out, a signed-out provider or a filter refusal is a
+  // reason to hand over before the window. An unrecognised transient error is the CLI's own wait, not a cut.
+  if (!e.passing && !e.blocked && !runOutOf(e.reason) && e.reason !== 'Signed out') return { passing: true, reason: e.reason }
+  return e
 }
 
 /** which errors pass by themselves. The CLI's own code decides where it has one (Codex codex_error_info, Claude Code's
@@ -456,7 +460,7 @@ export class Retries {
     if (!e.passing || past) {
       const r: Retry = {
         cut: cut.id,
-        tries: was?.tries ?? 1,
+        tries: was?.tries ?? 0,
         reason: e.passing ? `${e.reason}, still after ${state.attempt} tries` : e.reason,
         words,
         over: true,
@@ -473,9 +477,10 @@ export class Retries {
     }
     const r: Retry = {
       cut: cut.id,
-      tries: was?.tries ?? 1,
+      tries: was?.tries ?? 0,
       reason: e.reason,
       words,
+      ...(was?.nudged !== undefined ? { nudged: was.nudged } : {}),
       inTurn: true,
       attempt: state.attempt,
       loopSince: since,

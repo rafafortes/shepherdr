@@ -43,7 +43,7 @@ const FORMATS: Record<string, RegExp[]> = {
   // Codex is not installed here and has no in-turn provider retry line with an attempt count: no pattern, by design.
   codex: [],
 }
-const SCREEN_LINES = 5
+const SCREEN_LINES = 14
 
 /**
  * The retry line a CLI's screen shows now, read from the foot upwards (newest line wins). Nothing when the screen says
@@ -52,7 +52,11 @@ const SCREEN_LINES = 5
  * classifies them as it does a cut at the end of a turn.
  */
 export function screenRetry(text: string, now = Date.now(), kind = 'opencode'): LoopState | undefined {
-  const lines = text.replace(/\r/g, '').split('\n').slice(-SCREEN_LINES)
+  const lines = text
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((l) => l.trim())
+    .slice(-SCREEN_LINES)
   for (const line of lines.reverse()) {
     for (const re of FORMATS[kind] ?? []) {
       const g = re.exec(line.trim())?.groups
@@ -86,7 +90,8 @@ export function statusRetry(data: unknown, sessionId?: string): LoopState | unde
  *  followed by text, a tool or an idle row is a turn that went on: it must never read as a retry now. */
 export function messagesRetry(data: unknown): LoopState | undefined {
   const rows = Array.isArray(data) ? data : []
-  const row = rows.at(-1) as { type?: string; parts?: unknown[]; content?: unknown[] } | undefined
+  // `order=desc` from the API returns newest first; with `order=asc` the last row is newest
+  const row = (rows.at(-1)?.type === 'idle' ? rows.at(-1) : rows[0]) as { type?: string; parts?: unknown[]; content?: unknown[] } | undefined
   if (!row || row.type === 'idle' || row.type === 'user') return undefined
   const parts = [...(row.parts ?? []), ...(row.content ?? [])]
   const part = parts.at(-1) as { type?: string; attempt?: number; error?: { message?: string }; message?: string } | undefined
@@ -130,7 +135,7 @@ export async function opencodeRetry(
     ? undefined
     : statusRetry(
         await call(['session.status'], { cwd, timeoutMs: 10_000 }).catch((e: Error) => {
-          if (/Operation not found|404/.test(e.message)) unavailable.add('status')
+          if (/Operation not found/.test(e.message)) unavailable.add('status')
           return undefined
         }),
         sessionId,
@@ -139,17 +144,18 @@ export async function opencodeRetry(
     quiet.set(sessionId, { until: now + 10_000, state: status })
     return status
   }
-  const messages = unavailable.has('messages')
-    ? undefined
-    : messagesRetry(
-        await call(['session.message.list', '--param', `sessionID=${sessionId}`, '--param', 'limit=10', '--param', 'order=desc'], {
-          cwd,
-          timeoutMs: 10_000,
-        }).catch((e: Error) => {
-          if (/Operation not found|404/.test(e.message)) unavailable.add('messages')
-          return undefined
-        }),
-      )
+  const messages =
+    unavailable.has('messages') || unavailable.has('status')
+      ? undefined
+      : messagesRetry(
+          await call(['session.message.list', '--param', `sessionID=${sessionId}`, '--param', 'limit=10', '--param', 'order=desc'], {
+            cwd,
+            timeoutMs: 10_000,
+          }).catch((e: Error) => {
+            if (/Operation not found/.test(e.message)) unavailable.add('messages')
+            return undefined
+          }),
+        )
   const state = messages ?? status
   quiet.set(sessionId, { until: now + QUIET_FOR, state })
   return state

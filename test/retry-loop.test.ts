@@ -34,6 +34,19 @@ describe("a CLI's own retry state", () => {
     // OpenCode's countdown that reached zero still says it is retrying, with no wait to read
     expect(screenRetry('⚠ Retry due · attempt 7 · Rate limit exceeded', T0)).toMatchObject({ attempt: 7, message: 'Rate limit exceeded' })
     expect(screenRetry('⚠ Retry due · attempt 7 · Rate limit exceeded', T0)?.next).toBeUndefined()
+    // a real OpenCode pane has the retry line above its input and footer, and blank rows: still read
+    const pane = [
+      '⚠ Retrying in 836s · attempt 7 · Rate limit exceeded. Please try again later.',
+      '',
+      'Build · HungerG Free',
+      '> ',
+      '╭──────────────────────────────────────────────────────╮',
+      '│ Type a message                                       │',
+      '╰──────────────────────────────────────────────────────╯',
+      '',
+      '  tab 1: Agent    tab 2: Review  1 git worktree',
+    ].join('\n')
+    expect(screenRetry(pane, T0)).toMatchObject({ attempt: 7, next: T0 + 836_000, message: 'Rate limit exceeded. Please try again later.' })
     // a pane that says nothing about a retry is not one; a line of prose 20 lines up in a diff is not a status
     expect(screenRetry('Build · HungerG Free\n> doing the work', T0)).toBeUndefined()
     expect(screenRetry(['Retrying in 836s · attempt 7 · Rate limit exceeded', ...Array(20).fill('diff --git'), 'done'].join('\n'), T0)).toBeUndefined()
@@ -52,7 +65,8 @@ describe("a CLI's own retry state", () => {
     // a sibling's retry is never attributed to this session
     expect(statusRetry(map, 'ses-1')).toBeUndefined()
     expect(statusRetry({ 'ses-1': { type: 'busy' } }, 'ses-1')).toBeUndefined()
-    expect(messagesRetry([{ type: 'user' }, { content: [{ type: 'retry', attempt: 4, error: { message: 'Rate limit exceeded. Please try again later.' } }] }])).toMatchObject({
+    // `order=desc` returns newest first, so the current retry is the first row
+    expect(messagesRetry([{ content: [{ type: 'retry', attempt: 4, error: { message: 'Rate limit exceeded. Please try again later.' } }] }, { type: 'user' }])).toMatchObject({
       attempt: 4,
       message: 'Rate limit exceeded. Please try again later.',
       source: 'messages',
@@ -76,8 +90,8 @@ describe("a CLI's own retry state", () => {
     expect(await opencodeRetry('ses-2', '/repo', async () => undefined, T0 + 5_000)).toBeUndefined()
     expect(calls.length).toBe(0)
     expect(await opencodeRetry('ses-2', '/repo', async () => undefined, T0 + QUIET_FOR + 1)).toBeUndefined()
-    // OpenCode 2.3.2 has no session.status (checked by running it); session.message.list exists but keeps no retry
-    // part (checked on its own database). Each is then asked only once, and the screen reader takes over.
+    // OpenCode 2.3.2 has no session.status (checked by running it); its messages keep no retry part either, so the
+    // API path is asked once for status and then skipped: no CLI spawn every 30 s on a version that cannot answer.
     forgetOpencodeRetry()
     calls.length = 0
     const none = async (args: string[]) => {
@@ -86,7 +100,8 @@ describe("a CLI's own retry state", () => {
     }
     expect(await opencodeRetry('ses-3', '/repo', none, T0)).toBeUndefined()
     expect(await opencodeRetry('ses-4', '/repo', none, T0)).toBeUndefined()
-    expect(calls).toEqual(['session.status', 'session.message.list'])
+    // with no session.status there is no new retry format in messages either: do not ask 10 agents every 30 s
+    expect(calls).toEqual(['session.status'])
     forgetOpencodeRetry()
   })
 
