@@ -32,6 +32,18 @@ export interface ProviderError {
   blocked?: boolean
 }
 
+/** a provider error a CLI is retrying inside its turn, read from its own status/messages or its waiting line */
+export interface LoopState {
+  /** which retry this is, as the CLI counts them */
+  attempt: number
+  /** the provider's words, where the CLI prints them; classified by providerError below */
+  message: string
+  /** when the CLI says the next try is (ms since epoch), where it says it */
+  next?: number
+  /** where it was read: its API, its session messages, or its screen */
+  source: 'api' | 'messages' | 'screen'
+}
+
 const CODE_PASSING: Record<string, string> = {
   server_overloaded: 'Provider overloaded',
   overloaded: 'Provider overloaded',
@@ -281,6 +293,20 @@ const until = (words: string, resetAt?: number) => {
  *  capitalised words it says it with or the lower-case ones a takeover keeps (an outage's `why`) */
 export const runOutOf = (reason: string) => /^out of (?:allowance|credit)/i.test(reason)
 
+/**
+ * What an in-turn retry means, by the same rules as a cut at the end of a turn. A CLI that prints only a countdown
+ * (Claude Code, pi) gives no provider words: a retry it is already doing is waiting, not a refusal to hand over at
+ * once. Where it prints the reason, a quota is out of allowance and a rate limit passes, as it does for a cut.
+ */
+export function loopError(s: LoopState): ProviderError {
+  if (!s.message.trim()) return { passing: true, reason: 'Provider retrying' }
+  const e = providerError(s.message)
+  // the CLI is already retrying: only an allowance that ran out, a signed-out provider or a filter refusal is a
+  // reason to hand over before the window. An unrecognised transient error is the CLI's own wait, not a cut.
+  if (!e.passing && !e.blocked && !runOutOf(e.reason) && e.reason !== 'Signed out') return { passing: true, reason: e.reason }
+  return e
+}
+
 /** which errors pass by themselves. The CLI's own code decides where it has one (Codex codex_error_info, Claude Code's
  *  error and HTTP status); its words decide for the rest. Not recognised: it doesn't pass. `resetAt` is when the provider
  *  says its allowance comes back, where it said how long to wait rather than when (ms). */
@@ -337,6 +363,18 @@ export interface Retry {
   /** one response was refused by a filter: its chat goes to its backup, but there is no outage to watch, so this
    *  takeover must not be adopted as one by the way back (unlike a passing error's five tries) */
   blocked?: boolean
+  /** read while the turn was still running, from a CLI's own retry state rather than a log's cut-off */
+  inTurn?: boolean
+  /** the CLI's own attempt number, while it retries inside the turn */
+  attempt?: number
+  /** when this retry loop was first seen: the window runs from here, not from the CLI's first attempt */
+  loopSince?: number
+  /** when the CLI says its next try is */
+  next?: number
+  /** consecutive reads that saw no retry: a countdown at zero and a request in flight show no line, so a loop holds */
+  loopMisses?: number
+  /** where the in-turn state came from */
+  source?: LoopState['source']
 }
 
 /** the line a cut-off agent is told after the wait */
@@ -379,7 +417,7 @@ export class Retries {
     // a newer turn began since (a job it left running woke it, you typed in its terminal, the CLI tried again by
     // itself): it went on without being told, and the count starts again
     if (!cut) return was ? this.clear(key) : undefined
-    if (was?.cut === cut.id) return
+    if (was?.cut === cut.id || (was?.inTurn && was.over)) return
     const e = providerError(cut.text, cut.code, cut.status, cut.retryAfterMs ? cut.at + cut.retryAfterMs : undefined)
     const tries = (was?.tries ?? 0) + 1
     const words = cut.text.replace(/\s+/g, ' ').trim().slice(0, 300)
@@ -401,9 +439,81 @@ export class Retries {
       ...(e.passing || e.blocked ? {} : { lasting: true }),
       ...(e.blocked ? { blocked: true } : {}),
     }
+    this.end(key, cut, r)
+  }
+
+  /**
+   * Its CLI is retrying inside its turn. This is the cut the log never records: the same windows (1, 2, 4, 8 minutes)
+   * count from when the loop was first seen, and a next try the CLI says is beyond that window is a cut now. A quota
+   * (or anything waiting can't fix) goes straight to the backup. Until then the retry is kept for the status line,
+   * never a plain "Working", and the ordinary cut-off rules take over if the turn does end later.
+   */
+  loop(key: string, state: LoopState, now = Date.now()) {
+    const was = this.data[key]
+    if (was?.over) return
+    const e = loopError(state)
+    const words = state.message.replace(/\s+/g, ' ').trim().slice(0, 300)
+    const since = was?.inTurn && was.loopSince !== undefined ? was.loopSince : now
+    const window = this.waits.reduce((total, w) => total + w, 0)
+    const past = now - since >= window || (state.next !== undefined && state.next > since + window)
+    const cut: Cut = { id: `loop-${state.attempt}-${since}`, at: now, text: state.message }
+    if (!e.passing || past) {
+      const r: Retry = {
+        cut: cut.id,
+        tries: was?.tries ?? 0,
+        reason: e.passing ? `${e.reason}, still after ${state.attempt} tries` : e.reason,
+        words,
+        over: true,
+        // a loop that outlasted its window holds the primary out: like a lasting cut, the watch asks it again (SHE-174)
+        ...(e.blocked ? { blocked: true } : { lasting: true }),
+        inTurn: true,
+        attempt: state.attempt,
+        loopSince: since,
+        ...(state.next !== undefined ? { next: state.next } : {}),
+        source: state.source,
+      }
+      this.end(key, cut, r)
+      return
+    }
+    const r: Retry = {
+      cut: cut.id,
+      tries: was?.tries ?? 0,
+      reason: e.reason,
+      words,
+      ...(was?.nudged !== undefined ? { nudged: was.nudged } : {}),
+      inTurn: true,
+      attempt: state.attempt,
+      loopSince: since,
+      ...(state.next !== undefined ? { next: state.next } : {}),
+      source: state.source,
+    }
+    r.loopMisses = 0
+    this.data[key] = r
+    // the pass reads this every few seconds: save and wake the screen only when the retry actually changed
+    if (!was || was.attempt !== state.attempt || was.next !== state.next || was.reason !== e.reason) {
+      this.save()
+      this.hooks.changed(key)
+    }
+  }
+
+  /** A read that saw no retry may be a request in flight between attempts, not a recovery. Only several in a row
+   *  clear the loop; a rising attempt with a gap in between still counts the window from the first sighting. */
+  loopEnded(key: string, misses = 3) {
+    const r = this.data[key]
+    if (!r?.inTurn || r.over) return
+    const n = (r.loopMisses ?? 0) + 1
+    if (n < misses) {
+      r.loopMisses = n
+      this.save()
+      return
+    }
+    this.clear(key)
+  }
+
+  /** told by what comes next: a backup agent takes over, or the human hears */
+  private end(key: string, cut: Cut, r: Retry) {
     this.set(key, r)
-    if (!e.passing && runOutOf(e.reason)) this.hooks.runOut?.(key, cut, e.reason)
-    // told by what comes next: a backup agent takes over, or the human hears
+    if (r.lasting && runOutOf(r.reason)) this.hooks.runOut?.(key, cut, r.reason)
     this.hooks.over(key, r)
   }
 

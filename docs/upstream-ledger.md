@@ -1104,3 +1104,35 @@ a task's own Terminal stays its side-panel item. PR #756's reset-on-open is not 
 to reset — a chat is stuck only while its own key is in `ui.term`, and the new row clears exactly that.
 `test/layout-panel.test.ts` proves the card repro failing before and passing after (the narrow window's ⋯ menu, the
 desktop's Ctrl+`, and a split pane's Ctrl+`), with the coordinator's toggle still tested.
+
+## Not from upstream: a CLI retrying inside its turn (SHE-200)
+
+Checked 2026-11-24 on `upstream/main` (`bcfd3fde`) and `upstream/v2.0` (`ebb17d58`), their code, history and public
+issues and pull requests (read only). Neither line reads a CLI's in-turn retry state: provider errors are read only
+when a turn ends (`9b8b0a5e` introduced retry.ts, `24106315` the fallback agent, `74da1e63` the 2.0 copy), and 3.2
+(`a1d90086`, `mods/tasks/bin/herdr_task/provider.py`) drops auto-retry altogether — "it is never retried by itself:
+3.2". The closest anything gets is pi's reader note that a CLI retrying an error starts a new turn
+(`upstream/v2.0:server/live/readers/pi.ts`), the blind spot here: OpenCode 2 retries inside the turn with growing
+backoff ("Retrying in 836s · attempt 7 · Rate limit exceeded") and herdr still says `working`, so no cut reaches
+retry.ts and no backup goes in. Issue and PR searches for retry, rate limit, backoff and quota found nothing on this.
+
+What each CLI actually says was checked on this host's own binaries and screens before writing the reader: OpenCode
+2.3.2's `⚠ Retrying in Ns · attempt N · <reason>` (and `Retry due` at zero), Claude Code 2.1.331's dim
+`· retrying in Ns · attempt N/M`, pi 1.5.2's `Retrying (N/M) in Ns...`, agy's `Retrying in Ns (attempt N/M)`; Codex is
+not installed here and has no in-turn provider retry with an attempt count, so it gets no reader and a test says so.
+The OpenCode API operations were checked by running them: `session.status` is absent in 2.3.2, `session.message.list`
+exists but keeps no retry part, so the screen is the working path there and the API reader covers versions that have it.
+
+**not from upstream** (ours): read the retry state a CLI keeps while its turn runs — OpenCode's own session status and
+messages through its API where the version has them, then its waiting line, and the same line for Claude Code and agy
+(pi's own reader already ends its retries as turns) — classify it with retry.ts's rules, and hand a loop past the passing-error window (or one whose next wait is
+beyond it, or an allowance that is out) to the same backup chain a cut uses, stopping the old CLI's pane. A short
+retry that recovers leaves the task alone. Three.x's "never retried by itself" is not taken: our fork keeps the
+wait-and-nudge policy and its backup chain by design. No upstream code ports: the mechanism does not exist there.
+
+The per-CLI check (AGENTS.md's "Every harness") is recorded at the top of `server/live/retry-loop.ts`: OpenCode 2.3.2's
+own API and screen (its `session.status` operation is absent, checked by running it; its messages keep no retry part),
+Claude Code 2.1.331, pi 1.5.2 and agy from their installed bundles' own status-line strings, and Codex as not installed
+here and without an in-turn provider backoff we can read. Each CLI's line that was found has its own test; the local
+`opencode-retry-cap` plugin on this host caps the longest OpenCode loops by ending the turn, so Shepherdr's reader also
+covers sessions started before it and other machines without that plugin.

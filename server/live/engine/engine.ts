@@ -1358,6 +1358,8 @@ export class Engine extends Emitter<Events> {
         return fitStatus(`${on} ${t.tookOver.from === t.tookOver.to ? 'starts again' : 'takes over'}: ${t.tookOver.why}`)
       }
       const r = this.retry?.(key)
+      // a CLI retrying inside its turn still says "working" to herdr: its row says what it waits for instead
+      if (r?.inTurn && !r.over) return `${r.reason}, retrying (attempt ${r.attempt ?? 1})${r.next ? ` · next in ${inMins(r.next)}` : ''}`
       if (r?.due) return `${r.reason} · retry in ${inMins(r.due)}`
       return 'Working'
     })()
