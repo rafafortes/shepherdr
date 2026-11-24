@@ -3,19 +3,21 @@
 // opens a small popover (a phone: the same controls under its line) with the CLI, model and effort it runs on, and
 // writes the same setting keys at that row's level, through the setting action. The bulk actions: a column's "Set for
 // every space…" and a space's "Copy models to…", each confirmed first. The table comes from one read (models-matrix.ts).
+
+import type { MatrixRow, MatrixSlot, ModelsMatrix, SettingRow, ModelsSummary as Summary } from '@shared/types.ts'
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { MatrixRow, MatrixSlot, ModelsMatrix, ModelsSummary as Summary, SettingRow } from '@shared/types.ts'
-import { act, useSnap } from './kernel.ts'
-import { askWaitingMany } from './apply-waiting.tsx'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Anchored, OnTop } from './anchored.tsx'
+import { askWaitingMany } from './apply-waiting.tsx'
 import { Pop } from './cell-pop.tsx'
-import { ProfilesBar } from './Profiles.tsx'
-import { Control, Editor, Refused, openPage } from './settings-parts.tsx'
-import { Dialog } from './rowmenu.tsx'
+import { press } from './drag.ts'
+import { act, useSnap } from './kernel.ts'
 import ModelsSummary from './ModelsSummary.tsx'
+import { ProfilesBar } from './Profiles.tsx'
 import QuotaSettings from './QuotaSettings.tsx'
-import { Ghost, Menu, MenuItem, MoreIcon, Primary, Small, ic } from './ui.tsx'
+import { Dialog } from './rowmenu.tsx'
+import { Control, Editor, openPage, Refused } from './settings-parts.tsx'
+import { DownIcon, Ghost, ic, Menu, MenuItem, MoreIcon, PlusIcon, Primary, Small, UpIcon } from './ui.tsx'
 
 /** a CLI's name when it is off: a backup that doesn't run */
 const OFF = 'off'
@@ -24,6 +26,15 @@ type Plain = ModelsMatrix['plain'][number]
 type Target = { slot: MatrixSlot } | { plain: Plain }
 /** one setting key written, its value (null: reset to what the level above gives) */
 type Write = [key: string, value: string | null]
+/** a chain shown in its new order until the matrix read has caught up */
+type PendingOrder = { order: number[]; words: string[] }
+type ChainOp = { op: 'move'; from: number; to: number } | { op: 'insert'; at: number; cli: string }
+
+const chainKey = (row: MatrixRow, role: MatrixSlot['role']) => `${row.id}|${role}`
+/** a dragged chain entry lifts; the line marks the position it will take, down a phone list or across a table row */
+const dragged = 'data-dragging:z-10 data-dragging:bg-bg data-dragging:shadow-menu'
+const dropBefore = 'data-[drop-over=before]:shadow-[inset_0_2px_0_var(--focus)]'
+const dropBeforeX = 'data-[drop-over=before]:shadow-[inset_2px_0_0_var(--focus)]'
 
 const keysOf = (t: Target) => ('slot' in t ? [t.slot.cli, t.slot.model, t.slot.effort] : [t.plain.key])
 const idOf = (row: MatrixRow, t: Target) => `${row.id}|${'slot' in t ? t.slot.id : t.plain.key}`
@@ -152,6 +163,10 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   const [menu, setMenu] = useState<string | null>(null)
   const [bulk, setBulk] = useState<MatrixSlot | null>(null)
   const [copy, setCopy] = useState<MatrixRow | null>(null)
+  // a chain's optimistic order until the server's matrix has it; one write at a time, and its refusal under the table
+  const [orders, setOrders] = useState<Record<string, PendingOrder>>({})
+  const [chainError, setChainError] = useState('')
+  const writing = useRef(false)
   // every change of Settings is a new snapshot: the table reads again
   useEffect(() => {
     let live = true
@@ -162,6 +177,20 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       live = false
     }
   }, [snap])
+  // once a read has the order that was shown optimistically, the server's own values take over again
+  useEffect(() => {
+    setOrders((current) => {
+      let next = current
+      for (const [key, pending] of Object.entries(current)) {
+        const [rowId, role] = key.split('|') as [string, MatrixSlot['role']]
+        const cells = m?.rows.find((r) => r.id === rowId)?.cells
+        if (!pending.order.every((_, i) => cells?.[`${role}.${i}`]?.words === pending.words[i])) continue
+        if (next === current) next = { ...current }
+        delete next[key]
+      }
+      return next
+    })
+  }, [m])
   useEffect(() => {
     let live = true
     act({ type: 'models-summary' })
@@ -175,6 +204,44 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   const groups = groupsOf(m)
   const spaces = m.rows.filter((r) => r.kind === 'space')
   const machine = m.rows.find((r) => r.kind === 'machine')!
+  /** the slots of one role keep their positions (and their Primary/Backup names); a pending move changes only which
+   *  entry is shown in each position until the server has written those positional keys */
+  const shownCellOf = (row: MatrixRow, g: Group, slot: MatrixSlot) => {
+    const pending = orders[chainKey(row, g.role)]
+    const source = pending ? g.all[pending.order[slot.n]] : slot
+    return cellOf(row, source)
+  }
+  const showOrder = (row: MatrixRow, g: Group, order: number[]) => {
+    const words = order.map((n) => cellOf(row, g.all[n]).words)
+    setOrders((o) => ({ ...o, [chainKey(row, g.role)]: { order, words } }))
+  }
+  /** one whole-chain write at this row's scope; a refusal puts the shown order back */
+  const writeChain = async (row: MatrixRow, g: Group, op: ChainOp) => {
+    const key = chainKey(row, g.role)
+    if (writing.current || orders[key]) return false
+    writing.current = true
+    setChainError('')
+    const r = (await act({ type: 'model-chain', role: g.role, place: row.id, ...op }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
+    writing.current = false
+    if (!r?.ok) {
+      setOrders((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key)))
+      setChainError(`${row.name} · ${g.title}: ${r?.error ?? "That didn't go through."}`)
+      return false
+    }
+    void askWaitingMany(m.slots.filter((x) => x.role === g.role).flatMap((x) => [x.cli, x.model, x.effort].map((key) => ({ key, place: row.id }))))
+    return true
+  }
+  const moveChain = (row: MatrixRow, g: Group, from: number, to: number) => {
+    if (writing.current || orders[chainKey(row, g.role)]) return
+    const order = g.slots.map((x) => x.n)
+    const [slot] = order.splice(from, 1)
+    order.splice(to, 0, slot)
+    showOrder(row, g, order)
+    void writeChain(row, g, { op: 'move', from, to })
+  }
+  const insertChain = async (row: MatrixRow, g: Group, slot: MatrixSlot) => {
+    if (await writeChain(row, g, { op: 'insert', at: slot.n, cli: row.values[slot.cli].value })) setOpen({ id: idOf(row, { slot }) })
+  }
   const toggle = (id: string, next?: { id: string }) => setOpen(open?.id === id ? null : (next ?? { id }))
   /** a warning's Change: the cell's editor opens, and the cell is brought into view first */
   const goTo = (row: string, slot: string) => {
@@ -240,6 +307,65 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       ) : null}
     </span>
   )
+  /** a chain entry's ⋯: move the whole entry, or insert a new one on this entry's CLI at this position */
+  const chainMenu = (row: MatrixRow, g: Group, slot: MatrixSlot, at: number, count: number) => {
+    const id = `chain:${row.id}:${slot.id}`
+    const pending = !!orders[chainKey(row, g.role)]
+    return (
+      <span className="relative inline-flex shrink-0">
+        <button
+          type="button"
+          aria-label={`Chain actions for ${row.name} · ${g.title} · ${slot.name}`}
+          aria-haspopup="menu"
+          aria-expanded={menu === id}
+          disabled={pending}
+          onClick={() => setMenu(menu === id ? null : id)}
+          className="press-dim grid size-6 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg disabled:opacity-40 coarse:size-8 phone:size-8"
+        >
+          <MoreIcon className={ic} />
+        </button>
+        {menu === id ? (
+          <Anchored end>
+            <Menu label={`${row.name} · ${g.title} · ${slot.name}`} onClose={() => setMenu(null)} className="min-w-48 text-left">
+              <MenuItem
+                icon={<UpIcon className={ic} />}
+                disabled={at === 0}
+                className="disabled:pointer-events-none disabled:text-fg3"
+                onClick={() => {
+                  setMenu(null)
+                  moveChain(row, g, at, at - 1)
+                }}
+              >
+                Move up
+              </MenuItem>
+              <MenuItem
+                icon={<DownIcon className={ic} />}
+                disabled={at === count - 1}
+                className="disabled:pointer-events-none disabled:text-fg3"
+                onClick={() => {
+                  setMenu(null)
+                  moveChain(row, g, at, at + 1)
+                }}
+              >
+                Move down
+              </MenuItem>
+              <MenuItem
+                icon={<PlusIcon className={ic} />}
+                disabled={count >= g.all.length}
+                className="disabled:pointer-events-none disabled:text-fg3"
+                onClick={() => {
+                  setMenu(null)
+                  void insertChain(row, g, slot)
+                }}
+              >
+                Insert above
+              </MenuItem>
+            </Menu>
+          </Anchored>
+        ) : null}
+      </span>
+    )
+  }
   const copyItem = (row: MatrixRow) => (
     <MenuItem
       onClick={() => {
@@ -278,6 +404,11 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       <div className="flex flex-col gap-5 px-4 pb-6">
         <ProfilesBar phone={phone} />
         <LimitsLink />
+        {chainError ? (
+          <Small role="status" className="text-pretty text-need-fg!">
+            {chainError}
+          </Small>
+        ) : null}
         {m.rows.map((row) => (
           <section key={row.id} aria-label={row.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
             <div className="flex items-center gap-2 px-4 pt-3 pb-1">
@@ -287,28 +418,53 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
             </div>
             {groups.map((g) => {
               const next = g.all[topOf(row, g.all) + 1]
+              const slots = g.slots
               return (
                 <div key={g.role} className="px-4 pb-1">
                   <h4 className="pt-2 pb-1 text-[0.8125rem] text-fg2">{g.title}</h4>
                   <ul className="flex flex-col">
-                    {g.slots.map((slot) => {
-                      const cell = cellOf(row, slot)
+                    {slots.map((slot, position) => {
+                      const cell = shownCellOf(row, g, slot)
                       const t: Target = { slot }
+                      const id = idOf(row, t)
                       return (
-                        <li key={slot.id} className="flex flex-col">
-                          <button
-                            type="button"
-                            data-cell={idOf(row, t)}
-                            aria-expanded={open?.id === idOf(row, t)}
-                            onClick={() => toggle(idOf(row, t))}
-                            className="press flex min-h-11 w-full items-center justify-between gap-3 text-left"
-                          >
-                            <span className="shrink-0 text-fg2">{slot.name}</span>
-                            <span className={clsx('min-w-0 truncate text-right', cell.set ? 'text-fg' : 'text-fg3')} title={cell.words}>
-                              {cell.words}
-                              {cell.set ? null : <span className="block text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
-                            </span>
-                          </button>
+                        <li
+                          key={slot.id}
+                          data-chain={id}
+                          className={clsx('flex flex-col', dragged, dropBefore, orders[chainKey(row, g.role)] && 'opacity-60')}
+                          onPointerDown={
+                            orders[chainKey(row, g.role)]
+                              ? undefined
+                              : (e) =>
+                                  press(e, {
+                                    id,
+                                    siblings: slots.map((x) => idOf(row, { slot: x })),
+                                    level: 'chain',
+                                    drop: (ids) => {
+                                      if (writing.current) return
+                                      const order = ids.map((x) => Number(x.slice(x.lastIndexOf('.') + 1)))
+                                      showOrder(row, g, order)
+                                      void writeChain(row, g, { op: 'move', from: position, to: order.indexOf(slot.n) })
+                                    },
+                                  })
+                          }
+                        >
+                          <div className="flex items-center">
+                            <button
+                              type="button"
+                              data-cell={id}
+                              aria-expanded={open?.id === id}
+                              onClick={() => !orders[chainKey(row, g.role)] && toggle(id)}
+                              className="press flex min-h-11 w-full min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                            >
+                              <span className="shrink-0 text-fg2">{slot.name}</span>
+                              <span className={clsx('min-w-0 truncate text-right', cell.set ? 'text-fg' : 'text-fg3')} title={cell.words}>
+                                {cell.words}
+                                {cell.set ? null : <span className="block text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
+                              </span>
+                            </button>
+                            {chainMenu(row, g, slot, position, slots.length)}
+                          </div>
                           {editorOf(row, t)}
                         </li>
                       )
@@ -359,6 +515,11 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
     <div className="flex w-full flex-col gap-3 px-6 pt-5 pb-8">
       <ProfilesBar phone={phone} />
       <LimitsLink />
+      {chainError ? (
+        <Small role="status" className="text-pretty text-need-fg!">
+          {chainError}
+        </Small>
+      ) : null}
       {/* the table scrolls in its own box, both ways: its header rows and the Level column stay in view */}
       <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
         <table aria-label="Models by level" className="w-max border-separate border-spacing-0 text-[0.8125rem]">
@@ -414,38 +575,68 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                   </span>
                   <span className="block text-[0.75rem] text-fg3">{kindWords(row)}</span>
                 </th>
-                {groups.flatMap((g) => [
-                  ...g.slots.map((slot, i) => {
-                    const cell = cellOf(row, slot)
-                    const t: Target = { slot }
-                    const id = idOf(row, t)
-                    return (
-                      <td key={slot.id} className={clsx('relative py-1.5 pr-3 pl-2 align-top', i === 0 && 'border-l border-line')}>
-                        <button
-                          type="button"
-                          data-cell={id}
-                          aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`}
-                          aria-haspopup="dialog"
-                          aria-expanded={open?.id === id}
-                          onClick={() => toggle(id)}
-                          title={cell.words}
-                          className={clsx('press-dim block max-w-64 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}
+                {groups.flatMap((g) => {
+                  const slots = g.slots
+                  return [
+                    ...slots.map((slot, position) => {
+                      const cell = shownCellOf(row, g, slot)
+                      const t: Target = { slot }
+                      const id = idOf(row, t)
+                      return (
+                        <td
+                          key={slot.id}
+                          data-chain={id}
+                          className={clsx('relative py-1.5 pr-3 pl-2 align-top', position === 0 && 'border-l border-line', dragged, dropBeforeX, orders[chainKey(row, g.role)] && 'opacity-60')}
+                          onPointerDown={
+                            orders[chainKey(row, g.role)]
+                              ? undefined
+                              : (e) =>
+                                  press(e, {
+                                    id,
+                                    siblings: slots.map((x) => idOf(row, { slot: x })),
+                                    level: 'chain',
+                                    axis: 'x',
+                                    drop: (ids) => {
+                                      if (writing.current) return
+                                      const order = ids.map((x) => Number(x.slice(x.lastIndexOf('.') + 1)))
+                                      showOrder(row, g, order)
+                                      void writeChain(row, g, { op: 'move', from: position, to: order.indexOf(slot.n) })
+                                    },
+                                  })
+                          }
                         >
-                          {cell.words}
-                        </button>
-                        {cell.set || cell.words === OFF ? null : <span className="block truncate px-1.5 text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
-                        {open?.id === id ? <Pop onClose={() => setOpen(null)}>{editorOf(row, t)}</Pop> : null}
-                      </td>
-                    )
-                  }),
-                  ...(g.plus
-                    ? [
-                        <td key={`${g.role}-plus-${row.id}`} className="relative py-1.5 pr-3 align-top">
-                          <PlusCell row={row} group={g} open={open?.id ?? null} add={(slot) => add(row, slot)} onClose={() => setOpen(null)} editor={(t) => editorOf(row, t)} />
-                        </td>,
-                      ]
-                    : []),
-                ])}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              data-cell={id}
+                              aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`}
+                              aria-haspopup="dialog"
+                              aria-expanded={open?.id === id}
+                              onClick={() => !orders[chainKey(row, g.role)] && toggle(id)}
+                              title={cell.words}
+                              className={clsx(
+                                'press-dim block max-w-64 min-w-0 flex-1 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel',
+                                cell.set ? 'font-medium text-fg' : 'text-fg3',
+                              )}
+                            >
+                              {cell.words}
+                            </button>
+                            {chainMenu(row, g, slot, position, slots.length)}
+                          </div>
+                          {cell.set || cell.words === OFF ? null : <span className="block truncate px-1.5 text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
+                          {open?.id === id ? <Pop onClose={() => setOpen(null)}>{editorOf(row, t)}</Pop> : null}
+                        </td>
+                      )
+                    }),
+                    ...(g.plus
+                      ? [
+                          <td key={`${g.role}-plus-${row.id}`} className="relative py-1.5 pr-3 align-top">
+                            <PlusCell row={row} group={g} open={open?.id ?? null} add={(slot) => add(row, slot)} onClose={() => setOpen(null)} editor={(t) => editorOf(row, t)} />
+                          </td>,
+                        ]
+                      : []),
+                  ]
+                })}
                 {m.plain.map((p) => {
                   const t: Target = { plain: p }
                   const id = idOf(row, t)

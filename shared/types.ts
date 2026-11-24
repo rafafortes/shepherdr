@@ -1430,11 +1430,13 @@ export type Action =
   /** a space's move up or down the queue in Settings → Limits → Spaces: every value the move writes, at the space each
    *  names (null clears it). One action, so a move happens whole or not at all and two moves cannot interleave */
   | { type: 'space-order'; moves: { place: string; value: string | null }[] }
+  /** Settings → Models: move a whole CLI/model/effort entry, or insert one on the row's CLI, at one scope in one write */
+  | ({ type: 'model-chain'; role: MatrixRole; place?: string } & ({ op: 'move'; from: number; to: number } | { op: 'insert'; at: number; cli: string }))
   /** a task agent Setting (task.agent, task.model, task.effort) changed at a level (place: a space, this machine, or none
    *  for Everywhere): the waiting tasks it reaches take what Settings name for their space, as Start with… gives each
    *  (engine retuneWaiting). dry: the counts only, for the question asked first. Running tasks keep their agent */
   | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
-  /** Settings → Models: every level's model settings as one table (read only; the writes are the setting action) */
+  /** Settings → Models: every level's model settings as one table (read only; cells write setting, chain moves write model-chain) */
   | { type: 'models-matrix' }
   /** Settings → Models → Summary: per provider and model, what they run, use and ran out of, and the warnings (read only) */
   | { type: 'models-summary' }

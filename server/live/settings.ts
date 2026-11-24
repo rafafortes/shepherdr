@@ -6,20 +6,21 @@
 // Settings come in two groups: what agents are told (only words in their prompts) and how Shepherdr runs (the rest).
 // The main machine keeps the Everywhere level; a worker for another machine (machines.ts) reads it from the main
 // machine's file as it changes, and its shepherdr set for Everywhere is run there.
-import { CHAT_KINDS, chatProblem } from './readers/index.ts'
-import { cleanFlagsLine, KINDS as FLAG_KINDS, NAMES as FLAG_NAMES, parseFlags } from './flags.ts'
+
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
+import type { SetBy } from '../../shared/brief.ts'
+import { fitToProviders, formatMaxAtOnce, type Lowered, loweredWords, type MaxEntry, parseMaxAtOnce, toHarnessPatterns } from '../../shared/model-caps.ts'
+import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { PLACE_MAX } from '../../shared/space-order.ts'
 import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
-import type { SetBy } from '../../shared/brief.ts'
-import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
-import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, offers, scopeOpencodeText, scopePatterns } from './models.ts'
+import { cleanFlagsLine, KINDS as FLAG_KINDS, NAMES as FLAG_NAMES, parseFlags } from './flags.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
-import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
-import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, toHarnessPatterns, type Lowered, type MaxEntry } from '../../shared/model-caps.ts'
-import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
+import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, offers, scopeOpencodeText, scopePatterns } from './models.ts'
+import { type Reviewer, type Said, SEVERITIES, settingsBlock, settingsLines, type Ways } from './prompts.ts'
+import { CHAT_KINDS, chatProblem } from './readers/index.ts'
+import { type EventRule, eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
 const FALLBACK_KINDS = [
@@ -1028,27 +1029,32 @@ export class Settings {
     if (typeof l === 'object' && !Object.keys(at).length) delete this.d.spaces[l.space]
     this.save()
     if (key === 'opencode.models') this.scopeOpencode()
-    // a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
-    // own, the demo's, keeps its picks to itself)
-    const own = pairOfKey(key)
-    if (!this.seed && value !== null && own?.what === 'model') {
-      // the tasks' backup model is one the tasks' backup CLI has, and the coordinators' one while it follows it; the
-      // coordinators' own model, one its own backup CLI has
-      const kinds =
-        own.pair === PAIRS.backup
-          ? [this.kindOf('backup', l), this.pick(PAIRS.coordinatorBackup.model, l).value.trim().toLowerCase() === 'default' ? this.kindOf('coordinatorBackup', l) : undefined]
-          : [kindOf(this.pick(own.pair.cli, l).value)]
-      for (const kind of kinds) {
-        const picked = kind ? findModel(kind, value) : undefined
-        if (kind && picked) rememberModel(kind, picked.id)
-      }
-    }
+    this.choseModel(key, value, l)
     return note ? { ok: true, note } : { ok: true }
   }
 
+  /** a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
+   *  own, the demo's, keeps its picks to itself) */
+  private choseModel(key: string, value: string | null, l: Level) {
+    if (this.seed || value === null) return
+    const own = pairOfKey(key)
+    if (own?.what !== 'model') return
+    // the tasks' backup model is one the tasks' backup CLI has, and the coordinators' one while it follows it; the
+    // coordinators' own model, one its own backup CLI has
+    const kinds =
+      own.pair === PAIRS.backup
+        ? [this.kindOf('backup', l), this.pick(PAIRS.coordinatorBackup.model, l).value.trim().toLowerCase() === 'default' ? this.kindOf('coordinatorBackup', l) : undefined]
+        : [kindOf(this.pick(own.pair.cli, l).value)]
+    for (const kind of kinds) {
+      const picked = kind ? findModel(kind, value) : undefined
+      if (kind && picked) rememberModel(kind, picked.id)
+    }
+  }
+
   /**
-   * Set several values as one write (a space's move up or down the queue): each is tried on a copy of every level first,
-   * so a value any of them refuses leaves none of them written, and two moves can never interleave their values.
+   * Set several values as one write (a space's move up or down the queue, a model chain's reorder): each is tried on a
+   * copy of every level first, so a value any of them refuses leaves none of them written. The copy becomes this one only
+   * after every value passed, and the file is saved once: no reader can see a half-shifted chain.
    */
   setMany(moves: { key: string; value: string | null; level: Level }[]): { ok: boolean; error?: string } {
     const trial = this.copy()
@@ -1056,8 +1062,66 @@ export class Settings {
       const r = trial.set(m.key, m.value, m.level)
       if (!r.ok) return { ok: false, error: r.error }
     }
-    for (const m of moves) this.set(m.key, m.value, m.level)
+    this.d = trial.d
+    this.save()
+    for (const m of moves) {
+      if (m.key === 'opencode.models') this.scopeOpencode()
+      this.choseModel(m.key, m.value, m.level)
+    }
     return { ok: true }
+  }
+
+  /** a role's whole chain as this level reads it, Primary first: moving it carries each CLI with its own model and effort */
+  chainAt(role: Chain, l: Level): { cli: string; model: string; effort: string }[] {
+    return rolePairs(role).map((p) => ({ cli: this.readAt(p.cli, l).value, model: this.readAt(p.model, l).value, effort: this.readAt(p.effort, l).value }))
+  }
+
+  /** move one whole entry to another position, writing the chain only at this level and all of it in one save */
+  moveChain(role: Chain, from: number, to: number, l: Level): { ok: boolean; error?: string } {
+    return this.writeChain(
+      role,
+      (entries) => {
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= entries.length || to >= entries.length) return { ok: false, error: 'Choose two positions in this chain.' }
+        const next = entries.filter((_, i) => i !== from)
+        next.splice(to, 0, entries[from])
+        return { ok: true, entries: next }
+      },
+      l,
+    )
+  }
+
+  /** insert a new entry above a position, starting on the CLI of the row it was opened from; a full chain refuses whole */
+  insertChain(role: Chain, at: number, cli: string, l: Level): { ok: boolean; error?: string } {
+    return this.writeChain(
+      role,
+      (entries) => {
+        if (!Number.isInteger(at) || at < 0 || at >= entries.length) return { ok: false, error: 'Choose a position in this chain.' }
+        if (entries.every((x) => !!kindOf(x.cli))) return { ok: false, error: 'This chain already has a primary and five backups.' }
+        const drop = entries.findLastIndex((x) => !kindOf(x.cli))
+        const next = entries.filter((_, i) => i !== drop)
+        next.splice(at, 0, { cli, model: 'default', effort: 'default' })
+        return { ok: true, entries: next }
+      },
+      l,
+    )
+  }
+
+  /** the one writer behind a move and an insert: the trial checks every CLI, model and effort before any key changes */
+  private writeChain(
+    role: Chain,
+    change: (entries: { cli: string; model: string; effort: string }[]) => { ok: true; entries: { cli: string; model: string; effort: string }[] } | { ok: false; error: string },
+    l: Level,
+  ): { ok: boolean; error?: string } {
+    if (!CHAINS.includes(role)) return { ok: false, error: 'No such model chain.' }
+    const next = change(this.chainAt(role, l))
+    if (!next.ok) return next
+    return this.setMany(
+      rolePairs(role).flatMap((p, i) => [
+        { key: p.cli, value: next.entries[i].cli, level: l },
+        { key: p.model, value: next.entries[i].model, level: l },
+        { key: p.effort, value: next.entries[i].effort, level: l },
+      ]),
+    )
   }
 
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
@@ -1103,8 +1167,10 @@ export class Settings {
       // only a level that will read this value has to fit it: one whose own key is stored would win over it
       if (x !== l && !this.readsAt(x, l, pair[what])) return []
       const get = (k: string) => this.pick(k, x).value
-      // the tasks' pair is read by their backup, and by the coordinators' while their own is at default
-      if (pair === PAIRS.backup) return get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default' ? fallbackKinds(get) : [kindOf(get(PAIRS.backup.cli))]
+      // the tasks' pair is read by their first backup, and by the coordinators' first backup while its own is at default;
+      // later backups have their own model and effort keys and must not constrain this pair
+      if (pair === PAIRS.backup)
+        return get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default' ? [kindOf(get(PAIRS.backup.cli)), kindOf(get(PAIRS.coordinatorBackup.cli))] : [kindOf(get(PAIRS.backup.cli))]
       return [kindOf(get(PAIRS.coordinatorBackup.cli))]
     })
     return [...new Set(kinds.filter((k): k is string => !!k))]

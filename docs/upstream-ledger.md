@@ -451,6 +451,15 @@ one row's model; its Settings are one level at a time. So the table of every lev
 backups, and its bulk "set for every space" and "copy to" actions, is ours: `models-matrix.ts` and `ModelsPage.tsx`,
 Settings → Models. See [settings](settings.md#models).
 
+## Not from upstream: reorder and insert whole model-chain entries
+
+Checked 2026-11-24 against upstream `main` (`0f6ee268`, 3.x) and `v2.0` (`ebb17d58`): code and history for backup chains,
+fallback chains and reordering, plus the public issues and pull requests for model-chain reorder, backup reorder and
+insert-above. Upstream `main` has one backup agent and machine reordering (`5b024ae6`, #1436, with Move up / Move down in
+the machine menu), not a role's chain of models; `v2.0` has no chain reorder. Nothing to port. The pointer gesture is our
+sidebar's (`src/drag.ts`, shared by `plugins/places` and Models), and the scoped whole-chain writer is ours
+(`Settings.moveChain` / `insertChain`, the `model-chain` action). `shepherdr set` remains key-by-key.
+
 ## Not from upstream: named settings profiles, built here
 
 Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for profile, preset and

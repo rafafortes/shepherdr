@@ -1,19 +1,21 @@
-// Dragging a machine or a project into the order you want. A mouse drags a row at once; a finger holds it first (a
-// project's menu opens then, as before) and slides it, which closes the menu. The rows it passes make room for it; let
-// go, it settles into its slot. A machine takes its projects along, a section its spaces; a space moves among those
-// beside it, or out onto another section (its heading, or a row in it: before that one) where it may go, which lights up.
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import { flushSync } from 'react-dom'
+// Dragging a machine, a project or a model-chain entry into the order you want. A mouse drags a row at once; a finger
+// holds it first (a project's menu opens then, as before) and slides it, which closes the menu. The rows it passes make
+// room for it; let go, it settles into its slot. A machine takes its projects along, a section its spaces; a space moves
+// among those beside it, or out onto another section (its heading, or a row in it: before that one) where it may go,
+// which lights up. A chain entry moves along its role's column (desktop table) or down its list (phone).
+
 import { still } from '@client/motion.ts'
 import { HOLD_MS } from '@client/rowmenu.tsx'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+import { flushSync } from 'react-dom'
 
 export interface Press {
   /** the row's place, and the places it moves among (itself too), as they show */
   id: string
   siblings: string[]
   /** a machine's rows are its own and its projects' (data-machine); a project's its own (data-project), a pinned row's
-   *  its own (data-pin) */
-  level: 'machine' | 'project' | 'section'
+   *  its own (data-pin); a model-chain entry's its own (data-chain) */
+  level: 'machine' | 'project' | 'section' | 'chain'
   /** the new order, once it lands somewhere else; inside flushSync, so the rows are in it when it settles */
   drop: (ids: string[]) => void
   /** a space: the group it is in (data-drop on its rows and heading), whether it may go into another, and going there
@@ -23,13 +25,15 @@ export interface Press {
   hold?: (el: HTMLElement) => void
   lift?: () => void
   release?: () => void
+  /** a table's chain moves across its columns; a list's chain (and the sidebar) moves down its rows */
+  axis?: 'x' | 'y'
 }
 
 interface Block {
   id: string
   els: HTMLElement[]
-  top: number
-  bottom: number
+  start: number
+  end: number
 }
 
 const EASE = 'transform 160ms cubic-bezier(0.2, 0, 0, 1)'
@@ -46,12 +50,13 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
   const id = e.pointerId
   const x0 = e.clientX
   const y0 = e.clientY
+  const axis = o.axis ?? 'y'
   const movable = o.siblings.length > 1 || !!o.into
   let held = mouse
   let blocks: Block[] = []
   let from = -1
   let to = -1
-  let dy = 0
+  let shift = 0
   let gap = 0
   /** another group it is over, where it may go: its heading lit, and the row it goes before */
   let over: { group: string; before?: string; lit: HTMLElement[] } | null = null
@@ -63,16 +68,16 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
       else navigator.vibrate?.(10)
     }, HOLD_MS)
 
-  const rowsOf = (k: string) => [...el.parentElement!.children].filter((x): x is HTMLElement => x instanceof HTMLElement && x.dataset[o.level] === k)
+  const rowsOf = (k: string) => [...(el.parentElement?.children ?? [])].filter((x): x is HTMLElement => x instanceof HTMLElement && x.dataset[o.level] === k)
   const begin = () => {
     blocks = o.siblings.map((k) => {
       const els = rowsOf(k)
       const rs = els.map((x) => x.getBoundingClientRect())
-      return { id: k, els, top: Math.min(...rs.map((r) => r.top)), bottom: Math.max(...rs.map((r) => r.bottom)) }
+      return { id: k, els, start: Math.min(...rs.map((r) => (axis === 'x' ? r.left : r.top))), end: Math.max(...rs.map((r) => (axis === 'x' ? r.right : r.bottom))) }
     })
     from = to = o.siblings.indexOf(o.id)
     if (from < 0 || blocks.some((b) => !b.els.length)) return false
-    gap = blocks.length > 1 ? Math.max(0, blocks[1].top - blocks[0].bottom) : 0
+    gap = blocks.length > 1 ? Math.max(0, blocks[1].start - blocks[0].end) : 0
     active = true
     o.lift?.()
     for (const [i, b] of blocks.entries())
@@ -107,22 +112,24 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     light(target(x, y))
     if (over) {
       // out over another group: it follows the pointer, and the rest stay as they were
-      dy = y - y0
+      shift = axis === 'x' ? x - x0 : y - y0
       to = from
-      for (const x of me.els) x.style.transform = `translateY(${dy}px)`
+      for (const x of me.els) x.style.transform = `translate${axis === 'x' ? 'X' : 'Y'}(${shift}px)`
       for (const [i, b] of blocks.entries()) if (i !== from) for (const x of b.els) x.style.transform = ''
       return
     }
-    dy = Math.min(Math.max(y - y0, blocks[0].top - me.top), blocks.at(-1)!.bottom - me.bottom)
-    // it passes a row once its top edge (going up) or bottom edge (going down) is past that row's middle
+    const at = axis === 'x' ? x : y
+    const start = axis === 'x' ? x0 : y0
+    shift = Math.min(Math.max(at - start, blocks[0].start - me.start), (blocks.at(-1)?.end ?? me.end) - me.end)
+    // it passes a row once its leading edge is past that row's middle
     const others = blocks.filter((_, i) => i !== from)
-    to = others.filter((b, k) => (b.top + b.bottom) / 2 < (k < from ? me.top : me.bottom) + dy).length
-    const room = me.bottom - me.top + gap
-    for (const x of me.els) x.style.transform = `translateY(${dy}px)`
+    to = others.filter((b, k) => (b.start + b.end) / 2 < (k < from ? me.start : me.end) + shift).length
+    const room = me.end - me.start + gap
+    for (const x of me.els) x.style.transform = `translate${axis === 'x' ? 'X' : 'Y'}(${shift}px)`
     for (const [k, b] of others.entries()) {
       const i = k < from ? k : k + 1
-      const shift = i < from && k >= to ? room : i > from && k < to ? -room : 0
-      for (const x of b.els) x.style.transform = shift ? `translateY(${shift}px)` : ''
+      const move = i < from && k >= to ? room : i > from && k < to ? -room : 0
+      for (const x of b.els) x.style.transform = move ? `translate${axis === 'x' ? 'X' : 'Y'}(${move}px)` : ''
     }
   }
   const clear = () => {
@@ -136,16 +143,16 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
       light(null)
       clear()
       for (const x of me.els) delete x.dataset.dragging
-      flushSync(() => o.into!.go(group, before))
+      flushSync(() => o.into?.go(group, before))
       return
     }
-    const at = me.top + dy
+    const at = me.start + shift
     const ids = blocks.filter((_, i) => i !== from).map((b) => b.id)
     ids.splice(to, 0, me.id)
     clear()
     if (to !== from) flushSync(() => o.drop(ids))
-    const now = Math.min(...me.els.map((x) => x.getBoundingClientRect().top))
-    for (const x of me.els) Object.assign(x.style, { transition: 'none', transform: `translateY(${at - now}px)` })
+    const now = Math.min(...me.els.map((x) => (axis === 'x' ? x.getBoundingClientRect().left : x.getBoundingClientRect().top)))
+    for (const x of me.els) Object.assign(x.style, { transition: 'none', transform: `translate${axis === 'x' ? 'X' : 'Y'}(${at - now}px)` })
     void el.offsetHeight
     for (const x of me.els) Object.assign(x.style, { transition: still() ? 'none' : EASE, transform: '' })
     setTimeout(
@@ -176,7 +183,10 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     if (!was) return
     settle()
     // the click a drag ends with opens nothing
-    const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
+    const swallow = (c: MouseEvent) => {
+      c.stopPropagation()
+      c.preventDefault()
+    }
     addEventListener('click', swallow, { capture: true, once: true })
     setTimeout(() => removeEventListener('click', swallow, { capture: true }), 50)
   }

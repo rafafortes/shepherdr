@@ -402,6 +402,13 @@ before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.m
   space's own. **Reset to inherited** removes the keys the row sets. A CLI change also resets a model or effort the new
   CLI lacks, to default, so it is never refused for what the screen moved itself. A change of a task or reviewer key
   asks **Apply to the tasks already created?** when a waiting task would change, as Settings does.
+- **Reorder or insert a chain entry**. Drag an entry with a mouse across its role's columns, or hold it with a finger and
+  slide it down the phone's list. Its ⋯ menu also offers **Move up**, **Move down** and **Insert above**. A move carries
+  the whole entry (CLI, model and effort); moving one to the top makes it the Primary. Insert above starts the new entry
+  on the CLI of the row whose menu was opened, as **+** and Agents' **Add a backup** do. The chain is read as that row
+  sees it and written at **that row's level in one change**: inherited entries become that scope's own, and Everywhere,
+  this machine and the other spaces are untouched. A chain with all six positions on cannot take another entry.
+  `shepherdr set` still changes one key at a time, so it has no atomic reorder command; use this screen to move a chain.
 - **Set for every space…** (a column's ⋯): one slot's CLI, model and effort for every space. Either **each space's own**
   (written at each space, replacing its value), or **Everywhere, and reset the spaces** (Everywhere gets the value, and
   this machine and each space lose their own, so every space reads Everywhere's). It closes once written, and the
