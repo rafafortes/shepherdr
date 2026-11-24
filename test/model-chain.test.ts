@@ -57,6 +57,21 @@ describe('a model chain moves and inserts whole entries', () => {
     expect(chain(s)).toEqual([before[0], { cli: 'OpenCode', model: 'default', effort: 'default' }, ...before.slice(1, 5)])
   })
 
+  test('Insert above keeps its position when an off entry before it is removed', () => {
+    const s = fresh({
+      everywhere: {
+        'task.agent': 'Claude Code',
+        'task.fallback': 'off',
+        'task.fallback2': 'pi',
+        'task.fallback3': 'OpenCode',
+        'task.fallback4': 'Antigravity',
+        'task.fallback5': 'Codex',
+      },
+    })
+    expect(s.insertChain('task', 4, 'OpenCode', 'all')).toEqual({ ok: true })
+    expect(chain(s).map((x) => x.cli)).toEqual(['Claude Code', 'pi', 'OpenCode', 'OpenCode', 'Antigravity', 'Codex'])
+  })
+
   test('a moved coordinator backup carries the model and effort it was reading from the tasks backup', () => {
     const s = fresh({ everywhere: { 'backup.model': 'gpt-6-sol', 'backup.effort': 'xhigh', 'coordinator.fallback': 'pi' } })
     const before = chain(s, 'coordinator')

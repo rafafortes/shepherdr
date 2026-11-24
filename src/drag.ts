@@ -44,7 +44,8 @@ export const dragging = () => active
 
 /** a pointer went down on a row that can be dragged: follows it until it goes up */
 export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
-  if ((e.pointerType === 'mouse' && e.button !== 0) || e.ctrlKey || (e.target as HTMLElement).closest('[role=menu]')) return
+  const fromTarget = e.target as HTMLElement
+  if ((e.pointerType === 'mouse' && e.button !== 0) || e.ctrlKey || fromTarget.closest('[role=menu], [role=dialog], input, select, textarea')) return
   const el = e.currentTarget
   const mouse = e.pointerType === 'mouse'
   const id = e.pointerId

@@ -1103,7 +1103,7 @@ export class Settings {
         if (entries.every((x) => !!kindOf(x.cli))) return { ok: false, error: 'This chain already has a primary and five backups.' }
         const drop = entries.findLastIndex((x) => !kindOf(x.cli))
         const next = entries.filter((_, i) => i !== drop)
-        next.splice(at, 0, { cli, model: 'default', effort: 'default' })
+        next.splice(at - (drop < at ? 1 : 0), 0, { cli, model: 'default', effort: 'default' })
         return { ok: true, entries: next }
       },
       l,

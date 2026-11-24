@@ -358,7 +358,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
               </MenuItem>
               <MenuItem
                 icon={<PlusIcon className={ic} />}
-                disabled={topOf(row, g.all) >= g.all.length - 1 || row.values[slot.cli].value.trim().toLowerCase() === OFF}
+                disabled={g.all.every((x) => row.values[x.cli].value.trim().toLowerCase() !== OFF) || row.values[slot.cli].value.trim().toLowerCase() === OFF}
                 className="disabled:pointer-events-none disabled:text-fg3"
                 onClick={() => {
                   setMenu(null)
