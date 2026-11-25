@@ -1444,7 +1444,8 @@ describe('the advisor, while the human may still answer', () => {
           expect(await src.advise(w.key, 'ask:m1')).toEqual({ ok: true })
         }),
       )
-      expect(src.advices.get(w.key, 'ask:m1')?.state).toBe('human')
+      // the card was closed while it read: its answer is kept, nothing goes in, and the record says why (SHE-201)
+      expect(src.advices.get(w.key, 'ask:m1')).toMatchObject({ state: 'settled', settledWhy: 'the question is no longer open' })
       expect(sent).toEqual([])
     } finally {
       w.done()

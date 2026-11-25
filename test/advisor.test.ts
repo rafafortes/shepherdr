@@ -476,6 +476,94 @@ describe('by itself, once a question waited', () => {
   })
 })
 
+describe('a question settled while the advisor reads (SHE-201)', () => {
+  const ASKERS = ['claude', 'codex', 'pi', 'opencode', 'agy']
+  /** hold a run open, change the question under it, then let it answer: the check must be made now, not at run start */
+  async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void) {
+    let finish: ((r: { ok: boolean; out: string }) => void) | undefined
+    src.runAdvisor = (async () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })) as never
+    const p = src.advise(w.key, qid)
+    settle()
+    if (!finish) throw new Error('the advisor never started its run')
+    finish(json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
+    expect(await p).toEqual({ ok: true })
+  }
+
+  test('a card the coordinator settled is not answered, and the record says why', async () => {
+    const w = await world('adv-settled-card')
+    try {
+      card(w.key, 'ask:set1', 'Add one more review round?', ['Yes', 'No'])
+      await held(w, 'ask:set1', () => {
+        expect(src.chats.settleAsk(w.key, 'Answered by its coordinator: one more review round added')).toBe(true)
+      })
+      expect(to(w.key)).toEqual([])
+      expect(alerts).toEqual([])
+      expect(src.advices.get(w.key, 'ask:set1')).toMatchObject({ state: 'settled', settledWhy: 'the question is no longer open' })
+      expect(cards(w.key).at(-1)).toContain('The advisor did not answer: the question is no longer open.')
+    } finally {
+      w.done()
+    }
+  })
+
+  test('a turn the asker had since it asked leaves the card to the human, with no run spent', async () => {
+    const w = await world('adv-settled-turn')
+    try {
+      card(w.key, 'ask:set2', 'Which store?', ['SQLite', 'Postgres'])
+      const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
+      expect(await src.advise(w.key, 'ask:set2')).toEqual({ ok: true })
+      expect(runs).toEqual([])
+      expect(to(w.key)).toEqual([])
+      // a later turn may be only hidden news: the question still waits, so it is left to the human, not closed for good
+      expect(src.advices.get(w.key, 'ask:set2')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
+      expect(cards(w.key).at(-1)).toContain('The advisor leaves this to you: its asker has had a turn since it asked')
+      // the card itself stands: the human can still answer it, and Needs you still shows it
+      expect(src.chats.openCard(w.key)).toBe('ask')
+      expect(src.snapshot().needs.some((n) => n.chat === w.key && n.question?.id === 'ask:set2')).toBe(true)
+    } finally {
+      w.done()
+    }
+  })
+
+  test('a plain question whose asker had a later turn is left to the human too', async () => {
+    const w = await world('adv-settled-words')
+    try {
+      const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'agent', id: 'w9', at: Date.now(), text: 'Which port should it use?' }])
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
+      expect(await src.advise(w.key, 'words:w9')).toEqual({ ok: true })
+      expect(runs).toEqual([])
+      expect(to(w.key)).toEqual([])
+      expect(src.advices.get(w.key, 'words:w9')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
+    } finally {
+      w.done()
+    }
+  })
+
+  // the card, the advisor's check and the merge state read the same log whatever CLI the asker runs on
+  for (const kind of ASKERS) {
+    test(`a settled card is not answered on ${kind} either`, async () => {
+      const w = await world(`adv-settled-${kind}`)
+      try {
+        const record = src.agents.records[w.key]
+        if (!record) throw new Error('the asker has no agent record')
+        record.kind = kind
+        card(w.key, `ask:set-${kind}`, 'Which store?', ['SQLite', 'Postgres'])
+        await held(w, `ask:set-${kind}`, () => {
+          expect(src.chats.settleAsk(w.key, 'Answered by its coordinator: one more review round added')).toBe(true)
+        })
+        expect(to(w.key)).toEqual([])
+        expect(src.advices.get(w.key, `ask:set-${kind}`)).toMatchObject({ state: 'settled' })
+      } finally {
+        w.done()
+      }
+    })
+  }
+})
+
 describe('the advisor on the caps: a harness with room, a run held as a lease, and a question that waits', () => {
   const OPENCODE = 'opencode-go/deepseek-v4.1-flash'
   /** the key pi's model runs under: pi and its provider in front of the id */

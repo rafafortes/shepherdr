@@ -7,6 +7,7 @@ import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME ??= tmp('card')
 const { Chats, menuId } = await import('../server/live/chats.ts')
+const { Engine } = await import('../server/live/engine/engine.ts')
 
 const question = (id: string) => ({ id, title: 'x', kind: 'Plan' as const, choices: [{ label: 'Yes' }], to: 'T agent' })
 const chatsWith = (key: string) =>
@@ -34,6 +35,23 @@ test('an open plan or choice card, until it is answered or you write', async () 
   await Bun.sleep(2)
   chats.post(key, { id: 'you:1', who: 'you', text: 'Something else' })
   expect(chats.openCard(key)).toBeUndefined()
+})
+
+test('a coordinator settling a review-round card closes only that card, plural title included (SHE-201)', () => {
+  const key = 'T-201/Agent'
+  const chats = chatsWith(key)
+  // the real test the coordinator's grant applies to a card the agent wrote itself
+  chats.post(key, { id: 'ask:rounds', question: { ...question('ask:rounds'), title: 'Allow extra review rounds?' } })
+  expect(chats.openCard(key)).toBe('ask')
+  expect(chats.settleAsk(key, 'Answered by its coordinator: one more review round added', Engine.isReviewRoundAsk)).toBe(true)
+  expect(chats.openCard(key)).toBeUndefined()
+  expect(chats.log(key).answers['ask:rounds']).toBe(-1)
+  expect(chats.log(key).said?.['ask:rounds']).toEqual({ text: 'Answered by its coordinator: one more review round added' })
+  // a different open ask is none of the grant's business
+  chats.post(key, { id: 'ask:store', question: { ...question('ask:store'), title: 'Which store?' } })
+  expect(chats.settleAsk(key, 'one more review round added', Engine.isReviewRoundAsk)).toBe(false)
+  expect(chats.openCard(key)).toBe('ask')
+  expect(chats.log(key).answers['ask:store']).toBeUndefined()
 })
 
 test('POL-442: a card is answered by any message that reached the agent after it, a peer’s relay as well', async () => {

@@ -144,8 +144,16 @@ export function world(herdr = fakeHerdr(), o: { boot?: string; usage?: UsageLedg
   /** what the agent's chat holds: its last reply, an open card of Shepherdr's, its CLI's own question */
   const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[]; askedInTurn?: boolean } =
     { reply: 'Which name do you want?' }
+  /** the cards a coordinator settled while granting an extra review round */
+  const settled: { key: string; words: string }[] = []
   const chats = {
     post: (key: string, p: { id: string; question?: { kind: string } }) => posted.push({ key, ...p }),
+    settleAsk: (key: string, words: string, match?: (q?: { title?: string }) => boolean) => {
+      if (chat.card === 'ask' && (!match || match({ title: chat.cardTitle }))) chat.card = undefined
+      else return false
+      settled.push({ key, words })
+      return true
+    },
     lastReply: () => chat.reply,
     openQuestion: () => (chat.question ? { id: 'q', items: [{ question: 'Which one?', options: [], multiSelect: false }] } : undefined),
     openCard: () => chat.card,
@@ -181,7 +189,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string; usage?: UsageLedg
     outbox.splice(0, outbox.length, ...outbox.filter((k) => k !== key))
     engine.sent(key)
   }
-  return { routed, agents, engine, places, settings, started, sent, posted, status, records, news, newsTo, cards, agentIs, brief, herdr, chat, bg, forgot, pruned, said, stopped }
+  return { routed, agents, engine, places, settings, started, sent, posted, settled, status, records, news, newsTo, cards, agentIs, brief, herdr, chat, bg, forgot, pruned, said, stopped }
 }
 
 export const until = async (f: () => boolean, ms = 8000) => {

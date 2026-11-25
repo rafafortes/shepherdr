@@ -1279,7 +1279,10 @@ export class Engine extends Emitter<Events> {
     // a card asked in the turn running now is still yours; one asked before it began is answered by the work that went on
     const asked = asks && this.chats.asksInTurn(key)
     const working = st === 'working' || this.handing.has(t.id)
-    // a card or question it waits on is yours until its agent is at work again, whatever its queue says
+    // a card or question it waits on is yours until its agent is at work again, whatever its queue says. A card asked
+    // before this turn began is answered by the work that went on only while it works: when the turn ends, an open
+    // card is still a question. The stale round card is settled explicitly by review-more, not by counting turns —
+    // a turn can begin with hidden news while the question is still open (SHE-201).
     if (asks && !working) return 'need'
     // queued: until they are all done, or one ends without being done (then it waits for you to decide)
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
@@ -4104,6 +4107,13 @@ export class Engine extends Emitter<Events> {
     return `All ${this.roundsOf(t)} of ${t.id}'s review rounds are used. If its last commit still needs a review, say why in your chat and end your turn: only ${this.spaceName(t)}'s coordinator adds one (shepherdr task review-more ${t.id})`
   }
 
+  /** the card an agent asks when its review rounds ran out: its title or choices say it wants another one, whatever
+   *  words it chose. An unrelated open ask must not be closed by the coordinator's grant. */
+  static isReviewRoundAsk(q?: Question): boolean {
+    const words = [q?.title ?? '', ...(q?.choices ?? []).map((c) => c.label)].join(' ')
+    return /\breview/i.test(words) && /\b(?:rounds?|passes|iterations?)\b/i.test(words)
+  }
+
   private spaceName(t: TaskRec) {
     return this.places.nameOf(t.project) ?? t.project
   }
@@ -4136,6 +4146,10 @@ export class Engine extends Emitter<Events> {
       )
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
+    // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not
+    // keep the task Needs you when the agent's next turn ends. Only a card about a review round is settled: an unrelated
+    // ask the agent also has open is still the human's (SHE-201).
+    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, Engine.isReviewRoundAsk)
     this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`
@@ -5289,8 +5303,13 @@ export class Engine extends Emitter<Events> {
     if (ended(t)) return
     // writing to it is how a start that failed is tried again
     this.started(key)
-    t.reported = false
-    t.landing = undefined
+    // a merge already going in is not undone by words that reach its agent: the gate, the checks and the merge carry
+    // on, and the task keeps reading Merging until they end. Only a task not in flight goes back to its agent's turn.
+    const inFlight = !!t.landing && t.landing.step !== 'rebase' && (this.runner.landings.has(t.id) || !!t.gateRun)
+    if (!inFlight) {
+      t.reported = false
+      t.landing = undefined
+    }
     t.stopped = undefined
     // talking to it is the go, or a change to the brief: it says so again if it still waits. Queued, it stays so: its
     // agent decides from the words whether they are a go, and clears its queue itself (task queue --after none)

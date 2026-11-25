@@ -1353,6 +1353,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
+  /** when a question was asked: a card Needs you reads, or the agent's plain words by their id */
+  private askedAt(chat: string, qid: string): number | undefined {
+    const card = this.chats.openCardsQuick(chat).find((m) => m.question.id === qid)
+    return card?.at ?? (qid.startsWith('words:') ? this.chats.chat(chat).messages.find((m) => m.id === qid.slice(6) && m.who === 'agent')?.at : undefined)
+  }
+
+  /**
+   * A question whose asker has had a turn since asking it is not this advisor's to answer: a turn can begin with hidden
+   * news while the question really is still open, so it goes to the human instead. Checked before the run starts (no
+   * lease or quota spent on a stale question) as well as at the moment of sending, since a run may take eight minutes.
+   */
+  private askMovedOn(chat: string, qid: string): string | undefined {
+    const at = this.askedAt(chat, qid)
+    return at !== undefined && this.chats.turnStartedSince(chat, at) ? 'its asker has had a turn since it asked' : undefined
+  }
+
+  /** a question the advisor does not take: the human still has it, and the card says why */
+  private leaveToHuman(chat: string, qid: string, why: string, by: string) {
+    this.advices.set({ chat, question: qid, at: Date.now(), state: 'human', advice: { why, human: why, by } })
+    this.adviceCard(chat, `The advisor leaves this to you: ${why} (${by}).`)
+  }
+
   /**
    * Ask the advisor about one open question: its primary, then its backup where the primary can't run or answers nothing
    * that makes sense. A sure answer goes to the agent as the human's would, and the chat says it was the advisor's — at
@@ -1365,6 +1387,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const x = this.advisable(chat).find((y) => y.qid === qid)
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
+    // no run, lease or quota for a question whose asker has moved on: it goes to the human (SHE-201)
+    const moved = this.askMovedOn(chat, qid)
+    if (moved) {
+      this.leaveToHuman(chat, qid, moved, 'Shepherdr')
+      return { ok: true }
+    }
     this.advising = true
     const before = this.advices.get(chat, qid)
     // a question that waited keeps the harnesses that gave no answer: they are not run again for it
@@ -1442,10 +1470,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.adviceCard(chat, `The advisor leaves this to you: ${advice.human} (${advice.by})`)
         return { ok: true }
       }
-      // still open? the human may have answered while it read
+      // still what its asker waits on? The run may have taken eight minutes: a coordinator may have settled the card,
+      // or the asker may have had a turn since asking (SHE-201). Both checks are also made before the run starts.
+      const moved = this.askMovedOn(chat, qid)
+      if (moved) {
+        this.leaveToHuman(chat, qid, moved, advice.by)
+        return { ok: true }
+      }
       const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
       if (!open) {
-        this.advices.set({ ...rec, state: 'human', advice })
+        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: 'the question is no longer open' })
+        this.adviceCard(chat, 'The advisor did not answer: the question is no longer open.')
         return { ok: true }
       }
       if (!x.q.plan) {

@@ -235,10 +235,12 @@ export interface AdviceRec {
   at: number
   /** asking: a run is going; waiting: no harness of its chain has room under the caps (and the card says which), it is
    *  asked again when one does (source.retryAdvice) */
-  state: 'asking' | 'waiting' | 'suggested' | 'sent' | 'human' | 'failed'
+  state: 'asking' | 'waiting' | 'suggested' | 'sent' | 'human' | 'failed' | 'settled'
   /** it went by itself (the question had waited), not on the human's word */
   auto?: boolean
   advice?: Advice
+  /** why no answer was sent: the question was settled while this run was reading (SHE-201) */
+  settledWhy?: string
   /** the card the advice is shown on in the chat */
   card?: string
   /** the chain positions (0: the primary, n: backup n) whose run gave no answer: they are not run again for this question */
