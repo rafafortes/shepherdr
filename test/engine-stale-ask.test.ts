@@ -13,7 +13,9 @@ async function asking(w: W, kind: string, name: string) {
   const t = w.engine.add({ project: p.name, title: 'Add one review round', desc: 'Merge when done.', by: 'test', set: { 'review.rounds': '2' } })
   await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
   const key = `${t.id}/Agent`
-  w.records[key]!.kind = kind
+  const record = w.records[key]
+  if (!record) throw new Error(`no agent record for ${key}`)
+  record.kind = kind
   w.chat.card = 'ask'
   w.chat.cardTitle = 'Add one more review round?'
   w.chat.askedInTurn = false

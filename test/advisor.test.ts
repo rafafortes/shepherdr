@@ -480,13 +480,14 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
   const ASKERS = ['claude', 'codex', 'pi', 'opencode', 'agy']
   /** hold a run open, change the question under it, then let it answer: the check must be made now, not at run start */
   async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void) {
-    let finish!: (r: { ok: boolean; out: string }) => void
+    let finish: ((r: { ok: boolean; out: string }) => void) | undefined
     src.runAdvisor = (async () =>
       new Promise((resolve) => {
         finish = resolve
       })) as never
     const p = src.advise(w.key, qid)
     settle()
+    if (!finish) throw new Error('the advisor never started its run')
     finish(json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
     expect(await p).toEqual({ ok: true })
   }
@@ -530,13 +531,15 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
     test(`a settled card is not answered on ${kind} either`, async () => {
       const w = await world(`adv-settled-${kind}`)
       try {
-        src.agents.records[w.key]!.kind = kind
+        const record = src.agents.records[w.key]
+        if (!record) throw new Error('the asker has no agent record')
+        record.kind = kind
         card(w.key, `ask:set-${kind}`, 'Which store?', ['SQLite', 'Postgres'])
         await held(w, `ask:set-${kind}`, () => {
           expect(src.chats.settleAsk(w.key, 'Answered by its coordinator: one more review round added')).toBe(true)
         })
         expect(to(w.key)).toEqual([])
-        expect(src.advices.get(w.key, `ask:set-${kind}`)!.state).toBe('settled')
+        expect(src.advices.get(w.key, `ask:set-${kind}`)).toMatchObject({ state: 'settled' })
       } finally {
         w.done()
       }
