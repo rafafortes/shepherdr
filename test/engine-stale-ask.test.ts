@@ -99,7 +99,7 @@ for (const kind of KINDS) {
 
 test('review-more leaves an unrelated open ask alone', async () => {
   const w = world()
-  const { t, key } = await asking(w, 'opencode', 'unrelated')
+  const { t } = await asking(w, 'opencode', 'unrelated')
   w.chat.cardTitle = 'Which store for the outbox?'
   expect(await w.engine.reviewMore(t.id, t.project)).toEqual({ rounds: 3 })
   expect(w.settled).toEqual([])
