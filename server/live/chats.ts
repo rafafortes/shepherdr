@@ -474,6 +474,15 @@ export class Chats {
     return true
   }
 
+  /** settle only the open `ask:` card with words from someone else (a coordinator granting the round it asked for):
+   *  the card shows as answered by those words, never as an open question, and no other ask in the chat is closed. */
+  settleAsk(key: string, words: string): boolean {
+    const id = this.openAskId(key)
+    if (!id) return false
+    this.answer(key, id, -1, words)
+    return true
+  }
+
   /* ---------- reading the CLI's logs ---------- */
 
   /** how many times a chat's events changed, and the turns and jobs made from them at that count: they are asked for on
@@ -1019,6 +1028,12 @@ export class Chats {
   endedSince(key: string, at: number): boolean {
     this.pull(key)
     return (this.events.get(key) ?? []).some((e) => e.kind === 'turn-end' && e.at > at)
+  }
+
+  /** its log shows a turn that began after this time: since asking, its agent has been woken once more */
+  turnStartedSince(key: string, at: number): boolean {
+    this.pull(key)
+    return (this.events.get(key) ?? []).some((e) => e.kind === 'turn-start' && e.at > at)
   }
 
   /** its log shows a turn since this time: a start became an agent at work, whatever its screen says */

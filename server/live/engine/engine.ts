@@ -1279,8 +1279,13 @@ export class Engine extends Emitter<Events> {
     // a card asked in the turn running now is still yours; one asked before it began is answered by the work that went on
     const asked = asks && this.chats.asksInTurn(key)
     const working = st === 'working' || this.handing.has(t.id)
-    // a card or question it waits on is yours until its agent is at work again, whatever its queue says
-    if (asks && !working) return 'need'
+    // a card or question it waits on is yours until its agent is at work again, whatever its queue says. One asked
+    // before a turn its agent then worked through was answered by that work: once it reports, it does not come back as
+    // Needs you when that turn ends. A card asked in the turn just ended, or one a still-unreported agent waits on, is a
+    // real question — including one an agent woken by its own background shell still waits on (SHE-201).
+    const cardAt = asks ? this.chats.askAt(key) : undefined
+    const workedPast = cardAt !== undefined && this.chats.turnStartedSince(key, cardAt)
+    if (asks && !working && !(t.reported && workedPast)) return 'need'
     // queued: until they are all done, or one ends without being done (then it waits for you to decide)
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
     // held until the machine has room
@@ -4136,6 +4141,9 @@ export class Engine extends Emitter<Events> {
       )
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
+    // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not
+    // keep the task Needs you when the agent's next turn ends (SHE-201)
+    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`)
     this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`
@@ -5289,8 +5297,13 @@ export class Engine extends Emitter<Events> {
     if (ended(t)) return
     // writing to it is how a start that failed is tried again
     this.started(key)
-    t.reported = false
-    t.landing = undefined
+    // a merge already going in is not undone by words that reach its agent: the gate, the checks and the merge carry
+    // on, and the task keeps reading Merging until they end. Only a task not in flight goes back to its agent's turn.
+    const inFlight = !!t.landing && t.landing.step !== 'rebase' && (this.runner.landings.has(t.id) || !!t.gateRun)
+    if (!inFlight) {
+      t.reported = false
+      t.landing = undefined
+    }
     t.stopped = undefined
     // talking to it is the go, or a change to the brief: it says so again if it still waits. Queued, it stays so: its
     // agent decides from the words whether they are a go, and clears its queue itself (task queue --after none)

@@ -1290,6 +1290,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (rec?.state === 'human') advice = `The advisor left this to you: ${rec.advice?.human ?? 'it was not sure'} (${rec.advice?.by ?? 'the advisor'}).`
       else if (rec?.state === 'failed') advice = 'The advisor could not answer, so this waits for you.'
       else if (rec?.state === 'waiting') advice = 'The advisor waits for a free model, so this waits for you.'
+      else if (rec?.state === 'settled') advice = `The advisor did not answer: ${rec.settledWhy}.`
       else if (pending || rec?.state === 'asking') advice = 'The advisor is answering this but has not finished; it may still take it.'
       else if (after !== null) advice = `If you don't answer, the advisor answers for you at ${clockWords(n.at + after, now, this.settings.zone())}.`
     }
@@ -1351,6 +1352,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       await this.advise(x.need.chat, x.qid, true)
       return
     }
+  }
+
+  /**
+   * Why the advisor may not send its answer now, checked at the moment of sending: the question was closed while it
+   * read (by the human, a relay or a coordinator), or its asker has had a turn since asking and worked past it. A run
+   * may take eight minutes, so the look made when it started is not enough (SHE-201).
+   */
+  private settledWhileReading(chat: string, qid: string): string | undefined {
+    const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
+    if (!open) return 'the question is no longer open'
+    const card = this.chats.openCardsQuick(chat).find((m) => m.question.id === qid)
+    const at = card?.at ?? (qid.startsWith('words:') ? this.chats.chat(chat).messages.find((m) => m.id === qid.slice(6) && m.who === 'agent')?.at : undefined)
+    if (at !== undefined && this.chats.turnStartedSince(chat, at)) return 'its asker has had a turn since it asked'
+    return undefined
   }
 
   /**
@@ -1442,10 +1457,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.adviceCard(chat, `The advisor leaves this to you: ${advice.human} (${advice.by})`)
         return { ok: true }
       }
-      // still open? the human may have answered while it read
-      const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
-      if (!open) {
-        this.advices.set({ ...rec, state: 'human', advice })
+      // still what its asker waits on? Checked now, not when the run began: a coordinator may have settled the card,
+      // or the asker may have had a turn since asking and worked past the question (SHE-201). A sure answer must never
+      // reopen a settled question as Needs you.
+      const settled = this.settledWhileReading(chat, qid)
+      if (settled) {
+        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: settled })
+        this.adviceCard(chat, `The advisor did not answer: ${settled}.`)
         return { ok: true }
       }
       if (!x.q.plan) {
