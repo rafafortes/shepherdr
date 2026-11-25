@@ -17,7 +17,7 @@ async function asking(w: W, kind: string, name: string) {
   if (!record) throw new Error(`no agent record for ${key}`)
   record.kind = kind
   w.chat.card = 'ask'
-  w.chat.cardTitle = 'Add one more review round?'
+  w.chat.cardTitle = 'Allow extra review rounds?'
   w.chat.askedInTurn = false
   // its turn ended on the card it asked
   w.agentIs(key, 'idle')
@@ -37,7 +37,7 @@ for (const kind of KINDS) {
       const w = world()
       const { t, key } = await asking(w, kind, `grant-${kind}`)
       expect(w.engine.statusOf(t)).toBe('need')
-      expect(w.engine.subOf(t, 'need')).toContain('Add one more review round?')
+      expect(w.engine.subOf(t, 'need')).toContain('Allow extra review rounds?')
 
       expect(await w.engine.reviewMore(t.id, t.project)).toEqual({ rounds: 3 })
       // the card shows as answered by the coordinator, and stops being the question the agent waits on
@@ -82,7 +82,7 @@ for (const kind of KINDS) {
       // no coordinator settled it and the agent did not report: the question is still the human's
       w.agentIs(key, 'idle')
       expect(w.engine.statusOf(t)).toBe('need')
-      expect(w.engine.subOf(t, 'need')).toContain('Add one more review round?')
+      expect(w.engine.subOf(t, 'need')).toContain('Allow extra review rounds?')
     })
 
     test('a card asked in the turn that just ended still reads Needs you, even on a reported task', async () => {
@@ -92,7 +92,7 @@ for (const kind of KINDS) {
       t.reported = true
       w.agentIs(key, 'idle')
       expect(w.engine.statusOf(t)).toBe('need')
-      expect(w.engine.subOf(t, 'need')).toContain('Add one more review round?')
+      expect(w.engine.subOf(t, 'need')).toContain('Allow extra review rounds?')
     })
   })
 }

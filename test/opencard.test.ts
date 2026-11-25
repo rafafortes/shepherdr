@@ -36,6 +36,24 @@ test('an open plan or choice card, until it is answered or you write', async () 
   expect(chats.openCard(key)).toBeUndefined()
 })
 
+test('a coordinator settling a review-round card closes only that card, plural title included (SHE-201)', () => {
+  const key = 'T-201/Agent'
+  const chats = chatsWith(key)
+  // the same test the coordinator's grant applies to a card the agent wrote itself
+  const roundAsk = (title?: string) => !!title && /\breview\b/i.test(title) && /\brounds?\b/i.test(title)
+  chats.post(key, { id: 'ask:rounds', question: { ...question('ask:rounds'), title: 'Allow extra review rounds?' } })
+  expect(chats.openCard(key)).toBe('ask')
+  expect(chats.settleAsk(key, 'Answered by its coordinator: one more review round added', roundAsk)).toBe(true)
+  expect(chats.openCard(key)).toBeUndefined()
+  expect(chats.log(key).answers['ask:rounds']).toBe(-1)
+  expect(chats.log(key).said?.['ask:rounds']).toEqual({ text: 'Answered by its coordinator: one more review round added' })
+  // a different open ask is none of the grant's business
+  chats.post(key, { id: 'ask:store', question: { ...question('ask:store'), title: 'Which store?' } })
+  expect(chats.settleAsk(key, 'one more review round added', roundAsk)).toBe(false)
+  expect(chats.openCard(key)).toBe('ask')
+  expect(chats.log(key).answers['ask:store']).toBeUndefined()
+})
+
 test('POL-442: a card is answered by any message that reached the agent after it, a peer’s relay as well', async () => {
   const key = 'T-442/Agent'
   const chats = chatsWith(key)

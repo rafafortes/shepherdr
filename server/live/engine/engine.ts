@@ -4142,7 +4142,7 @@ export class Engine extends Emitter<Events> {
     // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not
     // keep the task Needs you when the agent's next turn ends. Only a card about a review round is settled: an unrelated
     // ask the agent also has open is still the human's (SHE-201).
-    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, (title) => !!title && /\breview\b/i.test(title) && /\bround\b/i.test(title))
+    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, (title) => !!title && /\breview\b/i.test(title) && /\brounds?\b/i.test(title))
     this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`
