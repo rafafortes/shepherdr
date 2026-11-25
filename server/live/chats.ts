@@ -477,10 +477,10 @@ export class Chats {
   /** settle the open `ask:` card with words from someone else (a coordinator granting the round it asked for), when
    *  its question matches: the card shows as answered by those words, never as an open question. An unrelated ask is
    *  left alone — it is still the human's to answer. */
-  settleAsk(key: string, words: string, matches: (title?: string) => boolean = () => true): boolean {
+  settleAsk(key: string, words: string, matches: (q?: Question) => boolean = () => true): boolean {
     const posted = this.openPosted(key)
     const id = posted?.question?.id
-    if (!id || !matches(posted?.question?.title)) return false
+    if (!id || !matches(posted?.question)) return false
     this.answer(key, id, -1, words)
     return true
   }

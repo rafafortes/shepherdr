@@ -4107,6 +4107,13 @@ export class Engine extends Emitter<Events> {
     return `All ${this.roundsOf(t)} of ${t.id}'s review rounds are used. If its last commit still needs a review, say why in your chat and end your turn: only ${this.spaceName(t)}'s coordinator adds one (shepherdr task review-more ${t.id})`
   }
 
+  /** the card an agent asks when its review rounds ran out: its title or choices say it wants another one, whatever
+   *  words it chose. An unrelated open ask must not be closed by the coordinator's grant. */
+  static isReviewRoundAsk(q?: Question): boolean {
+    const words = [q?.title ?? '', ...(q?.choices ?? []).map((c) => c.label)].join(' ')
+    return /\breview/i.test(words) && /\b(?:rounds?|passes|iterations?)\b/i.test(words)
+  }
+
   private spaceName(t: TaskRec) {
     return this.places.nameOf(t.project) ?? t.project
   }
@@ -4142,7 +4149,7 @@ export class Engine extends Emitter<Events> {
     // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not
     // keep the task Needs you when the agent's next turn ends. Only a card about a review round is settled: an unrelated
     // ask the agent also has open is still the human's (SHE-201).
-    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, (title) => !!title && /\breview\b/i.test(title) && /\brounds?\b/i.test(title))
+    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, Engine.isReviewRoundAsk)
     this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`

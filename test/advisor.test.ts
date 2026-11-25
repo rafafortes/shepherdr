@@ -479,7 +479,7 @@ describe('by itself, once a question waited', () => {
 describe('a question settled while the advisor reads (SHE-201)', () => {
   const ASKERS = ['claude', 'codex', 'pi', 'opencode', 'agy']
   /** hold a run open, change the question under it, then let it answer: the check must be made now, not at run start */
-  async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void, replied = false) {
+  async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void) {
     let finish: ((r: { ok: boolean; out: string }) => void) | undefined
     src.runAdvisor = (async () =>
       new Promise((resolve) => {
@@ -488,7 +488,7 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
     const p = src.advise(w.key, qid)
     settle()
     if (!finish) throw new Error('the advisor never started its run')
-    finish(replied ? json({ decide: 'advisor', reply: 'Use 8080.', why: 'A fits.', sure: true }) : json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
+    finish(json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
     expect(await p).toEqual({ ok: true })
   }
 
@@ -508,14 +508,14 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
     }
   })
 
-  test('a turn the asker had since it asked stops the answer even while the card is still open', async () => {
+  test('a turn the asker had since it asked leaves the card to the human, with no run spent', async () => {
     const w = await world('adv-settled-turn')
     try {
       card(w.key, 'ask:set2', 'Which store?', ['SQLite', 'Postgres'])
-      await held(w, 'ask:set2', () => {
-        const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
-        ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
-      })
+      const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
+      expect(await src.advise(w.key, 'ask:set2')).toEqual({ ok: true })
+      expect(runs).toEqual([])
       expect(to(w.key)).toEqual([])
       // a later turn may be only hidden news: the question still waits, so it is left to the human, not closed for good
       expect(src.advices.get(w.key, 'ask:set2')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
@@ -533,7 +533,9 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
     try {
       const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
       ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'agent', id: 'w9', at: Date.now(), text: 'Which port should it use?' }])
-      await held(w, 'words:w9', () => ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }]), true)
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
+      expect(await src.advise(w.key, 'words:w9')).toEqual({ ok: true })
+      expect(runs).toEqual([])
       expect(to(w.key)).toEqual([])
       expect(src.advices.get(w.key, 'words:w9')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
     } finally {

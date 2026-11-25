@@ -148,8 +148,8 @@ export function world(herdr = fakeHerdr(), o: { boot?: string; usage?: UsageLedg
   const settled: { key: string; words: string }[] = []
   const chats = {
     post: (key: string, p: { id: string; question?: { kind: string } }) => posted.push({ key, ...p }),
-    settleAsk: (key: string, words: string, match?: (title?: string) => boolean) => {
-      if (chat.card === 'ask' && (!match || match(chat.cardTitle))) chat.card = undefined
+    settleAsk: (key: string, words: string, match?: (q?: { title?: string }) => boolean) => {
+      if (chat.card === 'ask' && (!match || match({ title: chat.cardTitle }))) chat.card = undefined
       else return false
       settled.push({ key, words })
       return true

@@ -1290,7 +1290,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (rec?.state === 'human') advice = `The advisor left this to you: ${rec.advice?.human ?? 'it was not sure'} (${rec.advice?.by ?? 'the advisor'}).`
       else if (rec?.state === 'failed') advice = 'The advisor could not answer, so this waits for you.'
       else if (rec?.state === 'waiting') advice = 'The advisor waits for a free model, so this waits for you.'
-      else if (rec?.state === 'settled') advice = `The advisor did not answer: ${rec.settledWhy}.`
       else if (pending || rec?.state === 'asking') advice = 'The advisor is answering this but has not finished; it may still take it.'
       else if (after !== null) advice = `If you don't answer, the advisor answers for you at ${clockWords(n.at + after, now, this.settings.zone())}.`
     }
@@ -1354,20 +1353,26 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /**
-   * Why the advisor may not send its answer now, checked at the moment of sending: the question was closed while it
-   * read (by the human, a relay or a coordinator), or its asker has had a turn since asking. A run may take eight
-   * minutes, so the look made when it started is not enough (SHE-201). A closed question is over for good; one with a
-   * later turn is only held back from this run and goes to the human, since a turn can begin with hidden news while
-   * the question really is still open.
-   */
-  private settledWhileReading(chat: string, qid: string): { why: string; human: boolean } | undefined {
-    const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
-    if (!open) return { why: 'the question is no longer open', human: false }
+  /** when a question was asked: a card Needs you reads, or the agent's plain words by their id */
+  private askedAt(chat: string, qid: string): number | undefined {
     const card = this.chats.openCardsQuick(chat).find((m) => m.question.id === qid)
-    const at = card?.at ?? (qid.startsWith('words:') ? this.chats.chat(chat).messages.find((m) => m.id === qid.slice(6) && m.who === 'agent')?.at : undefined)
-    if (at !== undefined && this.chats.turnStartedSince(chat, at)) return { why: 'its asker has had a turn since it asked', human: true }
-    return undefined
+    return card?.at ?? (qid.startsWith('words:') ? this.chats.chat(chat).messages.find((m) => m.id === qid.slice(6) && m.who === 'agent')?.at : undefined)
+  }
+
+  /**
+   * A question whose asker has had a turn since asking it is not this advisor's to answer: a turn can begin with hidden
+   * news while the question really is still open, so it goes to the human instead. Checked before the run starts (no
+   * lease or quota spent on a stale question) as well as at the moment of sending, since a run may take eight minutes.
+   */
+  private askMovedOn(chat: string, qid: string): string | undefined {
+    const at = this.askedAt(chat, qid)
+    return at !== undefined && this.chats.turnStartedSince(chat, at) ? 'its asker has had a turn since it asked' : undefined
+  }
+
+  /** a question the advisor does not take: the human still has it, and the card says why */
+  private leaveToHuman(chat: string, qid: string, why: string, by: string) {
+    this.advices.set({ chat, question: qid, at: Date.now(), state: 'human', advice: { why, human: why, by } })
+    this.adviceCard(chat, `The advisor leaves this to you: ${why} (${by}).`)
   }
 
   /**
@@ -1382,6 +1387,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const x = this.advisable(chat).find((y) => y.qid === qid)
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
+    // no run, lease or quota for a question whose asker has moved on: it goes to the human (SHE-201)
+    const moved = this.askMovedOn(chat, qid)
+    if (moved) {
+      this.leaveToHuman(chat, qid, moved, 'Shepherdr')
+      return { ok: true }
+    }
     this.advising = true
     const before = this.advices.get(chat, qid)
     // a question that waited keeps the harnesses that gave no answer: they are not run again for it
@@ -1459,18 +1470,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.adviceCard(chat, `The advisor leaves this to you: ${advice.human} (${advice.by})`)
         return { ok: true }
       }
-      // still what its asker waits on? Checked now, not when the run began: a coordinator may have settled the card,
-      // or the asker may have had a turn since asking (SHE-201). A closed question stays closed; one with a later turn
-      // is left to the human, whose own words can still answer it.
-      const settled = this.settledWhileReading(chat, qid)
-      if (settled?.human) {
-        this.advices.set({ ...rec, state: 'human', advice: { ...advice, human: settled.why } })
-        this.adviceCard(chat, `The advisor leaves this to you: ${settled.why} (${advice.by}).`)
+      // still what its asker waits on? The run may have taken eight minutes: a coordinator may have settled the card,
+      // or the asker may have had a turn since asking (SHE-201). Both checks are also made before the run starts.
+      const moved = this.askMovedOn(chat, qid)
+      if (moved) {
+        this.leaveToHuman(chat, qid, moved, advice.by)
         return { ok: true }
       }
-      if (settled) {
-        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: settled.why })
-        this.adviceCard(chat, `The advisor did not answer: ${settled.why}.`)
+      const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
+      if (!open) {
+        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: 'the question is no longer open' })
+        this.adviceCard(chat, 'The advisor did not answer: the question is no longer open.')
         return { ok: true }
       }
       if (!x.q.plan) {
