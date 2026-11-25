@@ -479,7 +479,7 @@ describe('by itself, once a question waited', () => {
 describe('a question settled while the advisor reads (SHE-201)', () => {
   const ASKERS = ['claude', 'codex', 'pi', 'opencode', 'agy']
   /** hold a run open, change the question under it, then let it answer: the check must be made now, not at run start */
-  async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void) {
+  async function held(w: Awaited<ReturnType<typeof world>>, qid: string, settle: () => void, replied = false) {
     let finish: ((r: { ok: boolean; out: string }) => void) | undefined
     src.runAdvisor = (async () =>
       new Promise((resolve) => {
@@ -488,7 +488,7 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
     const p = src.advise(w.key, qid)
     settle()
     if (!finish) throw new Error('the advisor never started its run')
-    finish(json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
+    finish(replied ? json({ decide: 'advisor', reply: 'Use 8080.', why: 'A fits.', sure: true }) : json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true }))
     expect(await p).toEqual({ ok: true })
   }
 
@@ -517,10 +517,25 @@ describe('a question settled while the advisor reads (SHE-201)', () => {
         ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }])
       })
       expect(to(w.key)).toEqual([])
-      expect(src.advices.get(w.key, 'ask:set2')).toMatchObject({ state: 'settled', settledWhy: 'its asker has had a turn since it asked' })
+      // a later turn may be only hidden news: the question still waits, so it is left to the human, not closed for good
+      expect(src.advices.get(w.key, 'ask:set2')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
+      expect(cards(w.key).at(-1)).toContain('The advisor leaves this to you: its asker has had a turn since it asked')
       // the card itself stands: the human can still answer it, and Needs you still shows it
       expect(src.chats.openCard(w.key)).toBe('ask')
       expect(src.snapshot().needs.some((n) => n.chat === w.key && n.question?.id === 'ask:set2')).toBe(true)
+    } finally {
+      w.done()
+    }
+  })
+
+  test('a plain question whose asker had a later turn is left to the human too', async () => {
+    const w = await world('adv-settled-words')
+    try {
+      const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
+      ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'agent', id: 'w9', at: Date.now(), text: 'Which port should it use?' }])
+      await held(w, 'words:w9', () => ev.set(w.key, [...(ev.get(w.key) ?? []), { kind: 'turn-start', id: 'start-after', at: Date.now() + 1000 }]), true)
+      expect(to(w.key)).toEqual([])
+      expect(src.advices.get(w.key, 'words:w9')).toMatchObject({ state: 'human', advice: { human: 'its asker has had a turn since it asked' } })
     } finally {
       w.done()
     }

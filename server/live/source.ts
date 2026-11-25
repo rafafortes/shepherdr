@@ -1356,15 +1356,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /**
    * Why the advisor may not send its answer now, checked at the moment of sending: the question was closed while it
-   * read (by the human, a relay or a coordinator), or its asker has had a turn since asking and worked past it. A run
-   * may take eight minutes, so the look made when it started is not enough (SHE-201).
+   * read (by the human, a relay or a coordinator), or its asker has had a turn since asking. A run may take eight
+   * minutes, so the look made when it started is not enough (SHE-201). A closed question is over for good; one with a
+   * later turn is only held back from this run and goes to the human, since a turn can begin with hidden news while
+   * the question really is still open.
    */
-  private settledWhileReading(chat: string, qid: string): string | undefined {
+  private settledWhileReading(chat: string, qid: string): { why: string; human: boolean } | undefined {
     const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
-    if (!open) return 'the question is no longer open'
+    if (!open) return { why: 'the question is no longer open', human: false }
     const card = this.chats.openCardsQuick(chat).find((m) => m.question.id === qid)
     const at = card?.at ?? (qid.startsWith('words:') ? this.chats.chat(chat).messages.find((m) => m.id === qid.slice(6) && m.who === 'agent')?.at : undefined)
-    if (at !== undefined && this.chats.turnStartedSince(chat, at)) return 'its asker has had a turn since it asked'
+    if (at !== undefined && this.chats.turnStartedSince(chat, at)) return { why: 'its asker has had a turn since it asked', human: true }
     return undefined
   }
 
@@ -1458,12 +1460,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return { ok: true }
       }
       // still what its asker waits on? Checked now, not when the run began: a coordinator may have settled the card,
-      // or the asker may have had a turn since asking and worked past the question (SHE-201). A sure answer must never
-      // reopen a settled question as Needs you.
+      // or the asker may have had a turn since asking (SHE-201). A closed question stays closed; one with a later turn
+      // is left to the human, whose own words can still answer it.
       const settled = this.settledWhileReading(chat, qid)
+      if (settled?.human) {
+        this.advices.set({ ...rec, state: 'human', advice: { ...advice, human: settled.why } })
+        this.adviceCard(chat, `The advisor leaves this to you: ${settled.why} (${advice.by}).`)
+        return { ok: true }
+      }
       if (settled) {
-        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: settled })
-        this.adviceCard(chat, `The advisor did not answer: ${settled}.`)
+        this.advices.set({ ...rec, state: 'settled', advice, settledWhy: settled.why })
+        this.adviceCard(chat, `The advisor did not answer: ${settled.why}.`)
         return { ok: true }
       }
       if (!x.q.plan) {

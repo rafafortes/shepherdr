@@ -19,7 +19,6 @@ async function asking(w: W, kind: string, name: string) {
   w.chat.card = 'ask'
   w.chat.cardTitle = 'Add one more review round?'
   w.chat.askedInTurn = false
-  w.chat.askedAt = Date.now()
   // its turn ended on the card it asked
   w.agentIs(key, 'idle')
   // all of its own rounds were used, so only its coordinator can add one
@@ -46,9 +45,7 @@ for (const kind of KINDS) {
       expect(w.chat.card).toBeUndefined()
       expect(w.engine.statusOf(t)).not.toBe('need')
 
-      // the agent was woken for the added round and worked through it
-      w.chat.turnStarts = [Date.now() + 1000]
-      // it reports and starts its merge gate, then its turn ends
+      // the agent works the added round, reports and starts its merge gate, then its turn ends
       t.reported = true
       t.landing = { step: 'gate', at: Date.now() }
       gate(w, t.id)
@@ -61,7 +58,6 @@ for (const kind of KINDS) {
       const w = world()
       const { t, key } = await asking(w, kind, `word-${kind}`)
       await w.engine.reviewMore(t.id, t.project)
-      w.chat.turnStarts = [Date.now() + 1000]
       t.reported = true
       t.landing = { step: 'gate', at: Date.now() }
       gate(w, t.id)
@@ -100,3 +96,40 @@ for (const kind of KINDS) {
     })
   })
 }
+
+test('review-more leaves an unrelated open ask alone', async () => {
+  const w = world()
+  const { t, key } = await asking(w, 'opencode', 'unrelated')
+  w.chat.cardTitle = 'Which store for the outbox?'
+  expect(await w.engine.reviewMore(t.id, t.project)).toEqual({ rounds: 3 })
+  expect(w.settled).toEqual([])
+  expect(w.chat.card).toBe('ask')
+  expect(w.engine.statusOf(t)).toBe('need')
+})
+
+test('a gate run on its own also keeps a message from taking the task out of Merging', async () => {
+  const w = world()
+  const { t, key } = await asking(w, 'opencode', 'gate-only')
+  await w.engine.reviewMore(t.id, t.project)
+  t.reported = true
+  t.landing = { step: 'gate', at: Date.now() }
+  // a detached gate is on the task record, not in the merge runner's in-memory map
+  t.gateRun = { at: Date.now(), pid: 1, exit: 'gate.exit', log: 'gate.log' } as never
+  w.agentIs(key, 'idle')
+  w.engine.youWrote(key)
+  expect(t.reported).toBe(true)
+  expect(t.landing?.step).toBe('gate')
+  expect(w.engine.statusOf(t)).toBe('merging')
+})
+
+test('a merge stopped on a conflict still goes back to the agent when written to', async () => {
+  const w = world()
+  const { t, key } = await asking(w, 'opencode', 'rebase')
+  await w.engine.reviewMore(t.id, t.project)
+  t.reported = true
+  t.landing = { step: 'rebase', at: Date.now() }
+  gate(w, t.id)
+  w.engine.youWrote(key)
+  expect(t.reported).toBe(false)
+  expect(t.landing).toBeUndefined()
+})

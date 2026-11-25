@@ -1279,13 +1279,11 @@ export class Engine extends Emitter<Events> {
     // a card asked in the turn running now is still yours; one asked before it began is answered by the work that went on
     const asked = asks && this.chats.asksInTurn(key)
     const working = st === 'working' || this.handing.has(t.id)
-    // a card or question it waits on is yours until its agent is at work again, whatever its queue says. One asked
-    // before a turn its agent then worked through was answered by that work: once it reports, it does not come back as
-    // Needs you when that turn ends. A card asked in the turn just ended, or one a still-unreported agent waits on, is a
-    // real question — including one an agent woken by its own background shell still waits on (SHE-201).
-    const cardAt = asks ? this.chats.askAt(key) : undefined
-    const workedPast = cardAt !== undefined && this.chats.turnStartedSince(key, cardAt)
-    if (asks && !working && !(t.reported && workedPast)) return 'need'
+    // a card or question it waits on is yours until its agent is at work again, whatever its queue says. A card asked
+    // before this turn began is answered by the work that went on only while it works: when the turn ends, an open
+    // card is still a question. The stale round card is settled explicitly by review-more, not by counting turns —
+    // a turn can begin with hidden news while the question is still open (SHE-201).
+    if (asks && !working) return 'need'
     // queued: until they are all done, or one ends without being done (then it waits for you to decide)
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
     // held until the machine has room
@@ -4142,8 +4140,9 @@ export class Engine extends Emitter<Events> {
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
     // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not
-    // keep the task Needs you when the agent's next turn ends (SHE-201)
-    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`)
+    // keep the task Needs you when the agent's next turn ends. Only a card about a review round is settled: an unrelated
+    // ask the agent also has open is still the human's (SHE-201).
+    this.chats.settleAsk(this.key(t), `Answered by ${this.spaceName(t)}'s coordinator: one more review round added`, (title) => !!title && /\breview\b/i.test(title) && /\bround\b/i.test(title))
     this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`

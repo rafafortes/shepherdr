@@ -142,25 +142,15 @@ export function world(herdr = fakeHerdr(), o: { boot?: string; usage?: UsageLedg
   const stopped: string[] = []
   const posted: { key: string; id: string; question?: { kind: string; steps?: string[] }; card?: { text: string; restart?: boolean } }[] = []
   /** what the agent's chat holds: its last reply, an open card of Shepherdr's, its CLI's own question */
-  const chat: {
-    reply?: string
-    card?: 'plan' | 'ask'
-    cardTitle?: string
-    question?: boolean
-    unseen?: string[]
-    messages?: { who: string; text?: string; card?: object }[]
-    askedInTurn?: boolean
-    askedAt?: number
-    turnStarts?: number[]
-  } = { reply: 'Which name do you want?' }
+  const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[]; askedInTurn?: boolean } =
+    { reply: 'Which name do you want?' }
   /** the cards a coordinator settled while granting an extra review round */
   const settled: { key: string; words: string }[] = []
   const chats = {
     post: (key: string, p: { id: string; question?: { kind: string } }) => posted.push({ key, ...p }),
-    askAt: () => (chat.card ? (chat.askedAt ?? Date.now()) : undefined),
-    turnStartedSince: (_key: string, at: number) => (chat.turnStarts ?? []).some((t) => t > at),
-    settleAsk: (key: string, words: string) => {
-      if (chat.card === 'ask') chat.card = undefined
+    settleAsk: (key: string, words: string, match?: (title?: string) => boolean) => {
+      if (chat.card === 'ask' && (!match || match(chat.cardTitle))) chat.card = undefined
+      else return false
       settled.push({ key, words })
       return true
     },
