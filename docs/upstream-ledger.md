@@ -1136,3 +1136,23 @@ Claude Code 2.1.331, pi 1.5.2 and agy from their installed bundles' own status-l
 here and without an in-turn provider backoff we can read. Each CLI's line that was found has its own test; the local
 `opencode-retry-cap` plugin on this host caps the longest OpenCode loops by ending the turn, so Shepherdr's reader also
 covers sessions started before it and other machines without that plugin.
+
+## A task's page shows its brief (SHEP-330, `719f1f49`), ported in SHE-202
+
+Found on 2026-11-26 when the task asked for it. The 3.2-chrome row above put "a task page showing its brief" among the
+skins we skip, saying our brief was already its first chat message. That was half true and missed the real gap: a task
+without a started agent had no chat at all, so its page showed only an empty line, and once the agent started the launch
+message drew the whole prompt and its Settings block as an ordinary bubble. Upstream's `web/plugins/chat/brief.ts`
+(`briefFrom`, `deliveryWord`, `looksLong`, `startWords`) and `BriefMessage` answer both; its service half
+(`core/chat-view.js`, `service/compat.ts`, `service/model.ts`, `service/live.ts`) makes a structured first message we do
+not need, because 2.0 already carries `Task.desc` in every snapshot (`server/live/engine/engine.ts`) and reads it in search
+(`plugins/keyboard/search-data.ts`).
+
+Ported the idea to 2.0's own code instead: `src/task-brief.tsx` reads the existing `shared/brief.ts` (`readBrief`,
+`SETTINGS_HEAD`, `OLD_HEADS`) and draws a card above the task's body with the Assistant's name, the task title, the
+human's words folded after six lines with Show all, the Settings block folded away, and Not sent yet / Sent / Read under
+it; queued, scheduled, to-do and starting tasks say what they wait for. The chat's launch message is left out of the rows
+once it is recognised, so the scope is not drawn twice. The task list row is untouched. Tests: `test/task-brief.test.tsx`
+(parsing, words, folding, detection) and `test/layout-task-brief.test.ts` (pre-start and started, phone and desktop,
+light and dark, with the Settings and Show all toggles). No herdr-core, Tailscale, queue-tick or first-message protocol
+was taken: this is a screen change over data the snapshot already has.

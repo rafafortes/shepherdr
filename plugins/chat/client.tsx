@@ -74,6 +74,7 @@ import {
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage, isVideo } from '@shared/files.ts'
 import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { briefOf, hasBrief, isBriefMessage } from '@client/task-brief.tsx'
 import { buzz, openBar } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { useArrive } from '@client/motion.ts'
@@ -1369,8 +1370,13 @@ function Announcer({ chatKey, from }: { chatKey: string; from: string }) {
 const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: string }) {
   rememberChat(chat)
   const outbox = useStore((s) => s.outbox)
+  const snap = useSnap()
+  // the task's launch message holds its whole brief, which its page now shows as a card: don't draw it twice
+  const briefTask = snap?.tasks.find((t) => t.agent?.chat === chat.key && hasBrief(t))
+  const brief = briefTask ? briefOf(briefTask) : null
+  const briefId = brief && briefTask ? chat.messages.slice(0, 2).find((m) => isBriefMessage(m, brief.scope, briefTask.desc))?.id : undefined
   type Item = { at: number; msg: Message; out?: Outgoing; last?: boolean } | { at: number; album: Message[]; out?: Outgoing; last?: boolean }
-  const items: Item[] = chat.messages.map((msg) => ({ at: msg.at ?? 0, msg }))
+  const items: Item[] = chat.messages.filter((m) => m.id !== briefId).map((msg) => ({ at: msg.at ?? 0, msg }))
   items.sort((a, b) => a.at - b.at)
   // what you just sent comes last, in one list with the rest: when it comes back it keeps its place in the list, so
   // nothing is drawn again (a picture doesn't load twice)
