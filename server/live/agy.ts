@@ -192,18 +192,20 @@ export function newestConversation(cwd: string, sinceMs = 0, dir = home()): stri
  * 2026-11-26, where a `write_file` call created a file under `--mode plan --dangerously-skip-permissions`). The bypass
  * is still needed for read-only commands whose permission check fails outside the sandbox (SHE-202:
  * `permission check failed for unsandboxed "git -C … status --short && …"`), so the prompts forbid changes and these
- * deny rules hold agy's own write, URL and MCP tools even with the bypass (Deny > Ask > Allow in agy's permission
- * engine, antigravity.google/docs/permissions.md). A mutating shell command is still only held by the prompt — the
- * same residual risk as a pi reviewer, whose bash is allowed with changes forbidden by its prompt.
+ * deny rules hold agy's own write and URL tools and MCP even with the bypass (Deny > Ask > Allow in agy's permission
+ * engine, antigravity.google/docs/permissions.md). `write_file(.)` is scoped to the workspace: a global `write_file(*)`
+ * also refused agy's own plan artifact (its brain folder outside the worktree), so the round ended with that refusal
+ * instead of findings. A mutating shell command is still only held by the prompt — the same residual risk as a pi
+ * reviewer, whose bash is allowed with changes forbidden by its prompt.
  *
  * One helper for the three launch sites (headless reviewer, reviewer pane, advisor) so they cannot drift.
  */
-export const AGY_READ_ONLY_DENY = ['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)']
+const READ_ONLY_DENY = ['write_file(.)', 'read_url(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)']
 
 export function agyReviewSettings(o: { cwd?: string } = {}): string {
   return JSON.stringify({
     ...(o.cwd ? { trustedWorkspaces: [o.cwd] } : {}),
-    permissions: { deny: AGY_READ_ONLY_DENY },
+    permissions: { deny: READ_ONLY_DENY },
   })
 }
 

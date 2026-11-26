@@ -544,7 +544,7 @@ describe("the round's headless review command, one ready-to-run line per reviewe
     const agy = line('agy')
     expect(agy).toContain('--mode plan')
     expect(agy).toContain('--dangerously-skip-permissions')
-    expect(agy).toContain('--settings \'{"permissions":{"deny":["write_file(*)","execute_url(*)","download_url(*)","mcp(*)"]}}\'')
+    expect(agy).toContain('--settings \'{"permissions":{"deny":["write_file(.)","read_url(*)","execute_url(*)","download_url(*)","mcp(*)"]}}\'')
   })
 
   test("shepherdr review names only the round's reviewer's line, with its model and effort", () => {

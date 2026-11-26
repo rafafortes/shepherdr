@@ -64,7 +64,7 @@ describe('the interactive pane launch is read-only for every reviewer CLI', () =
       '--settings',
       JSON.stringify({
         trustedWorkspaces: ['/work/tree'],
-        permissions: { deny: ['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'] },
+        permissions: { deny: ['write_file(.)', 'read_url(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'] },
       }),
       '--model',
       'gemini-4-hydrogen-high',
@@ -83,7 +83,7 @@ describe('the interactive pane launch is read-only for every reviewer CLI', () =
     const agy = reviewerPaneArgs({ kind: 'agy' })
     expect(agy).toEqual(expect.arrayContaining(['--mode', 'plan', '--dangerously-skip-permissions', '--settings']))
     const settings = JSON.parse(String(agy[agy.indexOf('--settings') + 1]))
-    expect(settings.permissions.deny).toEqual(['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'])
+    expect(settings.permissions.deny).toEqual(['write_file(.)', 'read_url(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'])
   })
 })
 

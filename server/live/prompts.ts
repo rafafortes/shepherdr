@@ -73,8 +73,8 @@ export const REVIEW_RUN_TIMEOUT = 900_000
  * - agy: `-p <prompt> --output-format stream-json --mode plan --dangerously-skip-permissions --settings …` — the prompt
  *   must follow `-p` immediately, or `-p` takes the next flag as its prompt (the repo's own agy calls do the same, in
  *   advisor.ts and return.ts). The bypass answers read-only commands that fail a permission check outside the sandbox
- *   (SHE-202); its session settings deny agy's own write, URL and MCP tools. agy's plan mode is only a `/plan` prefix,
- *   not a tool-level block, so the prompt carries the read-only rule too (see agyReviewSettings in agy.ts).
+ *   (SHE-202); its session settings deny writes in the worktree and agy's URL and MCP tools. agy's plan mode is only a
+ *   `/plan` prefix, not a tool-level block, so the prompt carries the read-only rule too (see agyReviewSettings in agy.ts).
  * All five can stream; none needs a "cannot stream" note. pi emits partial deltas and claude needs --include-partial-messages
  * for them; whether agy, opencode and codex also emit deltas before a message is complete was not verified. pi has no
  * read-only mode: `bash` is in its tool list only so the reviewer can run `git diff`/`git log`, and the prompt forbids
@@ -121,8 +121,8 @@ export function reviewRunLine(r: Reviewer): string {
  *   permissions that deny edit (its one write permission), and `--session` opens it; `--standalone` keeps it in the pane's
  *   process tree
  * - agy: `--mode plan` is its planning prefix, `--dangerously-skip-permissions` answers the read-only commands that
- *   fail a permission check, and `--settings` trusts this worktree for the session only and denies write, URL and MCP
- *   tools (the mode itself does not block writes; see agyReviewSettings in agy.ts)
+ *   fail a permission check, and `--settings` trusts this worktree for the session only and denies writes in it plus
+ *   URL and MCP tools (the mode itself does not block writes; see agyReviewSettings in agy.ts)
  */
 export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string; modelId?: string } = {}): string[] {
   const model = r.model && r.model !== 'default' ? r.model : undefined

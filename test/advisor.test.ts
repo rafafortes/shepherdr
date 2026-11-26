@@ -19,8 +19,8 @@ const { providerOfKey: providerOf } = await import('../shared/model-caps.ts')
 
 const src = new LiveSource()
 afterAll(() => src.stop())
-/** the session-only deny rules that keep agy's bypass from freeing its write, URL and MCP tools (SHE-202) */
-const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
+/** the session-only deny rules that keep agy's bypass from freeing worktree writes, URL and MCP tools (SHE-202) */
+const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(.)","read_url(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 
 /** what the advisor was run with, and what it answers next (one per run) */

@@ -110,8 +110,8 @@ export function adviceArgs(h: Harness, prompt: string): { cmd: string[]; stdin?:
   if (h.kind === 'opencode')
     return { cmd: ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), prompt] }
   // agy's plan mode is only a /plan prefix: the bypass answers read-only checks that would otherwise fail (SHE-202),
-  // and the session deny rules keep the advisor's own write, URL and MCP tools blocked. Its answer is JSON, unwrapped
-  // by runAdvisor
+  // and the session deny rules keep writes in the worktree and the advisor's URL and MCP tools blocked. Its answer is
+  // JSON, unwrapped by runAdvisor
   if (h.kind === 'agy')
     return {
       cmd: [

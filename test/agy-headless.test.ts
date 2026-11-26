@@ -16,7 +16,7 @@ import { tmp } from './tmp.ts'
 
 const ASK = 'Reply with only the two letters: ok'
 /** the session-only deny rules agy's read-only roles get with --dangerously-skip-permissions (SHE-202) */
-const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
+const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(.)","read_url(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
 const LISTED = parseAgy('gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-9\tGemini 9')
 const bin = tmp('agy-headless-bin')
 const args = join(tmp('agy-headless-args'), 'args')
