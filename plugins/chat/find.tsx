@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { getState, setUI, useStore, useUI } from '@client/kernel.ts'
 import { DownIcon, ic, IconButton, roundBtn, SearchIcon, XIcon } from '@client/ui.tsx'
+import { briefMessageOf, briefOf, hasBrief } from '@client/task-brief.tsx'
 import { findIn } from './days.ts'
 import { jumpTo } from './reply.ts'
 
@@ -41,9 +42,17 @@ function mark(chat: string, q: string) {
 export function FindBar({ chatKey }: { chatKey: string }) {
   const f = useUI((u) => (u.find?.chat === chatKey ? u.find : null))
   const msgs = useStore((s) => s.chats[chatKey]?.messages)
+  // a task's launch message is drawn as a card above the chat, not as a row: don't offer a match that cannot be jumped to
+  const briefId = useStore((s) => {
+    const t = s.snap?.tasks.find((t) => t.agent?.chat === chatKey && hasBrief(t))
+    if (!t) return undefined
+    const b = briefOf(t)
+    return briefMessageOf(s.chats[chatKey], b.scope, t.desc)?.id
+  })
   const input = useRef<HTMLInputElement>(null)
   const q = f?.q ?? ''
-  const found = useMemo(() => findIn(msgs ?? [], q), [msgs, q])
+  const shown = useMemo(() => (msgs ?? []).filter((m) => m.id !== briefId), [msgs, briefId])
+  const found = useMemo(() => findIn(shown, q), [shown, q])
   // the match looked at (the newest until you step): by its id, so a reply coming in doesn't move you
   const current = f?.id && found.includes(f.id) ? f.id : (found.at(-1) ?? null)
   const pos = current ? found.indexOf(current) : -1

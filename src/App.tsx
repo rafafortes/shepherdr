@@ -506,7 +506,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
     <>
       <TaskBriefCard task={task} state="waiting" space={coordinator} />
       <StartWords task={task} chat={chat} />
-      {waiting ? null : <Empty>{`${task.id} is waiting for its agent to start. Ask ${coordinator} about it.`}</Empty>}
+      {waiting || task.status !== 'work' ? null : <Empty>{`${task.id} is waiting for its agent to start. Ask ${coordinator} about it.`}</Empty>}
     </>
   ) : (
     <Empty>

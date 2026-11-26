@@ -177,6 +177,24 @@ describe.skipIf(!browser)('a task page shows the brief its agent got', () => {
     }
   }, 60_000)
 
+  test('search in a task chat does not count the launch message drawn as a card', async () => {
+    const page = await live().newPage({ viewport: { width: 1280, height: 800 } })
+    try {
+      await openTask(page, 'HP-204')
+      const c = card(page, 'HP-204')
+      await c.waitFor()
+      const section = c.locator('xpath=ancestor::section[1]')
+      await section.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Search in this chat', exact: true }).click()
+      const find = page.getByRole('search')
+      await find.getByRole('searchbox', { name: 'Search in this chat' }).fill('Pages rendered in chat stay light')
+      // those words are in the brief's card, not in a message row: nothing to jump to
+      await find.getByText('No matches').waitFor()
+    } finally {
+      await page.close()
+    }
+  }, 60_000)
+
   test('a brief without a Settings block has no Settings row, and the page still shows its words', async () => {
     const t = demoTask('HP-204')
     const had = t.desc
