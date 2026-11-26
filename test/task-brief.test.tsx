@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SETTINGS_HEAD } from '../shared/brief.ts'
 import type { Chat, Message, Task } from '../shared/types.ts'
-import { briefFrom, briefOf, briefState, type BriefState, deliveryWord, hasBrief, isBriefMessage, looksLong, startWords, StartWords, TaskBriefCard } from '../src/task-brief.tsx'
+import { briefFrom, briefMessageOf, briefOf, briefState, type BriefState, deliveryWord, hasBrief, isBriefMessage, looksLong, startWords, StartWords, TaskBriefCard } from '../src/task-brief.tsx'
 
 const scope = 'Make the card bigger. Keep the colours.'
 const settings = `${SETTINGS_HEAD}\n- Review: on. On. (your setting for every machine)\n- Merge: on its own (this space's setting)`
@@ -64,6 +64,12 @@ test('the launch message holding the brief is recognised, and its delivery follo
   expect(isBriefMessage(undefined, scope, desc)).toBe(false)
   expect(isBriefMessage(msg({ text: 'On it.' }), scope, desc)).toBe(false)
   expect(isBriefMessage(msg({ who: 'agent', text: `Bigger card\n\n${desc}` }), scope, desc)).toBe(false)
+  // a card or a wake line may come before the launch message: still found, still read
+  const withCard = chat([msg({ id: 'c', card: { id: 'c', text: 'started' } }), launched])
+  expect(briefMessageOf(withCard, scope, desc)?.id).toBe('m')
+  expect(briefState(task({ agent }), withCard)).toBe('read')
+  expect(briefMessageOf(chat([launched]), scope, desc)?.id).toBe('m')
+  expect(briefMessageOf(undefined, scope, desc)).toBeUndefined()
   expect(briefState(task(), undefined)).toBe('waiting')
   expect(briefState(task({ agent }), undefined)).toBe('sent')
   expect(briefState(task({ agent }), chat([launched]))).toBe('read')

@@ -40,7 +40,7 @@ import { FocusToggle, PanelSheet, PanelToggle, TaskMenu, TaskPanel } from './Pan
 import { ApplyWaitingSheet } from './apply-waiting.tsx'
 import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
-import { briefState, hasBrief, StartWords, TaskBriefCard, startWords } from './task-brief.tsx'
+import { hasBrief, StartWords, TaskBriefCard, startWords } from './task-brief.tsx'
 import {
   BackIcon,
   BellIcon,
@@ -494,31 +494,28 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)
   const split = useUI((u) => panesHere(u).length > 0)
-  // the task's scope leads its page, whether or not its agent has started; the chat's launch message needn't repeat it
+  // before its agent starts the page has no chat, so the scope and why it waits lead here; once it starts the chat
+  // draws the card at the top of its own scroller (a long one must never push the composer off the screen)
   const brief = hasBrief(task)
   const waiting = brief ? startWords(task, chat) : ''
-  const body = (
+  const body = g ? (
+    Chat ? (
+      <Chat chatKey={g.chat} placeholder={agentPlaceholder(task, g.status === 'done' || finished)} />
+    ) : null
+  ) : brief ? (
     <>
-      {brief ? <TaskBriefCard task={task} state={briefState(task, chat)} space={coordinator} /> : null}
-      {brief ? <StartWords task={task} chat={chat} /> : null}
-      {g ? (
-        Chat ? (
-          <Chat chatKey={g.chat} placeholder={agentPlaceholder(task, g.status === 'done' || finished)} />
-        ) : null
-      ) : brief ? (
-        waiting ? null : (
-          <Empty>{`${task.id} is waiting for its agent to start. Ask ${coordinator} about it.`}</Empty>
-        )
-      ) : (
-        <Empty>
-          {task.status === 'scheduled'
-            ? `${task.id} waits for its time: ${task.sub}. Its chat opens here then; to start it sooner, ask ${coordinator}.`
-            : task.status === 'todo' || task.status === 'work' || task.status === 'queued'
-              ? `${task.id} is starting: its chat opens here in a moment.`
-              : `${task.id}'s agent didn't start: its chat opens here once it does. Ask ${coordinator} about it.`}
-        </Empty>
-      )}
+      <TaskBriefCard task={task} state="waiting" space={coordinator} />
+      <StartWords task={task} chat={chat} />
+      {waiting ? null : <Empty>{`${task.id} is waiting for its agent to start. Ask ${coordinator} about it.`}</Empty>}
     </>
+  ) : (
+    <Empty>
+      {task.status === 'scheduled'
+        ? `${task.id} waits for its time: ${task.sub}. Its chat opens here then; to start it sooner, ask ${coordinator}.`
+        : task.status === 'todo' || task.status === 'work' || task.status === 'queued'
+          ? `${task.id} is starting: its chat opens here in a moment.`
+          : `${task.id}'s agent didn't start: its chat opens here once it does. Ask ${coordinator} about it.`}
+    </Empty>
   )
   if (phone)
     return (

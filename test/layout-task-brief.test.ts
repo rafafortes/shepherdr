@@ -8,7 +8,8 @@ import { layout, settled } from './layout.ts'
 
 const { browser, world, url } = await layout()
 const base = url().replace(/\?place=.*$/, '')
-const emit = () => (world as unknown as { emit(e: string): void }).emit('snapshot')
+const worldEmit = (e: string, k?: string) => (world as unknown as { emit(e: string, k?: string): void }).emit(e, k)
+const emit = () => worldEmit('snapshot')
 
 async function openTask(page: Page, id: string) {
   await page.goto(`${base}?place=p%3Avm-str%3Aherdr-projects&task=${id}`)
@@ -120,6 +121,59 @@ describe.skipIf(!browser)('a task page shows the brief its agent got', () => {
       await page.close()
       t.desc = had
       emit()
+    }
+  }, 60_000)
+
+  test('a started task whose chat holds only its launch message is not called empty', async () => {
+    const chat = world.chats['HP-204/Agent']
+    const had = chat.messages
+    const launch = had.find((m) => m.who === 'you')
+    if (!launch) throw new Error('the demo task has no launch message')
+    chat.messages = [launch]
+    worldEmit('chat', 'HP-204/Agent')
+    const page = await live().newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await openTask(page, 'HP-204')
+      const c = card(page, 'HP-204')
+      await c.waitFor()
+      expect(await c.locator('xpath=ancestor::section[1]').getByText('No messages yet. Write to start.').count()).toBe(0)
+    } finally {
+      await page.close()
+      chat.messages = had
+      worldEmit('chat', 'HP-204/Agent')
+    }
+  }, 60_000)
+
+  test('a long brief opened on a started task scrolls with the chat and keeps the composer in view', async () => {
+    const t = demoTask('HP-204')
+    const chat = world.chats['HP-204/Agent']
+    const hadDesc = t.desc
+    const hadMessages = chat.messages
+    t.desc = `${hadDesc}\n\nDo:\n${Array.from({ length: 30 }, (_, i) => `- step ${i + 1} keep the page's own colours`).join('\n')}`
+    chat.messages = [...hadMessages, ...Array.from({ length: 20 }, (_, i) => ({ id: `proof-msg-${i}`, who: 'agent' as const, text: `Step ${i + 1} done.`, at: Date.now() + i }))]
+    emit()
+    worldEmit('chat', 'HP-204/Agent')
+    const page = await live().newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await openTask(page, 'HP-204')
+      const c = card(page, 'HP-204')
+      await c.waitFor()
+      const show = c.getByRole('button', { name: 'Show all', exact: true })
+      await show.waitFor()
+      await show.click()
+      await c.getByRole('button', { name: 'Show less', exact: true }).waitFor()
+      const composer = page.locator('[data-composer]').first()
+      const box = await composer.boundingBox()
+      if (!box) throw new Error('no composer box')
+      expect(box.y + box.height).toBeLessThanOrEqual(844)
+      const messages = c.locator('xpath=ancestor::div[contains(@class,"overflow-y-auto")][1]').locator('[data-messages]')
+      expect((await messages.boundingBox())?.height ?? 0).toBeGreaterThan(0)
+    } finally {
+      await page.close()
+      t.desc = hadDesc
+      chat.messages = hadMessages
+      emit()
+      worldEmit('chat', 'HP-204/Agent')
     }
   }, 60_000)
 

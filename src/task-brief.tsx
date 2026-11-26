@@ -48,12 +48,17 @@ export function isBriefMessage(msg: Message | undefined, scope: string, desc?: s
   return (scope.length > 0 && msg.text.includes(scope)) || (!!desc && msg.text.includes(desc))
 }
 
+/** the launch message holding this brief, wherever it sits (a card or a wake line may come first) */
+export function briefMessageOf(chat: Chat | undefined, scope: string, desc?: string): Message | undefined {
+  return chat?.messages.slice(0, 4).find((m) => isBriefMessage(m, scope, desc))
+}
+
 /** waiting: no agent yet; sent: its agent started and hasn't taken the brief in; read: its chat has the launch message */
 export function briefState(task: Task, chat: Chat | undefined): BriefState {
   if (!task.agent) return 'waiting'
   if (!chat) return 'sent'
   const { scope } = briefOf(task)
-  if (isBriefMessage(chat.messages[0], scope, task.desc)) return 'read'
+  if (briefMessageOf(chat, scope, task.desc)) return 'read'
   return chat.messages.some((m) => m.who === 'agent') ? 'read' : 'sent'
 }
 
