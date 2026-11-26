@@ -34,6 +34,59 @@ async function round(w: World, t: Task) {
 
 const head = (t: Task) => sh('git rev-parse HEAD', t.worktree!)
 
+/**
+ * The documents of a conflict over counts (POL-673's README): a total, a table, a paragraph wrapped over lines and, apart
+ * from them, a line of its own. The task adds a group (its row, its share of the total, a sentence) and raises the line's
+ * count; meanwhile the base adds a group of its own and recounts the same lines, so the rebase conflicts on all of them,
+ * and a resolution keeps both sides with the numbers recomputed.
+ */
+const cases = (total: string, rows: string[], run: string[], stop: string) =>
+  ['# Cases', '', total, '', '| group | cases |', '| --- | --- |', ...rows, '', ...run, '', '## Stop', '', stop, ''].join('\n')
+const ADV = '| adversarial | 400 |'
+const SIL = '| silence | 96 |'
+const MEM = '| memory | 60 |'
+const L1 = '| l1_correction | 300 |'
+const STOP = (n: number | string) => `stop when a < b after ${n} seconds`
+const ORIGINAL = cases('496 cases in six groups.', [ADV, SIL], ['A default run sends 58 of the 496 cases', '(29 adversarial, 16 lesson flow) and the slices are walked with --offset.'], STOP(10))
+const MINE = cases(
+  '796 cases in seven groups: 496 authored and 300 generated.',
+  [ADV, SIL, L1],
+  ['A default run sends 58 of the 496 authored', 'cases (29 adversarial, 16 lesson flow), and the l1_correction', 'group needs its own --only; the slices are walked with --offset.'],
+  STOP(30),
+)
+const THEIRS = cases(
+  '556 cases in seven groups.',
+  [ADV, SIL, MEM],
+  ['A default run sends 57 of the 556 cases', '(26 adversarial, 13 lesson flow, 7 memory) and the slices are walked with --offset.'],
+  STOP(10),
+)
+/** both sides kept, the totals recomputed ("eight groups", 856) and the paragraph wrapped again */
+const MERGED = cases(
+  '856 cases in eight groups: 556 authored and 300 generated.',
+  [ADV, SIL, MEM, L1],
+  ['A default run sends 57 of the 556 authored', 'cases (26 adversarial, 13 lesson flow, 7 memory), and the l1_correction', 'group needs its own --only; the slices are walked with --offset.'],
+  STOP(30),
+)
+
+/** a task with its one round spent on MINE, the base moved to THEIRS, and the rebase's conflicts resolved as `resolved` */
+async function recounted(w: World, name: string, resolved: string) {
+  const dir = repo()
+  writeFileSync(join(dir, 'cases.md'), ORIGINAL)
+  sh('git add -A && git commit -qm "add cases"', dir)
+  const { t } = await started(w, dir, name)
+  writeFileSync(join(t.worktree!, 'cases.md'), MINE)
+  sh('git add -A && git commit -qm "add the l1 group"', t.worktree!)
+  t.rounds = 1
+  await round(w, t)
+  expect(w.engine.reviewsLeft(t)).toBe(0)
+  writeFileSync(join(dir, 'cases.md'), THEIRS)
+  sh('git add -A && git commit -qm "base adds the memory group"', dir)
+  expect(sh('git rebase main || true', t.worktree!)).toContain('CONFLICT')
+  writeFileSync(join(t.worktree!, 'cases.md'), resolved)
+  sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
+  return t
+}
+
 describe('a review is tied to the commit it reviewed', () => {
   test('ready refuses an unreviewed final commit and names the last reviewed commit and what came after', async () => {
     const w = world()
@@ -427,6 +480,76 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(refusal).toContain('mine: a row the task wrote')
     expect(refusal).not.toContain('short review')
     // the gate catches it, so a cheap rebase review is not offered: restore the work and take a normal round
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test('a conflict resolution that keeps both sides with the counts recomputed gets a short review outside the cap', async () => {
+    const w = world()
+    const t = await recounted(w, 'recounted-table', MERGED)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('base moved')
+    expect(refusal).toContain('short review')
+    expect(refusal).toContain('counted apart')
+    // the recounted lines are named, so the short review judges exactly them
+    expect(refusal).toContain('cases.md: + 856 cases in eight groups')
+    // its one normal round is spent, and the delta still gets its review without it
+    const r = await w.engine.reviewRound(t.id)
+    if ('wait' in r) throw new Error('no reviewer free')
+    expect(r.rebase).toBe(true)
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(t.rebaseReviews).toBe(1)
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+  })
+
+  test('a resolution that merges the two sides but also raises a count, swaps words, drops a row or words a line anew is not a base move', async () => {
+    // the resolution also touches the task's own lines that no conflict reached: 30 seconds made 300 (a number the task's
+    // lines have elsewhere, but no count of the base's is on this line), `a < b` made `b < a` (the same words, in another
+    // order), its row left out of the table the base also grew and a sentence worded anew
+    for (const [name, resolved] of [
+      ['raised-count', MERGED.replace(STOP(30), STOP(300))],
+      ['swapped-words', MERGED.replace(STOP(30), 'stop when b < a after 30 seconds')],
+      ['left-out-row', MERGED.replace(`${L1}\n`, '')],
+      ['reworded-line', MERGED.replace('group needs its own --only; the slices are walked with --offset.', 'group needs its own --only; run it as an overnight batch.')],
+    ] as const) {
+      const w = world()
+      const t = await recounted(w, name, resolved)
+      const refusal = await w.engine.reviewGate(t)
+      expect(refusal, name).toContain('All 1 of')
+      expect(refusal, name).not.toContain('base moved')
+      await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+    }
+  })
+
+  test("a resolution that takes the base's side whole drops the task's own lines and is refused as dropped work", async () => {
+    const w = world()
+    const t = await recounted(w, 'dropped-rows-recount', THEIRS.replace(STOP(10), STOP(30)))
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('dropped')
+    expect(refusal).toContain('| l1_correction | 300 |')
+    expect(refusal).not.toContain('short review')
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
+  })
+
+  test('a count the task changes itself, in a file the base touched elsewhere, is its own work', async () => {
+    const w = world()
+    const dir = repo()
+    writeFileSync(join(dir, 'limits.md'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\ntimeout is 10 seconds\n')
+    sh('git add -A && git commit -qm "add limits"', dir)
+    const { t } = await started(w, dir, 'own-count')
+    writeFileSync(join(t.worktree!, 'limits.md'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\ntimeout is 30 seconds\n')
+    sh('git add -A && git commit -qm "raise the timeout"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    // the base changes a distant line of the same file and the task rebases cleanly, then raises its own count again
+    writeFileSync(join(dir, 'limits.md'), 'base a\nb\nc\nd\ne\nf\ng\nh\ni\nj\ntimeout is 10 seconds\n')
+    sh('git add -A && git commit -qm "base a"', dir)
+    sh('git rebase main', t.worktree!)
+    writeFileSync(join(t.worktree!, 'limits.md'), 'base a\nb\nc\nd\ne\nf\ng\nh\ni\nj\ntimeout is 60 seconds\n')
+    sh('git add -A && git commit -qm "raise it again"', t.worktree!)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
     await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
   })
 

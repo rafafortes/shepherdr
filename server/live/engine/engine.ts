@@ -659,6 +659,15 @@ export const HELD = {
 /** a task held only by the spacing between starts (machine.startEvery), with nothing ahead of it: its line says so */
 export const TURN_GAP = 'Waiting for the gap between starts'
 
+/** a word, a number or one symbol of a line's text (Engine.words) */
+const TOKEN = /\p{L}[\p{L}\p{N}_'-]*|\p{N}+|[^\s\p{L}\p{N}]/gu
+/** the numbers a text spells out: a count a conflict resolution recomputes is not a word of the task's own */
+const NUMBER_WORDS = new Set(
+  'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand'.split(
+    ' ',
+  ),
+)
+
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
 
@@ -3900,6 +3909,52 @@ export class Engine extends Emitter<Events> {
     return s.trim().replace(/\b[0-9a-f]{40}\b|\b[0-9a-f]{64}\b/g, '#')
   }
 
+  /** the words and symbols of some lines in their order, and apart from them their numbers (digits and spelled out): a
+   *  count a resolution recomputed (a total of 796 that became 856, "seven groups" that became "eight") is the same
+   *  text, and so is a paragraph wrapped again */
+  private words(lines: string[]) {
+    const words: string[] = []
+    const numbers: string[] = []
+    for (const l of lines)
+      for (const w of this.lineKey(l).toLowerCase().match(TOKEN) ?? []) {
+        if (/^\p{N}/u.test(w) || NUMBER_WORDS.has(w)) numbers.push(w)
+        else words.push(w)
+      }
+    return { words, numbers }
+  }
+
+  /**
+   * Whether a file's new own lines are a mechanical merge of what the task changed there and what the base changed in the
+   * same lines: a conflict between the task's line and the base's (a table's count, a list's new item, a paragraph's
+   * numbers) resolved by keeping both. The task's words are all still there, in their order (a paragraph wrapped again
+   * keeps them), every other word is one the base's changed lines carry, and a number the task's lines did not have comes
+   * with a number of the base's lines on its line (the count the base moved, and the total it makes): `a < b` made
+   * `b < a`, or a 30 made 300 on a line of its own, is the task's work and not a merge.
+   */
+  private mergedLines(reviewed: string[], now: string[], baseLines: string[]) {
+    const was = this.words(reviewed)
+    const moved = this.words(baseLines)
+    const theirs = new Set(moved.words)
+    let at = 0
+    for (const w of this.words(now).words) {
+      if (at < was.words.length && w === was.words[at]) at++
+      else if (!theirs.has(w)) return false
+    }
+    if (at < was.words.length) return false
+    const known = new Map<string, number>()
+    for (const x of was.numbers) known.set(x, (known.get(x) ?? 0) + 1)
+    return now.every((l) => {
+      const n = this.words([l]).numbers
+      // each number the task's lines had can be on a line once more; any other needs a number the base moved beside it
+      const fresh = n.filter((x) => {
+        const left = known.get(x) ?? 0
+        if (left > 0) known.set(x, left - 1)
+        return left === 0
+      })
+      return !fresh.length || n.some((x) => moved.numbers.includes(x))
+    })
+  }
+
   /**
    * How HEAD's own change differs from a reviewed one. 'same' is the gate's existing pass; 'base' is only a derived
    * value or a conflict resolution caused by the base moving, and may use a short rebase review outside the cap;
@@ -3959,7 +4014,10 @@ export class Engine extends Emitter<Events> {
       const missingRemoved = old.removed.filter((l) => !next.removed.includes(l))
       const appearedRemoved = next.removed.filter((l) => !old.removed.includes(l))
       lines.push(...[...delta(old.added, next.added), ...delta(old.removed, next.removed)].map((l) => `${file}: ${l}`))
-      await check(file, missingAdded, appearedAdded, next.added)
+      // a line the task replaced that the base changed since is a conflict; its resolution, when it only merges the two sides,
+      // loses nothing of the task's and adds nothing of its own (mergedLines)
+      if (!(missingRemoved.length && missingAdded.length && appearedAdded.length && this.mergedLines(missingAdded, appearedAdded, appearedRemoved)))
+        await check(file, missingAdded, appearedAdded, next.added)
       await check(file, missingRemoved, appearedRemoved, next.removed, fromBaseRemoved)
     }
     // a file new to the own diff gets the same per-line check, even when the base touched it: a new own line there
