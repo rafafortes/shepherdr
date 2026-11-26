@@ -6,7 +6,7 @@
 // it is unsure of, stay with the human. Its own primary and backup, as every other role has (settings.ts advisor).
 import { readJson, writeJson } from '../store.ts'
 import { fitHarness, harnessWords, type Harness } from './restart.ts'
-import { agyModelId, headlessOutcome } from './agy.ts'
+import { agyModelId, agyReviewSettings, headlessOutcome } from './agy.ts'
 import { agyIds } from './models.ts'
 
 /** what the advisor is asked: a choice (a card, or one question of the CLI's own form) or a question in words */
@@ -109,8 +109,25 @@ export function adviceArgs(h: Harness, prompt: string): { cmd: string[]; stdin?:
   // OpenCode's plan agent is its read-only one; its answer is the text of its default output
   if (h.kind === 'opencode')
     return { cmd: ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), prompt] }
-  // agy's plan mode is its read-only one; its answer comes as JSON, unwrapped by runAdvisor
-  if (h.kind === 'agy') return { cmd: ['agy', '-p', prompt, ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []), '--output-format', 'json', '--mode', 'plan'] }
+  // agy's plan mode is only a /plan prefix: the bypass answers read-only checks that would otherwise fail (SHE-202),
+  // and the session deny rules keep writes in the worktree and the advisor's URL and MCP tools blocked. Its answer is
+  // JSON, unwrapped by runAdvisor
+  if (h.kind === 'agy')
+    return {
+      cmd: [
+        'agy',
+        '-p',
+        prompt,
+        ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []),
+        '--output-format',
+        'json',
+        '--mode',
+        'plan',
+        '--dangerously-skip-permissions',
+        '--settings',
+        agyReviewSettings(),
+      ],
+    }
   return undefined
 }
 

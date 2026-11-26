@@ -123,7 +123,9 @@ export function oneShot(h: Harness): string[] | undefined {
   if (h.kind === 'codex') return ['codex', 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), ASK]
   // no flag for a system prompt in `opencode run`: the question alone is the probe; its plan agent is read only
   if (h.kind === 'opencode') return ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), ASK]
-  // agy's headless run is read only (plan mode) and answers in JSON: its status says whether the provider answered
+  // agy's headless run is plan mode and answers in JSON: its status says whether the provider answered. Unlike the
+  // reviewer and advisor (which need the permission bypass for their read-only git commands, SHE-202), a probe runs no
+  // tool at all — it asks for two letters — so no command can fail a permission check and nothing needs bypassing
   if (h.kind === 'agy') return ['agy', '-p', ASK, ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []), '--output-format', 'json', '--mode', 'plan']
   if (h.kind === 'pi')
     return [

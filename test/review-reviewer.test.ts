@@ -529,6 +529,24 @@ describe("the round's headless review command, one ready-to-run line per reviewe
     })
   }
 
+  test('each of the five CLIs holds its headless reviewer read only, by its own permission flags', () => {
+    const line = (kind: string) => reviewRunLine({ kind })
+    // Claude: plan mode plus the edit tools refused
+    expect(line('claude')).toContain('--permission-mode plan')
+    expect(line('claude')).toContain('--disallowedTools Edit,Write,NotebookEdit')
+    // Codex: its documented read-only sandbox; pi: no permission system, a read-tool allowlist with bash for git only
+    expect(line('codex')).toContain('exec -s read-only')
+    expect(line('pi')).toContain('--tools read,grep,find,ls,bash')
+    // OpenCode: the plan agent is its read-only one
+    expect(line('opencode')).toContain('--agent plan')
+    // agy: the bypass answers read-only checks that fail outside the sandbox (SHE-202); the session settings deny its
+    // write, URL and MCP tools, since --mode plan is only a /plan prefix and would not block a write by itself
+    const agy = line('agy')
+    expect(agy).toContain('--mode plan')
+    expect(agy).toContain('--dangerously-skip-permissions')
+    expect(agy).toContain('--settings \'{"permissions":{"deny":["write_file(.)","read_url(*)","execute_url(*)","download_url(*)","mcp(*)"]}}\'')
+  })
+
   test("shepherdr review names only the round's reviewer's line, with its model and effort", () => {
     for (const kind of Object.keys(streaming)) {
       const reviewer = { kind, model: 'claude-sonnet-5-5', effort: 'high' }
