@@ -22,7 +22,27 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
-import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI } from '@client/kernel.ts'
+import {
+  act,
+  chatName,
+  definePlugin,
+  getDraft,
+  getState,
+  goChat,
+  has,
+  holdReload,
+  openTask,
+  placeOf,
+  registry,
+  setDraft,
+  setOutbox,
+  setUI,
+  taskOf,
+  useDraft,
+  useSnap,
+  useStore,
+  useUI,
+} from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
 import {
   AlertIcon,
@@ -74,6 +94,7 @@ import {
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage, isVideo } from '@shared/files.ts'
 import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { briefMessageOf, briefOf, briefState, hasBrief, StartWords, TaskBriefCard } from '@client/task-brief.tsx'
 import { buzz, openBar } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { useArrive } from '@client/motion.ts'
@@ -1369,8 +1390,13 @@ function Announcer({ chatKey, from }: { chatKey: string; from: string }) {
 const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: string }) {
   rememberChat(chat)
   const outbox = useStore((s) => s.outbox)
+  const snap = useSnap()
+  // the task's launch message holds its whole brief, which its page now shows as a card: don't draw it twice
+  const briefTask = snap?.tasks.find((t) => t.agent?.chat === chat.key && hasBrief(t))
+  const brief = briefTask ? briefOf(briefTask) : null
+  const briefId = brief && briefTask ? briefMessageOf(chat, brief.scope, briefTask.desc)?.id : undefined
   type Item = { at: number; msg: Message; out?: Outgoing; last?: boolean } | { at: number; album: Message[]; out?: Outgoing; last?: boolean }
-  const items: Item[] = chat.messages.map((msg) => ({ at: msg.at ?? 0, msg }))
+  const items: Item[] = chat.messages.filter((m) => m.id !== briefId).map((msg) => ({ at: msg.at ?? 0, msg }))
   items.sort((a, b) => a.at - b.at)
   // what you just sent comes last, in one list with the rest: when it comes back it keeps its place in the list, so
   // nothing is drawn again (a picture doesn't load twice)
@@ -1446,7 +1472,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
     <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
-      {!rows.length && !chat.unreadable ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
+      {!rows.length && !chat.unreadable && !briefTask ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
       {hidden ? (
         // biome-ignore lint/a11y/useSemanticElements: a button takes its width from its words; this sentinel fills the row
         <div
@@ -2935,6 +2961,8 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
 function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; placeholder: string; unreachable?: string }) {
   const from = useStore((s) => chatName(s.snap!, chatKey))
   const chat = useChat(chatKey)
+  const snap = useSnap()
+  const task = snap?.tasks.find((t) => t.agent?.chat === chatKey && hasBrief(t))
   const override = useUI((u) => registry.chatBody.find((b) => b.when(u, chatKey)))
   if (override) return <override.View chatKey={chatKey} />
   return (
@@ -2947,6 +2975,13 @@ function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; plac
               {unreachable}
             </div>
           </div>
+        ) : null}
+        {/* the task's brief and why it waits scroll with its messages, so a long one never pushes the composer away */}
+        {task ? (
+          <>
+            <TaskBriefCard task={task} state={briefState(task, chat)} space={snap ? placeOf(snap, task.place).name : undefined} />
+            <StartWords task={task} chat={chat} />
+          </>
         ) : null}
         <Messages chat={chat ?? { key: chatKey, cli: 'Claude Code', messages: [] }} from={from} />
       </StickToBottom>

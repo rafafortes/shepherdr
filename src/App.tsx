@@ -40,6 +40,7 @@ import { FocusToggle, PanelSheet, PanelToggle, TaskMenu, TaskPanel } from './Pan
 import { ApplyWaitingSheet } from './apply-waiting.tsx'
 import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
+import { hasBrief, StartWords, TaskBriefCard, startWords } from './task-brief.tsx'
 import {
   BackIcon,
   BellIcon,
@@ -477,7 +478,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const snap = useSnap()!
   const g = task.agent ?? null
   const Chat = registry.views.chat
-  const finished = useStore((s) => s.chats[g?.chat ?? '']?.finished)
+  const chat = useStore((s) => s.chats[g?.chat ?? ''])
+  const finished = chat?.finished
   const back = () => setUI({ task: null })
   const phone = useUI((u) => u.device === 'phone')
   const desktop = useUI((u) => u.device === 'desktop')
@@ -492,10 +494,20 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)
   const split = useUI((u) => panesHere(u).length > 0)
+  // before its agent starts the page has no chat, so the scope and why it waits lead here; once it starts the chat
+  // draws the card at the top of its own scroller (a long one must never push the composer off the screen)
+  const brief = hasBrief(task)
+  const waiting = brief ? startWords(task, chat) : ''
   const body = g ? (
     Chat ? (
       <Chat chatKey={g.chat} placeholder={agentPlaceholder(task, g.status === 'done' || finished)} />
     ) : null
+  ) : brief ? (
+    <>
+      <TaskBriefCard task={task} state="waiting" space={coordinator} />
+      <StartWords task={task} chat={chat} />
+      {waiting || task.status !== 'work' ? null : <Empty>{`${task.id} is waiting for its agent to start. Ask ${coordinator} about it.`}</Empty>}
+    </>
   ) : (
     <Empty>
       {task.status === 'scheduled'
