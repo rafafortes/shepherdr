@@ -186,6 +186,27 @@ export function newestConversation(cwd: string, sinceMs = 0, dir = home()): stri
   return hits.sort((a, b) => b.at - a.at)[0]?.id
 }
 
+/**
+ * The session-only settings for agy's read-only roles (reviewer and advisor). `--mode plan` only prepends `/plan` to the
+ * prompt: it is not a tool-level write block (official docs, antigravity.google/docs/cli/modes.md; checked live on
+ * 2026-11-26, where a `write_file` call created a file under `--mode plan --dangerously-skip-permissions`). The bypass
+ * is still needed for read-only commands whose permission check fails outside the sandbox (SHE-202:
+ * `permission check failed for unsandboxed "git -C … status --short && …"`), so the prompts forbid changes and these
+ * deny rules hold agy's own write, URL and MCP tools even with the bypass (Deny > Ask > Allow in agy's permission
+ * engine, antigravity.google/docs/permissions.md). A mutating shell command is still only held by the prompt — the
+ * same residual risk as a pi reviewer, whose bash is allowed with changes forbidden by its prompt.
+ *
+ * One helper for the three launch sites (headless reviewer, reviewer pane, advisor) so they cannot drift.
+ */
+export const AGY_READ_ONLY_DENY = ['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)']
+
+export function agyReviewSettings(o: { cwd?: string } = {}): string {
+  return JSON.stringify({
+    ...(o.cwd ? { trustedWorkspaces: [o.cwd] } : {}),
+    permissions: { deny: AGY_READ_ONLY_DENY },
+  })
+}
+
 /** the id agy takes for a model and its effort: the model with the effort appended when that id exists (gemini-3.8-flash
  *  and low: gemini-3.8-flash-low). With no effort given, the model's medium variant, else its lowest one; a full id as
  *  it is; a model with no variants as it is */

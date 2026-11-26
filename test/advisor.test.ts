@@ -19,6 +19,8 @@ const { providerOfKey: providerOf } = await import('../shared/model-caps.ts')
 
 const src = new LiveSource()
 afterAll(() => src.stop())
+/** the session-only deny rules that keep agy's bypass from freeing its write, URL and MCP tools (SHE-202) */
+const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 
 /** what the advisor was run with, and what it answers next (one per run) */
@@ -133,6 +135,37 @@ describe('what the advisor is asked, and how it answers', () => {
     expect(adviceArgs({ kind: 'opencode', model: 'default', effort: 'default' }, 'Q')!.cmd).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', 'Q'])
     expect(adviceArgs({ kind: 'opencode' }, 'Q')!.stdin).toBeUndefined()
     expect(adviceArgs({ kind: 'gemini' }, 'Q')).toBeUndefined()
+    expect(adviceArgs({ kind: 'agy' }, 'Q')?.cmd).toEqual(['agy', '-p', 'Q', '--output-format', 'json', '--mode', 'plan', '--dangerously-skip-permissions', '--settings', REVIEW_SETTINGS])
+  })
+
+  test('each of the five CLIs holds its advisor read only, by its own permission flags', () => {
+    const args = (kind: string) => {
+      const a = adviceArgs({ kind }, 'Q')
+      if (!a) throw new Error(`no advisor run for ${kind}`)
+      return a.cmd
+    }
+    const after = (a: string[], flag: string) => a[a.indexOf(flag) + 1] ?? ''
+    // Claude: reading tools allowed, every writing tool refused, no session or person's MCP
+    const claude = args('claude')
+    expect(claude).toContain('--allowedTools')
+    expect(after(claude, '--allowedTools')).toBe('Read,Grep,Glob')
+    expect(claude).toContain('--disallowedTools')
+    expect(after(claude, '--disallowedTools')).toContain('Write')
+    expect(claude).toContain('--strict-mcp-config')
+    // Codex: its read-only sandbox
+    expect(args('codex')).toEqual(expect.arrayContaining(['--sandbox', 'read-only']))
+    // pi: a read-tool allowlist, no bash, no edit, no MCP
+    const pi = args('pi')
+    expect(after(pi, '--tools')).toBe('read,grep,find,ls')
+    expect(pi).toContain('--no-mcp')
+    expect(pi.join(' ')).not.toContain('bash')
+    // OpenCode: its plan agent (the session's permissions deny edits)
+    expect(args('opencode')).toContain('plan')
+    // agy: its plan prefix, the permission bypass for read-only commands, and session deny rules for write tools
+    const agy = args('agy')
+    expect(after(agy, '--mode')).toBe('plan')
+    expect(agy).toContain('--dangerously-skip-permissions')
+    expect(after(agy, '--settings')).toBe(REVIEW_SETTINGS)
   })
 
   test('its last line of JSON is its answer: a pick in range, several, its own words, or the human', () => {

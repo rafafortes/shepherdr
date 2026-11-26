@@ -55,10 +55,35 @@ describe('the interactive pane launch is read-only for every reviewer CLI', () =
     expect(reviewerPaneArgs({ kind: 'opencode', model: 'opencode/hy4-flash-free', effort: 'high' }, { session: 'ses-1' })).toEqual(['--standalone', '--session', 'ses-1'])
   })
 
-  test('agy: plan mode is its read-only mode, the worktree is trusted for this session, and effort stays in the id', () => {
+  test('agy: its plan prefix, the permission bypass for read-only commands, session trust and deny rules, effort in the id', () => {
     const args = reviewerPaneArgs({ kind: 'agy', model: 'gemini-4-hydrogen-high', effort: 'high' }, { cwd: '/work/tree', modelId: 'gemini-4-hydrogen-high' })
-    expect(args).toEqual(['--mode', 'plan', '--settings', JSON.stringify({ trustedWorkspaces: ['/work/tree'] }), '--model', 'gemini-4-hydrogen-high'])
+    expect(args).toEqual([
+      '--mode',
+      'plan',
+      '--dangerously-skip-permissions',
+      '--settings',
+      JSON.stringify({
+        trustedWorkspaces: ['/work/tree'],
+        permissions: { deny: ['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'] },
+      }),
+      '--model',
+      'gemini-4-hydrogen-high',
+    ])
     expect(args).not.toContain('--effort')
+  })
+
+  test('every CLI has permission words that keep its reviewer read only (agy denied writes even with its bypass)', () => {
+    expect(reviewerPaneArgs({ kind: 'claude' })).toEqual(expect.arrayContaining(['--permission-mode', 'plan', '--disallowedTools', 'Edit,Write,NotebookEdit']))
+    expect(reviewerPaneArgs({ kind: 'codex' })).toEqual(expect.arrayContaining(['--sandbox', 'read-only']))
+    const pi = reviewerPaneArgs({ kind: 'pi' })
+    expect(pi).toContain('--tools')
+    expect(pi[pi.indexOf('--tools') + 1]).toBe('read,grep,find,ls,bash')
+    // OpenCode carries its permissions in the prepared session, not in a TUI flag (checked in its own test above)
+    expect(reviewerPaneArgs({ kind: 'opencode' }, { session: 's1' })).toEqual(['--standalone', '--session', 's1'])
+    const agy = reviewerPaneArgs({ kind: 'agy' })
+    expect(agy).toEqual(expect.arrayContaining(['--mode', 'plan', '--dangerously-skip-permissions', '--settings']))
+    const settings = JSON.parse(String(agy[agy.indexOf('--settings') + 1]))
+    expect(settings.permissions.deny).toEqual(['write_file(*)', 'execute_url(*)', 'download_url(*)', 'mcp(*)'])
   })
 })
 

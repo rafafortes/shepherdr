@@ -15,6 +15,8 @@ import { home, readJson } from '../server/store.ts'
 import { tmp } from './tmp.ts'
 
 const ASK = 'Reply with only the two letters: ok'
+/** the session-only deny rules agy's read-only roles get with --dangerously-skip-permissions (SHE-202) */
+const REVIEW_SETTINGS = '{"permissions":{"deny":["write_file(*)","execute_url(*)","download_url(*)","mcp(*)"]}}'
 const LISTED = parseAgy('gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-9\tGemini 9')
 const bin = tmp('agy-headless-bin')
 const args = join(tmp('agy-headless-args'), 'args')
@@ -58,13 +60,18 @@ describe('the headless runs: their flags', () => {
     expect(oneShot({ kind: 'agy', model: 'gemini-3.8-flash', effort: 'high' })).toEqual(['agy', '-p', ASK, '--model', 'gemini-3.8-flash-high', '--output-format', 'json', '--mode', 'plan'])
     expect(oneShot({ kind: 'agy', model: 'gemini-9', effort: 'low' })).toEqual(['agy', '-p', ASK, '--model', 'gemini-9', '--output-format', 'json', '--mode', 'plan'])
     expect(canProbe('agy')).toBe(true)
+    // a probe asks for two letters and runs no tool: it needs no permission bypass and no session deny rules
+    expect(oneShot({ kind: 'agy' })).not.toContain('--dangerously-skip-permissions')
+    expect(oneShot({ kind: 'agy' })).not.toContain('--settings')
   })
 
   test('an advisor run is the same plan-mode run, its prompt as the word after -p; an unknown effort takes the default variant', () => {
     expect(adviceArgs({ kind: 'agy', model: 'gemini-3.8-flash', effort: 'low' }, 'Which?')).toEqual({
-      cmd: ['agy', '-p', 'Which?', '--model', 'gemini-3.8-flash-low', '--output-format', 'json', '--mode', 'plan'],
+      cmd: ['agy', '-p', 'Which?', '--model', 'gemini-3.8-flash-low', '--output-format', 'json', '--mode', 'plan', '--dangerously-skip-permissions', '--settings', REVIEW_SETTINGS],
     })
-    expect(adviceArgs({ kind: 'agy' }, 'Which?')).toEqual({ cmd: ['agy', '-p', 'Which?', '--output-format', 'json', '--mode', 'plan'] })
+    expect(adviceArgs({ kind: 'agy' }, 'Which?')).toEqual({
+      cmd: ['agy', '-p', 'Which?', '--output-format', 'json', '--mode', 'plan', '--dangerously-skip-permissions', '--settings', REVIEW_SETTINGS],
+    })
     // this list has no medium variant: the lowest one stands for a model given no effort it has
     expect(adviceArgs({ kind: 'agy', model: 'gemini-3.8-flash', effort: 'max' }, 'x')!.cmd).toContain('gemini-3.8-flash-low')
     expect(canAdvise('agy')).toBe(true)
@@ -150,7 +157,7 @@ describe('the probe and the advisor run the fake agy', () => {
     const cwd = tmp('agy-headless-work')
     mode('ok')
     expect(await runAdvisor({ kind: 'agy', model: 'gemini-3.8-flash', effort: 'low' }, 'Which store?', cwd)).toEqual({ ok: true, out: cwd })
-    expect(argsSeen()).toBe('-p Which store? --model gemini-3.8-flash-low --output-format json --mode plan')
+    expect(argsSeen()).toBe(`-p Which store? --model gemini-3.8-flash-low --output-format json --mode plan --dangerously-skip-permissions --settings ${REVIEW_SETTINGS}`)
     mode('error')
     expect(await runAdvisor({ kind: 'agy' }, 'Which store?', cwd)).toEqual({ ok: false, out: 'invalid model selection' })
     mode('junk')

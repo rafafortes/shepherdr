@@ -6,6 +6,7 @@ import { type Mode } from '../../shared/types.ts'
 import { ROOT } from '../root.ts'
 import { has } from '../plugins.ts'
 import { BOX, helperDir } from './box.ts'
+import { agyReviewSettings } from './agy.ts'
 import { flagWords } from './flags.ts'
 
 /** where an agent finds Shepherdr's files: its checkout here; on another machine the helper's copy (install.ts) */
@@ -69,12 +70,15 @@ export const REVIEW_RUN_TIMEOUT = 900_000
  * - codex: `exec --json` (`-o` writes only the last message at the end — too late for a timeout);
  * - pi: `-p --mode json` (emits `message_update`/`thinking_delta` events as they are written);
  * - opencode: `run --standalone --agent plan --format json` (per-event JSON lines, plan agent read only);
- * - agy: `-p <prompt> --output-format stream-json --mode plan` — the prompt must follow `-p` immediately, or `-p` takes
- *   the next flag as its prompt (the repo's own agy calls do the same, in advisor.ts and return.ts).
+ * - agy: `-p <prompt> --output-format stream-json --mode plan --dangerously-skip-permissions --settings …` — the prompt
+ *   must follow `-p` immediately, or `-p` takes the next flag as its prompt (the repo's own agy calls do the same, in
+ *   advisor.ts and return.ts). The bypass answers read-only commands that fail a permission check outside the sandbox
+ *   (SHE-202); its session settings deny agy's own write, URL and MCP tools. agy's plan mode is only a `/plan` prefix,
+ *   not a tool-level block, so the prompt carries the read-only rule too (see agyReviewSettings in agy.ts).
  * All five can stream; none needs a "cannot stream" note. pi emits partial deltas and claude needs --include-partial-messages
  * for them; whether agy, opencode and codex also emit deltas before a message is complete was not verified. pi has no
  * read-only mode: `bash` is in its tool list only so the reviewer can run `git diff`/`git log`, and the prompt forbids
- * changes. The four others use a read-only mode.
+ * changes. agy's mode is a prompt prefix with session deny rules; the other three use the CLI's own read-only mode.
  */
 export function reviewRunLine(r: Reviewer): string {
   const model = r.model && r.model !== 'default' ? r.model : undefined
@@ -94,8 +98,9 @@ export function reviewRunLine(r: Reviewer): string {
       // OpenCode's model id carries the variant after `#`, as in oneShot and adviceArgs
       return `timeout 900 opencode run --standalone --agent plan --format json ${model ? `-m ${effort ? `${model}#${effort}` : model} ` : ''}${prompt} ${out}`
     case 'agy':
-      // -p takes the token right after it as the prompt: `agy -p --flag "prompt"` fails with "took --flag as its prompt"
-      return `timeout 900 agy -p ${prompt} --output-format stream-json --mode plan ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}${out}`
+      // -p takes the token right after it as the prompt: `agy -p --flag "prompt"` fails with "took --flag as its prompt".
+      // The JSON is single-quoted so the shell passes it as one argument (it holds only double quotes).
+      return `timeout 900 agy -p ${prompt} --output-format stream-json --mode plan --dangerously-skip-permissions --settings '${agyReviewSettings()}' ${model ? `--model ${model} ` : ''}${effort ? `--effort ${effort} ` : ''}${out}`
     default:
       return `timeout 900 ${r.kind} ${model ? `--model ${model} ` : ''}${prompt} ${out}`
   }
@@ -115,7 +120,9 @@ export function reviewRunLine(r: Reviewer): string {
  * - opencode: its TUI has no model/agent flag; the session prepared for this round carries the model, effort and
  *   permissions that deny edit (its one write permission), and `--session` opens it; `--standalone` keeps it in the pane's
  *   process tree
- * - agy: `--mode plan` is its read-only mode; `--settings` trusts this worktree for the session only
+ * - agy: `--mode plan` is its planning prefix, `--dangerously-skip-permissions` answers the read-only commands that
+ *   fail a permission check, and `--settings` trusts this worktree for the session only and denies write, URL and MCP
+ *   tools (the mode itself does not block writes; see agyReviewSettings in agy.ts)
  */
 export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?: string; cwd?: string; modelId?: string } = {}): string[] {
   const model = r.model && r.model !== 'default' ? r.model : undefined
@@ -151,8 +158,9 @@ export function reviewerPaneArgs(r: Reviewer, o: { sessionId?: string; session?:
     case 'agy':
       // the same session-only trust as an agent's launch (agents.ts): otherwise a new reviewer process stops at agy's
       // trust screen. Its effort goes in the model id (agyModelId, computed by the caller): --effort conflicts with one
-      // baked into that id, so it is never passed here.
-      return ['--mode', 'plan', ...(o.cwd ? ['--settings', JSON.stringify({ trustedWorkspaces: [o.cwd] })] : []), ...(agyId ? ['--model', agyId] : [])]
+      // baked into that id, so it is never passed here. The bypass plus session deny rules let read-only git commands
+      // through without leaving the reviewer free to write (SHE-202).
+      return ['--mode', 'plan', '--dangerously-skip-permissions', '--settings', agyReviewSettings(o), ...(agyId ? ['--model', agyId] : [])]
     default:
       return model ? ['--model', model] : []
   }
