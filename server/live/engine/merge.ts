@@ -127,6 +127,9 @@ export interface MergeHost {
   preflight(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: false; error: string } | undefined>
   /** others in line behind it go in with it on one gate run (the engine's own train) */
   train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined>
+  /** a train's gate run a restart found, in the head's worktree: waited for untouched, or ended, before anything writes there
+   *  (the engine's own settleFound) */
+  settleFound(t: TaskRec, p: Space, wt: string): Promise<void>
   /** how many merges a space's train takes at most (merge.train) */
   trainSize(space: string): number
   /** the holds in effect on each repo's line (shepherdr line hold), by repo path: the engine's record, kept in tasks.json */
@@ -989,6 +992,10 @@ export class MergeRunner {
     // a timed-out fetch is offline, not a refusal: the merge goes on from the base as it is here, but the agent and
     // the row are told, just as the GitHub path's note says main there was not brought up
     const stale = up.err ? `${t.base} here was not brought up to the remote: ${up.err}` : undefined
+    // a train's gate run that Shepherdr's stop left going is in this worktree, at the top of its stack: it ends (or is ended)
+    // before the checkout below takes the other cars' files from it, since a run vouches only for a tree its worktree held
+    // for the whole run
+    await this.e.settleFound(t, p, wt)
     // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first,
     // before the guard, so a dead gate's detached commit is not mistaken for another branch's work (#1194)
     if (!(await G.git(wt, 'branch', '--show-current')).out) await G.git(wt, 'checkout', '--quiet', t.branch)

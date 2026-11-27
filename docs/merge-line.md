@@ -14,7 +14,9 @@ All of it is under `server/live/engine/` unless said.
   what `shepherdr line` shows, `mergeNow()` is one turn's work and asks `train()` before `gate()`.
 - `engine.ts`: `train()` stacks the cars, runs one gate on the stack and lands it or searches it by halves;
   `preflightTrain()` is the pre-flight on a forming train; `gate()` is a lone merge's gate; `runGate()` and
-  `runPreflight()` are one detached run each; `resumeMerges()`, `sweepGates()` and `reattach()` are what a restart finds.
+  `runPreflight()` are one detached run each; `resumeMerges()`, `sweepGates()` and `reattach()` are what a restart finds,
+  and `settleFound()`, `foundRun()` and `endFound()` are what the turn that goes on from it does with the gate run it finds
+  (`settleFound()` runs from `mergeNow()` before anything writes in the head's worktree).
 - `train-bisect.ts`: the pure part of the search by halves (`firstHalf`, `halves`, `rideBlock`, `groupId`).
 - `gate-log.ts`: every run's log, the ledger `gates/ledger.jsonl` in Shepherdr's home, pruning (`GateLedger`).
 - `line-hold.ts`: `LineHolds`, the reservation, the expiry and the per-repo gate every turn passes first.
@@ -31,12 +33,16 @@ All of it is under `server/live/engine/` unless said.
 
 The files are in `test/`.
 
-- **Nothing lands that no gate run passed on exactly the stack that lands.** The base moves only through `G.landStack`,
-  from the commit the run saw and onto the trees it gated; a base that moved meanwhile lands nothing (`moved`). A
-  pre-flight never lets anything in. `engine-merge-train-bisect.test.ts` (each ledger line's `head` is the commit its run
-  gated), `engine-merge-train-bisect-line.test.ts` ("main moves while a half goes on its gate run"),
+- **Nothing lands that no gate run passed on exactly the stack that lands, and a run vouches only for a tree its
+  worktree held for the whole run.** The base moves only through `G.landStack`, from the commit the run saw and onto the
+  trees it gated; a base that moved meanwhile lands nothing (`moved`). A pre-flight never lets anything in. A train's gate
+  runs in its head's worktree detached at the stack: nothing may check out, reset, rebase or write there while the run
+  goes on (`settleFound()` waits for a run a restart found, untouched, or ends it first), or its exit code vouches for
+  another tree than the one that lands. `engine-merge-train-bisect.test.ts` (each ledger line's `head` is the commit its
+  run gated), `engine-merge-train-bisect-line.test.ts` ("main moves while a half goes on its gate run"),
   `engine-merge-train.test.ts` ("main moves while the train's gate runs") and `engine-merge-train-resume.test.ts` (a run a
-  restart found is taken up only for the stack it gated).
+  restart found is taken up only for the stack it gated, and a gate stand-in that fails the moment a car's file is missing
+  from its tree runs the whole restart through).
 - **A mark is saved before the next gate starts, so a restart finds the same halves.** `bisect` and `alone` are written
   with `saveNow()` before the gate they decide. `engine-merge-train-bisect-line.test.ts` ("the marks are on disk before
   the next gate starts", "a restart between the halves") and `engine-merge-train.test.ts` ("a refused train's marks are
@@ -71,8 +77,8 @@ time on a machine at a load average of 4 to 11:
 | --- | --- |
 | `train-bisect`, `gate-log`, `line-hold`, `line-hold-cli`, `app-cli-gone`, `engine-line-hold-pr`, `engine-line-hold-restart` | under 2 s |
 | `engine-line-hold`, `engine-merge-preflight`, `engine-merge-train-preflight` and its `-faults`, `-position` and `-bound` | 10 to 17 s |
-| `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate`, `engine-merge-train-resume` | 15 to 21 s |
-| `engine-merge-train-bisect` (25 s), `engine-merge-train` (34 s) | the longest |
+| `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate` | 17 to 21 s |
+| `engine-merge-train-bisect` (25 s), `engine-merge-train-resume` (27 s), `engine-merge-train` (34 s) | the longest |
 
 All of them one after another take about 3.5 minutes. `cli` (37 s, the commands' own timeouts) is one more for a change to a command's wait or to the helper. The engine files run real git and real gate commands: a gate in a
 test is a shell loop that waits for a `go-<task>` file and ends by itself, so a test that hangs is a gate waiting for a
@@ -111,15 +117,33 @@ as [AGENTS.md](../AGENTS.md), "Tests", says: alone, on the base, and nothing mer
   anything (`train()` reads it with `foundRun()`: a lone run's head is the branch's own commit and goes alone on it, a
   train's run, named by `GateRun.members`, is rebuilt from exactly those members and kept only when its stack is the
   run's commit on the run's base), and a run it cannot take up is ended through `endFound()` with a log line that says
-  why. Any step added before `runGate()` in a resumed turn leaves the run alone or ends it that way. Tests:
+  why. Any step added before `runGate()` in a resumed turn leaves the run alone or ends it that way. A run it cannot
+  take up because its cars changed is waited for to its end first (its worktree stays the stack's until then), not killed
+  on sight: the cars are only known to differ once the stack is built, after the worktree steps. Tests:
   `engine-merge-train-resume.test.ts`, `engine-merge-train.test.ts` ("a restart while the train's gate runs") and
   `engine-merge-train-bisect-line.test.ts` ("a restart between the halves"). What a swap still costs, and that swapping on
   an empty line or under a hold stays the safe way, is in [upstream](upstream.md), "How a release is cut".
+- **The branch checked out under a gate that was still reading the stack.** The first take-up of a train's run (the one
+  above) left `mergeNow()`'s own steps as they were: its checkout of the head's branch (it puts back a worktree a dead gate
+  left detached) ran while the found run, whose worktree is detached at the stack, was still going, so the other cars'
+  files vanished and came back under a live gate, and its exit code could let the stack land. The take-up made that
+  flip happen more often, since it keeps such runs. Rule: a run vouches only for a tree its worktree held for the whole
+  run, so nothing writes in a worktree a gate run is in. `settleFound()` decides before the first write: a train's run is
+  taken up only when its worktree is exactly as the run left it (detached at its commit, clean, the base where it gated),
+  then it is waited for, untouched; otherwise it is ended first with the reason, and only then does the branch come back.
+  The other writers were walked and each is closed: `resumeMerges()`'s `reattach()` runs only for a task with no live run
+  (the run is dropped just before it), `freshen()` (the bring-up-to-base of a task going back to work) returns while the
+  task has a `landing`, and the pre-flight's probes run in a turn's own worktree before its gate, never beside one. What a
+  clean worktree cannot show is a flip back to the very same commit while the server was down. Test: the gate stand-in of
+  `engine-merge-train-resume.test.ts` ("a gate that goes on across the restart sees the stack, whole, from first to
+  last"), red before, and the worktree-found-elsewhere tests there.
 - **A restart test that fabricated a run the server never wrote.** Two train restart tests started their run by hand with
   no `members`: a record only an older Shepherdr leaves (2.0.85 and before kept no task either), so once a run's record is
   what decides, they took the older rules and proved nothing about the current ones. Rule: a restart test writes
   the run's record as the server does (`space`, and `members` for a train's), and a test for the older records deletes
-  `task`, `members` and `space` on purpose (`engine-merge-train-resume.test.ts`, the two "older Shepherdr" tests).
+  `task`, `members` and `space` on purpose (`engine-merge-train-resume.test.ts`, the "older Shepherdr" tests). A record
+  with a `task` and no `members` that sits at a stack commit exists in no real data: it is waited for like an older
+  train's (its worktree is detached) and then ended as a lone run that cannot go on.
 - **A line hold whose command gave up left a hold nobody was told about.** `--wait` had no upper bound while the command
   itself gives up after 47 minutes, so a `--wait` past that ended the caller with "no answer" while the reservation lived on
   in the server and later became a hold in effect, ending only at its `--for` expiry. Rule: a reservation never outlives
