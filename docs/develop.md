@@ -261,7 +261,9 @@ browser can't start, and `bun run check:local` opens both browsers first and nam
 shell for every browser test, and WebKit for the iPhone ones, whose system libraries need root
 (`sudo bun x playwright-core install-deps webkit`).
 
-Agents working on Shepherdr: [AGENTS.md](../AGENTS.md) says what they check before merging.
+Agents working on Shepherdr: [AGENTS.md](../AGENTS.md) says what they check before merging. A change to the merge line
+(the gate, trains, the pre-flight, `shepherdr line hold`) also reads [merge-line](merge-line.md): where its code is, what
+every change must keep and the test files that hold it, and how to run them.
 
 The demo source (`SHEPHERDR_SOURCE=demo`) holds a fictional world for reviewing every screen and case without real
 agents. Your data lives in `~/.shepherdr` (`SHEPHERDR_HOME` to move it).

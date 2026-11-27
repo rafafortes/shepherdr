@@ -216,7 +216,9 @@
   that the gate still runs. If the base moved anyway while it ran, the branch is rebased on it and the gate runs again
   (three times at most). It is never a git hook: a hook that refuses an update leaves what it would write in the space's
   checkout. The gate runs detached, its words and exit code in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
-  merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
+  merges once it passes, unless merges wait in line behind it and the space takes trains: the merge that goes on forms
+  a train first, whose stack is another commit than the run's, so that run is ended (`stopped` in the ledger, its minutes
+  lost) and the train's gate starts. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
   exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
   (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted. On startup a
   gate past its limit, or one whose task is gone or no longer waits for it, is stopped too; a young gate of a task that
@@ -290,7 +292,7 @@
   space, apart from the gate logs' 200, so a cheap check never pushes a gate's log out) and writes one line in
   `gates/ledger.jsonl` with `kind` `preflight` (the gate's lines say `gate`, and are otherwise as they were): `members`
   names the cars of the stack a train's run looked at, and the line's `end` is `passed`, `refused` (a timeout too, code
-  124), or `stopped` (its task went away while it ran).
+  124), or `stopped` (a restart, a kill or its task going away while it ran).
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 8, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
