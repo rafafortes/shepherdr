@@ -134,9 +134,11 @@ Only with the operator's yes, and patch bumps (`v2.0.1`, `v2.0.2`, …) unless t
    from it, with trains on or off: a lone merge's run is taken up by that merge alone (the merges waiting in line behind
    it wait their turn as they would have, none is stacked over it), and a train's run (its record names its members) by
    the train of exactly those members, also when another merge joined the line after it formed (that one waits for the
-   turn after the train's). A run is ended only when what it gated is no longer what would land: its base moved while the
-   server was down, a member left the line, cannot ride any more or changed, the space's train size shrank, or the
-   branch changed. Then the server's log says why (`cannot go on`), the gate ledger has a `stopped` line for it and the
+   turn after the train's). A train's run is in its head's worktree, detached at the stack: nothing writes there while it
+   goes on, so the merge waits for it with the worktree untouched, and the branch is checked out again only once it ended.
+   A run is ended only when what it gated is no longer what would land: its base moved while the server was down, a
+   member left the line, cannot ride any more or changed, the space's train size shrank, the branch changed, or its
+   worktree is no longer as the run left it (a change there while the server was down). Then the server's log says why (`cannot go on`), the gate ledger has a `stopped` line for it and the
    merge gates again at once, as a turn with no run to find would. A run an older Shepherdr started (2.0.85 and before
    recorded no task) is kept for a lone merge, and a train's is taken up only when the stack comes out the same. Before
    this was fixed a swap ended every such run that had merges waiting behind it (the swap to 2.0.86 lost 377 s of a gate

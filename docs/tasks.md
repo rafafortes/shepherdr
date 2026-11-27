@@ -219,9 +219,13 @@
   merges once it passes, whether or not merges wait in line behind it and the space takes trains. A lone merge's run is
   taken up by that merge alone (the merges behind it wait their turn, none is stacked over it); a train's run, whose
   record names its members, by the train of exactly those members, so a merge that joined the line after the train formed
-  waits for the turn after it. Only a run that can no longer be taken up is ended (`stopped` in the ledger, its minutes
+  waits for the turn after it. A train's run is in its head's worktree, detached at the stack, and nothing writes there
+  while it goes on: the merge that takes it up waits for it, and the branch is checked out again only once it ended. Only a
+  run that can no longer be taken up is ended (`stopped` in the ledger, its minutes
   lost, the server's log saying `cannot go on` and why): its base moved while the server was down, a member left the line,
-  cannot ride any more or changed, the train's size shrank, or the branch changed; the merge then gates again as it
+  cannot ride any more or changed, the train's size shrank, the branch changed, or its worktree is no longer as the run left
+  it (on its branch, at another commit, or with a change the run did not make: then it is ended before anything else
+  writes there); the merge then gates again as it
   would have without the run. A run an older Shepherdr started is kept for a lone merge. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
   exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
   (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted. On startup a

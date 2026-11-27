@@ -1082,6 +1082,7 @@ export class Engine extends Emitter<Events> {
       gate: (t, repo, space, wt, on, refresh) => engine.gate(t, repo, space, wt, on, refresh),
       preflight: (t, repo, space, wt) => engine.preflight(t, repo, space, wt),
       train: (t, p, wt) => engine.train(t, p, wt),
+      settleFound: (t, p, wt) => engine.settleFound(t, p, wt),
       trainSize: (space) => engine.trainSize(space),
       holds: () => (engine.data.holds ??= {}),
     } satisfies MergeHost)
@@ -4763,6 +4764,52 @@ export class Engine extends Emitter<Events> {
     this.saveNow()
   }
 
+  /** a train's gate run a restart found cannot go on: ended (`endFound`), the reason in the log, the turn on as without it */
+  private loseTrainRun(t: TaskRec, run: GateRun, reason: string) {
+    this.endFound(
+      t,
+      run,
+      `${t.id}'s merge train: its gate run, which a restart found (${run.members?.join(', ') ?? 'its cars are not recorded'}), cannot go on: ${reason}. It is ended, and the turn goes on as without it`,
+    )
+  }
+
+  /**
+   * Before mergeNow writes anything in the head's worktree (its checkout of the branch): a train's gate run a restart found
+   * runs in that worktree, detached at the cars' stack, and a run vouches only for a tree its worktree held for the whole
+   * run. Checking the branch out under it would take the other cars' files from a gate that still reads them, and its exit
+   * code could then let the stack land. So the run is taken up only when the worktree is still exactly as the run left it
+   * (detached at its commit, clean, the base where it gated): then it is waited for, untouched, until it ends, and train()
+   * reads its end from its exit file; otherwise it is ended first, with the reason in the log, and the branch comes back after.
+   * A lone merge's run is on the branch, where what mergeNow writes is a commit and a run at another commit is ended (runGate).
+   * A run an older Shepherdr started names no cars: it is a train's when its worktree is detached.
+   */
+  async settleFound(t: TaskRec, p: Space, wt: string): Promise<void> {
+    const g = this.foundRun(t)
+    if (!g) return
+    const branch = (await G.git(wt, 'branch', '--show-current')).out
+    if (!g.members?.length && branch) return
+    const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
+    const main = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+    const why = branch
+      ? `its worktree is back on ${branch}, not at the stack the run gated`
+      : head !== g.head
+        ? `its worktree is at ${head.slice(0, 7)}, not at the stack the run gated (${g.head.slice(0, 7)})`
+        : (await G.dirty(wt))
+          ? 'its worktree has changes the run did not make'
+          : g.tip !== main
+            ? `${t.base} moved since the run began: it gated on ${g.tip.slice(0, 7)}, ${t.base} is at ${main.slice(0, 7)}`
+            : undefined
+    if (why) {
+      this.loseTrainRun(t, g, why)
+      return
+    }
+    trainLog(`${t.id}'s merge train: its gate run, which a restart found (${g.members?.join(', ') ?? 'its cars are not recorded'}), is waited for: nothing touches its worktree until it ends`)
+    this.land(t, 'gate', undefined, { cars: g.members?.length })
+    const ran = await waitGate(g, this.gateTimeout)
+    // killed at its limit: the code the command's own limit leaves, for the take-up to read
+    if (ran.code === 124 && !fs.existsSync(g.exit)) fs.writeFileSync(g.exit, '124\n')
+  }
+
   /**
    * One run of the gate in `wt` at `head`, on the base at `at`: this very commit's run on the base as it is, still going
    * (or done) since Shepherdr restarted, when there is one, not a second beside it; else a new one, detached (startGate).
@@ -4960,11 +5007,11 @@ export class Engine extends Emitter<Events> {
       const missing = run.members!.filter((id) => !stack.some((x) => x.id === id))
       const reason =
         main && run.tip !== main
-          ? `${t.base} moved while Shepherdr was down: the run gated on ${run.tip.slice(0, 7)}, ${t.base} is at ${main.slice(0, 7)}`
+          ? `${t.base} moved since the run began: it gated on ${run.tip.slice(0, 7)}, ${t.base} is at ${main.slice(0, 7)}`
           : missing.length
             ? missing.map((id) => [...why].find(([x]) => x.id === id)?.[1] ?? `${id} is no longer in line`).join('; ')
             : `the stack is not the one the run gated (a car's change differs)`
-      this.endFound(t, run, `${t.id}'s merge train: its gate run, which a restart found (${run.members!.join(', ')}), cannot go on: ${reason}. It is ended, and the turn goes on as without it`)
+      this.loseTrainRun(t, run, reason)
     }
     if (!riders.length) {
       if (resume) lose([t])

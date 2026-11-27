@@ -3,7 +3,7 @@
 // gate commands, the engine's own world (train-world.ts). The runs are made as a restart leaves them: started by hand, the
 // task records written as the server wrote them, then resumeMerges.
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { trainLog, trainWorld, wtOf } from './train-world.ts'
 import { ledger, probes } from './train-preflight-world.ts'
@@ -213,16 +213,17 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     d.landing = { step: 'queue', at: 4, behind: a.id, gate: true }
     await until(() => ran().length === 1, 20_000)
     w.engine.resumeMerges()
-    await until(() => a.landing?.step === 'gate' && a.landing.at > 1, 20_000)
-    const at = sh('git rev-parse --short=7 main', dir)
+    await until(() => decisions([a.id]).length === 1, 20_000)
     expect(w.engine.subOf(a)).toBe('Running the merge gate (a train of 3)')
     expect(w.engine.subOf(b)).toBe(`Going in with ${a.id}'s merge train`)
     expect(d.landing?.train).toBeUndefined()
-    expect(decisions([a.id])).toEqual([
-      `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id}, ${c.id} (one gate run on ${heads()[0]}, main at ${at}); its gate run, which a restart found, goes on. Left out: ${d.id} waits (its turn comes after the train whose gate run a restart found)`,
-    ])
     go(a)
     await until(() => [a, b, c].every((t) => w.engine.statusOf(t) === 'done'))
+    const said = decisions([a.id])
+    expect(said[0]).toBe(waited(a, [a, b, c]))
+    expect(said[1]).toBe(
+      `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id}, ${c.id} (one gate run on ${heads()[0]}, main at ${sh(`git rev-parse --short=7 ${a.squash}~1`, dir)}); its gate run, which a restart found, goes on. Left out: ${d.id} waits (its turn comes after the train whose gate run a restart found)`,
+    )
     // d's turn, alone, on a run of its own
     await until(() => ran().length === 2)
     go(d)
@@ -256,7 +257,7 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     expect(gateLines().map(([, end]) => end)).toEqual(['passed'])
   })
 
-  test("a train's run whose member was withdrawn while the server was down is ended with its why, and the turn goes on as without it", async () => {
+  test("a train's run whose member was withdrawn while the server was down is waited for, then ended with its why, and the turn goes on as without it", async () => {
     const world = await trainWorld('resume-gone', 3, '3')
     const { w, dir, riders, go, ran } = world
     const [a, b, c] = riders
@@ -265,17 +266,17 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     c.landing = undefined
     await until(() => ran().length === 1, 20_000)
     w.engine.resumeMerges()
-    await until(() => a.landing?.cars === 2, 20_000)
-    const at = sh('git rev-parse --short=7 main', dir)
-    const said = decisions([a.id])
-    expect(said[0]).toBe(
-      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: ${c.id} is no longer in line. It is ended, and the turn goes on as without it`,
-    )
-    expect(said[1]).toContain(`${a.id}'s merge train: ${a.id}, ${b.id} (one gate run on `)
-    expect(said[1]).toContain(`main at ${at})`)
+    await until(() => decisions([a.id]).length === 1, 20_000)
     go(a)
     await until(() => [a, b].every((t) => w.engine.statusOf(t) === 'done'))
-    // the run a restart left was stopped, and the two went in on one of their own; c was never merged
+    const said = decisions([a.id])
+    expect(said[0]).toBe(waited(a, [a, b, c]))
+    expect(said[1]).toBe(
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: ${c.id} is no longer in line. It is ended, and the turn goes on as without it`,
+    )
+    expect(said[2]).toContain(`${a.id}'s merge train: ${a.id}, ${b.id} (one gate run on `)
+    expect(said[2]).toContain(`main at ${sh('git rev-parse --short=7 main~2', dir)})`)
+    // the run a restart left is dropped (it gated three), and the two went in on one of their own; c was never merged
     expect(ran()).toEqual([a.id, a.id])
     expect(gateLines()).toEqual([
       [a.id, 'stopped', [a.id, b.id, c.id]],
@@ -284,7 +285,7 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     expect(w.engine.statusOf(c)).not.toBe('done')
   })
 
-  test("a train's run whose base moved while the server was down is ended with its why, and the same cars gate again on the base as it is", async () => {
+  test("a train's run whose base moved while the server was down is ended before it is waited for, with its why, and the same cars gate again on the base as it is", async () => {
     const world = await trainWorld('resume-train-moved', 3, '3')
     const { w, dir, riders, go, ran } = world
     const [a, b, c] = riders
@@ -294,9 +295,10 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     sh('git commit -q --allow-empty -m "main moves on"', dir)
     const now = sh('git rev-parse --short=7 main', dir)
     w.engine.resumeMerges()
+    // nothing waits for the old run: its stack is not what would land, so its worktree goes back to the branch at once
     await until(() => a.landing?.cars === 3 && ran().length === 2, 20_000)
     expect(decisions([a.id])[0]).toBe(
-      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: main moved while Shepherdr was down: the run gated on ${was}, main is at ${now}. It is ended, and the turn goes on as without it`,
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: main moved since the run began: it gated on ${was}, main is at ${now}. It is ended, and the turn goes on as without it`,
     )
     go(a)
     await landed(world, riders)
@@ -306,7 +308,27 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     ])
   })
 
-  test("a train's run whose car changed while the server was down is ended too: what the run gated is not what would land", async () => {
+  test("a train's run whose base moves while it is waited for is ended when it ends, and the same cars gate again", async () => {
+    const world = await trainWorld('resume-train-moves', 3, '3')
+    const { w, dir, riders, go, ran } = world
+    const [a, b, c] = riders
+    await leaveTrain(world, [a, b, c])
+    await until(() => ran().length === 1, 20_000)
+    w.engine.resumeMerges()
+    await until(() => decisions([a.id]).length === 1, 20_000)
+    // a commit made by hand while the run goes on
+    const was = sh('git rev-parse --short=7 main', dir)
+    sh('git commit -q --allow-empty -m "main moves on"', dir)
+    const now = sh('git rev-parse --short=7 main', dir)
+    go(a)
+    await landed(world, riders)
+    expect(decisions([a.id])[1]).toBe(
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: main moved since the run began: it gated on ${was}, main is at ${now}. It is ended, and the turn goes on as without it`,
+    )
+    expect(gateLines().map(([, end]) => end)).toEqual(['stopped', 'passed'])
+  })
+
+  test("a train's run whose car changed while the server was down is waited for, then ended too: what the run gated is not what would land", async () => {
     const world = await trainWorld('resume-train-changed', 3, '3')
     const { w, riders, go, ran } = world
     const [a, b, c] = riders
@@ -316,12 +338,12 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     writeFileSync(join(wtOf(b), 'more.txt'), 'more\n')
     sh('git add -A && git commit -qm "more"', wtOf(b))
     w.engine.resumeMerges()
-    await until(() => a.landing?.cars === 3 && ran().length === 2, 20_000)
-    expect(decisions([a.id])[0]).toBe(
-      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: the stack is not the one the run gated (a car's change differs). It is ended, and the turn goes on as without it`,
-    )
+    await until(() => decisions([a.id]).length === 1, 20_000)
     go(a)
     await landed(world, riders)
+    expect(decisions([a.id])[1]).toBe(
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: the stack is not the one the run gated (a car's change differs). It is ended, and the turn goes on as without it`,
+    )
     expect(gateLines().map(([, end]) => end)).toEqual(['stopped', 'passed'])
   })
 
@@ -334,20 +356,162 @@ describe('a restart while a merge gate runs, with merge trains on: the run a res
     // b's agent is at work again: it may not ride
     w.agentIs(`${b.id}/Agent`, 'working')
     w.engine.resumeMerges()
-    await until(() => a.landing?.step === 'gate' && a.landing.at > 1, 20_000)
-    expect(decisions([a.id])).toEqual([
-      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}), cannot go on: ${b.id}'s agent is working. It is ended, and the turn goes on as without it`,
-      `shepherdr: ${a.id}'s merge goes alone: ${b.id}'s agent is working`,
-    ])
+    await until(() => decisions([a.id]).length === 1, 20_000)
     go(a)
     await until(() => w.engine.statusOf(a) === 'done')
     go(b)
     await landed(world, riders)
+    expect(decisions([a.id])).toEqual([
+      waited(a, [a, b]),
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}), cannot go on: ${b.id}'s agent is working. It is ended, and the turn goes on as without it`,
+      `shepherdr: ${a.id}'s merge goes alone: ${b.id}'s agent is working`,
+    ])
     expect(ran()).toEqual([a.id, a.id, b.id])
     expect(gateLines()).toEqual([
       [a.id, 'stopped', [a.id, b.id]],
       [a.id, 'passed', undefined],
       [b.id, 'passed', undefined],
     ])
+  })
+})
+
+/** the line that says a train's run a restart found is waited for, its worktree untouched */
+const waited = (head: Task, cars: Task[]) =>
+  `shepherdr: ${head.id}'s merge train: its gate run, which a restart found (${cars.map((c) => c.id).join(', ')}), is waited for: nothing touches its worktree until it ends`
+
+/** a gate that fails at once, saying which file, whenever one of `files` is missing from the tree it runs in, polling while it
+ *  waits for its go: a car's file is in the stack's tree and not in the branch's. It logs its run as the world's own does. */
+function watching(world: World, files: string[]) {
+  const { w, space, gates } = world
+  const cmd = `echo "$SHEPHERDR_TASK $(git rev-parse --short=7 HEAD)" >> ${gates}/runs; i=0; while [ ! -f ${gates}/go-$SHEPHERDR_TASK ] && [ -d ${gates} ] && kill -0 ${process.pid} 2>/dev/null && [ $i -lt 6000 ]; do for f in ${files.join(' ')}; do [ -e "$f" ] || { echo "$f is missing from the tree the gate runs in"; exit 1; }; done; sleep 0.01; i=$((i+1)); done; echo "Gate: green on $(git rev-parse --short HEAD^{tree})"`
+  expect(w.settings.set('merge.gate', cmd, { space }).ok).toBe(true)
+}
+
+describe("a train's gate run a restart found is never touched: it vouches only for a tree its worktree held for the whole run", () => {
+  test('a gate that goes on across the restart sees the stack, whole, from first to last: the branch is not checked out under it', async () => {
+    const world = await trainWorld('resume-intact', 3, '3')
+    const { w, dir, riders, go, ran } = world
+    const [a, b, c] = riders
+    // the cars' files are in the stack and in no branch but their own: the gate fails the moment one is missing
+    watching(world, ['2.txt', '3.txt'])
+    const run = await leaveTrain(world, [a, b, c])
+    await until(() => ran().length === 1, 20_000)
+    w.engine.resumeMerges()
+    await until(() => (a.landing?.at ?? 0) > 1, 20_000)
+    // well past the moment the branch used to be checked out under the run: the worktree is the run's stack still, untouched
+    await Bun.sleep(700)
+    const wt = wtOf(a)
+    expect(sh('git branch --show-current', wt)).toBe('')
+    expect(sh('git rev-parse HEAD', wt)).toBe(run.head)
+    expect(sh('git status --porcelain', wt)).toBe('')
+    expect(existsSync(run.exit)).toBe(false)
+    expect(decisions([a.id])).toEqual([waited(a, [a, b, c])])
+    go(a)
+    await landed(world, riders)
+    // the one run a restart left, whole: it passed, and its cars went in on it
+    expect(ran()).toEqual([a.id])
+    expect(gateLines()).toEqual([[a.id, 'passed', [a.id, b.id, c.id]]])
+    expect(sh('git log --format=%s -n 4', dir).split('\n')).toEqual([c, b, a].map((t) => `${t.id}: ${t.title}`).concat('init'))
+  })
+
+  test('a gate that ended while the server was down is taken up from its exit file, its worktree as it left it', async () => {
+    const world = await trainWorld('resume-ended', 3, '3')
+    const { w, dir, riders, go, ran } = world
+    const [a, b, c] = riders
+    const run = await leaveTrain(world, [a, b, c])
+    go(a)
+    await until(() => existsSync(run.exit), 20_000)
+    w.engine.resumeMerges()
+    await landed(world, riders)
+    expect(ran()).toEqual([a.id])
+    expect(gateLines()).toEqual([[a.id, 'passed', [a.id, b.id, c.id]]])
+    expect(sh('git log --format=%s -n 4', dir).split('\n')).toEqual([c, b, a].map((t) => `${t.id}: ${t.title}`).concat('init'))
+  })
+
+  test('a gate that outlasts its limit while it is waited for is refused as a timeout, as it would have been without the wait', async () => {
+    const world = await trainWorld('resume-limit', 2, '2')
+    const { w, riders, ran } = world
+    const [a, b] = riders
+    await leaveTrain(world, [a, b])
+    await until(() => ran().length === 1, 20_000)
+    // the limit is far shorter than the run has gone on already: it is killed at once, its code left as its own limit leaves it
+    w.engine.gateTimeout = 300
+    w.engine.resumeMerges()
+    await until(() => existsSync(join(process.env.SHEPHERDR_HOME ?? '', 'gates', 'ledger.jsonl')), 30_000)
+    expect(ledger().filter((l) => l.kind === 'gate')[0]).toMatchObject({ task: a.id, end: 'refused', code: 124, members: [a.id, b.id] })
+    // what follows runs out of time the same way: the line ends with nobody merged
+    await until(() => !a.landing && !b.landing, 60_000)
+  })
+
+  for (const [name, older] of [
+    ['a worktree a stray change touched', false],
+    ['the same for a run an older Shepherdr started, which names no cars', true],
+  ] as const) {
+    test(`${name} is not as the run left it: the run is ended first, with its why, and the turn goes on as without it`, async () => {
+      const world = await trainWorld(`resume-stray-${older ? 'old' : 'new'}`, 3, '3')
+      const { w, riders, go, ran } = world
+      const [a, b, c] = riders
+      const run = await leaveTrain(world, [a, b, c])
+      if (older) {
+        const old = run as Partial<GateRun>
+        old.task = undefined
+        old.members = undefined
+        old.space = undefined
+      }
+      await until(() => ran().length === 1, 20_000)
+      // somebody wrote a file there while the server was down
+      writeFileSync(join(wtOf(a), 'stray.txt'), 'stray\n')
+      w.engine.resumeMerges()
+      await until(() => lines().some((l) => l.includes('cannot go on')), 20_000)
+      const cars = older ? 'its cars are not recorded' : `${a.id}, ${b.id}, ${c.id}`
+      expect(lines().filter((l) => l.includes('cannot go on'))).toEqual([
+        `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${cars}), cannot go on: its worktree has changes the run did not make. It is ended, and the turn goes on as without it`,
+      ])
+      // ended first: the gates that follow are its own, on the branch's files and the stack again
+      go(a)
+      await landed(world, riders)
+      expect(ran()).toEqual([a.id, a.id])
+      expect(gateLines().map(([, end]) => end)).toEqual(['stopped', 'passed'])
+    })
+  }
+
+  test("a worktree found on its branch instead of at the run's commit ends the run: its tree lost the cars' files, and the cars gate again", async () => {
+    const world = await trainWorld('resume-branch', 3, '3')
+    const { w, riders, go, ran } = world
+    const [a, b, c] = riders
+    await leaveTrain(world, [a, b, c])
+    await until(() => ran().length === 1, 20_000)
+    // the branch was put back while the server was down
+    sh(`git checkout -q ${a.branch}`, wtOf(a))
+    w.engine.resumeMerges()
+    await until(() => lines().some((l) => l.includes('cannot go on')), 20_000)
+    expect(lines().filter((l) => l.includes('cannot go on'))).toEqual([
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: its worktree is back on ${a.branch}, not at the stack the run gated. It is ended, and the turn goes on as without it`,
+    ])
+    go(a)
+    await landed(world, riders)
+    expect(ran()).toEqual([a.id, a.id])
+    expect(gateLines()).toEqual([
+      [a.id, 'stopped', [a.id, b.id, c.id]],
+      [a.id, 'passed', [a.id, b.id, c.id]],
+    ])
+  })
+
+  test("a worktree found detached at another commit than the run's ends the run too", async () => {
+    const world = await trainWorld('resume-elsewhere', 3, '3')
+    const { w, riders, go, ran } = world
+    const [a, b, c] = riders
+    const run = await leaveTrain(world, [a, b, c])
+    await until(() => ran().length === 1, 20_000)
+    sh(`git checkout -q --detach ${a.branch}`, wtOf(a))
+    const at = sh('git rev-parse --short=7 HEAD', wtOf(a))
+    w.engine.resumeMerges()
+    await until(() => lines().some((l) => l.includes('cannot go on')), 20_000)
+    expect(lines().filter((l) => l.includes('cannot go on'))).toEqual([
+      `shepherdr: ${a.id}'s merge train: its gate run, which a restart found (${a.id}, ${b.id}, ${c.id}), cannot go on: its worktree is at ${at}, not at the stack the run gated (${run.head.slice(0, 7)}). It is ended, and the turn goes on as without it`,
+    ])
+    go(a)
+    await landed(world, riders)
+    expect(gateLines().map(([, end]) => end)).toEqual(['stopped', 'passed'])
   })
 })
