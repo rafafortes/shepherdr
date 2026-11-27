@@ -86,6 +86,7 @@ import * as G from './git.ts'
 import { MergeRunner, ghNow, trainLog, type MergeHost } from './merge.ts'
 import { groupId, halves, rideBlock, type Bisect } from './train-bisect.ts'
 import { gateName, GateLedger, type GateEnd, type GateWho } from './gate-log.ts'
+import type { Hold } from './line-hold.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 import { resolveTakenPr, takenPrRecord, type TakenPr, type TakenPrRecord } from './taken-pr.ts'
 
@@ -304,6 +305,7 @@ export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'merge') return l.pre ? 'Running the merge pre-flight' : 'Merging'
   if (l.step === 'gate') return l.cars ? `Running the merge gate (a train of ${l.cars})` : 'Running the merge gate'
   if (l.step === 'queue' && l.train) return `Going in with ${l.train}'s merge train`
+  if (l.step === 'queue' && !l.behind) return 'Waiting for its turn in line'
   if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
   if (l.step === 'checks' && l.why) return l.why
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
@@ -844,7 +846,7 @@ export class Engine extends Emitter<Events> {
    *  how many logs a space keeps and the size the ledger is rotated at (a test makes them small) */
   readonly gateLedger = new GateLedger(join(this.dir, 'gates'))
   /** main: by project path, the failing commit on GitHub's main its coordinator was told of, until main is green */
-  private data = readJson<{ next: Record<string, number>; tasks: TaskRec[]; red?: Record<string, string> }>('tasks.json', { next: {}, tasks: [] }, this.dir)
+  private data = readJson<{ next: Record<string, number>; tasks: TaskRec[]; red?: Record<string, string>; holds?: Record<string, Hold> }>('tasks.json', { next: {}, tasks: [] }, this.dir)
   readonly taskIds: TaskIds
   private starting = new Set<string>()
   /** started, its brief not yet taken up: To do until its agent works on it */
@@ -860,6 +862,8 @@ export class Engine extends Emitter<Events> {
    * so the task is back at its turn, its row and its agent saying to merge again.
    */
   resumeMerges() {
+    // a hold on a line that a restart found past its time ends now, with its line in the log
+    this.runner.holds.start()
     this.sweepGates()
     const cut = this.tasks.filter((x) => !ended(x) && !this.runner.landings.has(x.id) && x.landing && ['gate', 'merge', 'queue'].includes(x.landing.step))
     // the gate that goes on is first in its repo's line, then those that waited, as they stood
@@ -942,6 +946,12 @@ export class Engine extends Emitter<Events> {
     this.dropRun(g)
     t.gateRun = undefined
     this.save()
+  }
+
+  /** a landing task's line: the landing's own words, and for a merge waiting in a held line, the hold's: by whom, until when, why */
+  private landingWords(t: TaskRec, now = Date.now()) {
+    const held = t.landing?.step === 'queue' ? this.runner.heldBy(this.places.space(t.project)?.path ?? '') : undefined
+    return held ? `Merge line ${held}` : landingLine(t.landing!, t.base, now)
   }
 
   /** a worktree a run cut short by a restart left detached (a train's stack checked out for its pre-flight or gate): back on its branch */
@@ -1072,6 +1082,7 @@ export class Engine extends Emitter<Events> {
       preflight: (t, repo, space, wt) => engine.preflight(t, repo, space, wt),
       train: (t, p, wt) => engine.train(t, p, wt),
       trainSize: (space) => engine.trainSize(space),
+      holds: () => (engine.data.holds ??= {}),
     } satisfies MergeHost)
     this.taskIds = new TaskIds(this.places.spaces, this.data, (name) => placeId.space(name), this.dir)
     this.places.takenTaskKeys = () => this.taskIds.keys()
@@ -1410,7 +1421,7 @@ export class Engine extends Emitter<Events> {
       const stop = t.landing?.step === 'rebase' ? `Merge stopped on a conflict with ${t.base}: rebasing by hand` : t.mergeStop
       if (stop && status !== 'merging') return stop.replace(/\s+/g, ' ')
       if (status === 'ready') return 'Ready to merge'
-      if (status === 'merging') return landingLine(t.landing!, t.base)
+      if (status === 'merging') return this.landingWords(t)
       if (this.handing.has(t.id) && t.tookOver) {
         const on = CLI_NAME[t.tookOver.to] ?? t.tookOver.to
         return fitStatus(`${on} ${t.tookOver.from === t.tookOver.to ? 'starts again' : 'takes over'}: ${t.tookOver.why}`)
@@ -2407,7 +2418,7 @@ export class Engine extends Emitter<Events> {
       .filter((t) => t.landing?.step === 'queue' && !t.archived && !ended(t))
       .map((t) => {
         const q = of(t)
-        q.words = landingLine(t.landing!, t.base, now)
+        q.words = this.landingWords(t, now)
         return q
       })
       .sort((a, b) => a.since! - b.since!)
@@ -4477,6 +4488,21 @@ export class Engine extends Emitter<Events> {
   /** a merge commit's words: the task and its title, what its agent said it did, its facts, then the lines after */
   private mergeMessage(t: TaskRec, ...after: (string | undefined)[]) {
     return this.runner.mergeMessage(t, ...after)
+  }
+
+  /** shepherdr line hold: `p`'s merge line is kept from starting its next turn for `ms` (merge.ts hold) */
+  lineHold(p: Space, who: { by: string; why: string }, ms: number, waitMs = this.gateTimeout) {
+    return this.runner.hold(p, who, ms, waitMs)
+  }
+
+  /** shepherdr line release: the hold on `p`'s line ends now */
+  lineRelease(p: Space, by: string) {
+    return this.runner.release(p, by)
+  }
+
+  /** shepherdr line: `p`'s merge line, as it stands */
+  line(p: Space) {
+    return this.runner.line(p)
   }
 
   /** a task's merge gate command, its own --set first, then its space's; nothing while it is off */

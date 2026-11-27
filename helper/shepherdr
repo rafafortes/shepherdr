@@ -53,7 +53,8 @@ print $s "POST /api/cli HTTP/1.0\r\nHost: shepherdr\r\n${authorization}Content-T
 # Any call must end with words when Shepherdr gives no answer: an agent's turn must not hang on a stalled server.
 # The long verbs have their own server-side deadlines (engine.ts, git.ts, the same as server/cli.ts): checks waits
 # up to 9 minutes for GitHub plus one last gh call (120 s), pr may push and open a pull request with gh calls of
-# 120 s, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here); the rest get 30 s. A bad override
+# 120 s, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here), line hold up to the gate's 45 minutes plus the
+# hold's own seconds (47 minutes here); the rest get 30 s. A bad override
 # falls back, never disables the bound. The merge words below stay as they were: agents already parse them.
 my $bound = sub {
   my ($name, $fallback) = @_;
@@ -65,6 +66,7 @@ my $word = @ARGV ? $ARGV[0] : '';
 my $second = ($word eq 'task' && @ARGV > 1) ? $ARGV[1] : '';
 my $merge = $word eq 'merge' || ($word eq 'task' && $second eq 'merge');
 my $wait = $merge ? $bound->('SHEPHERDR_MERGE_WAIT', 110000)
+  : ($word eq 'line' && @ARGV > 1 && $ARGV[1] eq 'hold') ? $bound->('SHEPHERDR_LINE_WAIT', 2820000)
   : $word eq 'checks' ? $bound->('SHEPHERDR_CHECKS_WAIT', 690000)
   : $word eq 'pr' ? $bound->('SHEPHERDR_PR_WAIT', 270000)
   : $word eq 'review' ? $bound->('SHEPHERDR_REVIEW_WAIT', 100000)

@@ -447,6 +447,13 @@ merge queue builds each queued pull request on top of the ones before it with no
 queue-position ideas are about GitHub's queue as well. The pre-flight, its probes by halves over a train's stack and its own
 ledger lines are ours.
 
+Checked on 2026-11-26 (the same task) for holding a space's merge line (`shepherdr line hold`): `git grep -i` for merge line,
+hold the line, pause merges, merge lock, merge hold and freeze on both lines, `git log -i --grep` for hold, pause and merge
+queue, and `gh issue list` and `gh pr list` for "merge queue hold", "pause merges" and "merge lock". **Nothing for this**: the
+only merge queue upstream has is GitHub's, which Shepherdr cannot pause, and the only "hold" hits are 3.x's chat gestures and
+2.0's `Freeze older queued records` comment; issue #1195's queue jump is about reordering GitHub's queue, not about stopping a
+local line. The hold, its reservation of the next turn and its expiry are ours.
+
 ## Not from upstream: a limits page over every space, provider and model, built here
 
 Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for a limits or capacity

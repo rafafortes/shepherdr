@@ -30,7 +30,8 @@ const stdin = (secret === 'set' || secret === 'elevenlabs' || (args[0] === 'hear
 // more on 2026-11-18, worst 20.1 s) otherwise hangs an agent's turn for ever. The long verbs have their own deadlines
 // on the server (engine.ts, merge.ts, git.ts): checks waits up to 9 minutes for GitHub plus one last gh call (120 s), pr may
 // push and open a pull request with gh calls of 120 s, review up to 90 s for a reviewer slot, merge up to 90 s
-// (110 s here); the rest get the default. Every call gets a bound, and says so instead of waiting on and on.
+// (110 s here), line hold up to the gate's 45 minutes for the merge in flight (47 minutes here); the rest get the default.
+// Every call gets a bound, and says so instead of waiting on and on.
 const envWait = (name: string, fallback: number) => {
   const n = Number(process.env[name] ?? fallback)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -46,7 +47,9 @@ const wait = merge
         ? envWait('SHEPHERDR_REVIEW_RUN_WAIT', 1_020_000)
         : args[0] === 'review'
           ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
-          : envWait('SHEPHERDR_CLI_WAIT', 30_000)
+          : args[0] === 'line' && args[1] === 'hold'
+            ? envWait('SHEPHERDR_LINE_WAIT', 47 * 60_000)
+            : envWait('SHEPHERDR_CLI_WAIT', 30_000)
 const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : (args[0] ?? '<verb>')
 
 type Answer = { out: string; code: number; secrets?: Record<string, string> }
