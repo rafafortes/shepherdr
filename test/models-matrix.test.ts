@@ -42,7 +42,7 @@ describe('the models matrix: slots and rows', () => {
     ])
     expect(m.plain).toEqual([
       { key: 'space.maxTasks', title: 'Max tasks', num: { min: 0, max: 200, off: true, limit: true } },
-      { key: 'merge.train', title: 'Merge train', options: ['off', '2', '3', '4', '5'] },
+      { key: 'merge.train', title: 'Merge train', options: ['off', '2', '3', '4', '5', '6', '7', '8'] },
     ])
     // the home space sets one of them: its row comes, named as the sidebar names it
     const home = matrix(fresh({ spaces: { '~': { 'space.maxTasks': '2' } } }), [{ key: '~', name: 'home' }, ...SPACES])

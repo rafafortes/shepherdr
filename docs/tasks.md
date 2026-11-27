@@ -242,7 +242,7 @@
   same tree pays nothing. A merge train runs its gate on the top of its stack, a tree no single run recorded, so a train
   always pays one full run.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
-  by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
+  by default, or 2 to 8, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
   and the gate runs once on the top of that stack, in the head task's worktree (detached there, so no task's branch
   changes). If it passes, each merge goes in as its own commit, with its task's words and the gate's last line, and the

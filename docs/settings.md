@@ -84,7 +84,7 @@
   by its coordinator (`task add --set reviewer.fallback=pi`), which wins for that task.
 - Merge gate and Merge train (How tasks work, `merge.gate` and `merge.train`), per space like the rest. The gate is a
   command every merge must pass (exit 0) before its change goes into its base, whether the merge is made here or through
-  the space's pull request. The train (2 to 5, the most merges one takes, the head included; off by default) lets the
+  the space's pull request. The train (2 to 8, the most merges one takes, the head included; off by default) lets the
   first merges in line go in together on one gate run, each as its own commit. It needs a gate set and works only for
   merges made here, not through a GitHub pull request. Off means one at a time. What each row does is in
   [tasks](tasks.md).

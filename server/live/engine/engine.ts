@@ -602,7 +602,7 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
 /** how many times main may move while a merge gate runs before the merge gives up for now */
 const GATE_ROUNDS = 3
 /** the most merges one train takes (merge.train) */
-const TRAIN_MAX = 5
+const TRAIN_MAX = 8
 /** up to three paths, then how many more: `a.md, b.md, c.md and 2 more` */
 const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', '))
 

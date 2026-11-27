@@ -1101,7 +1101,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                         label="More for Merge train"
                         menu={menu}
                         setMenu={setMenu}
-                        items={spaceColumn('merge.train', 'Merge train', { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5'] })}
+                        items={spaceColumn('merge.train', 'Merge train', { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5', '6', '7', '8'] })}
                       />
                     </span>
                   </th>
