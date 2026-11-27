@@ -114,6 +114,25 @@ describe("executable settings need the screen's own proof", () => {
     expect(local.out).not.toContain('Set it in Settings')
   })
 
+  test('the merge pre-flight is a command like the gate: a page cannot set it, per task or per space, without the page proof', async () => {
+    const page = await src.cli(['task', 'add', 'A task', '--set', 'merge.preflight=echo pwned'], { local: false })
+    expect(page.code).toBe(1)
+    expect(page.out).toContain('Set it in Settings')
+    const set = await src.cli(['set', 'merge.preflight', 'echo pwned'], { local: false })
+    expect(set.code).toBe(1)
+    expect(set.out).toContain('Set it in Settings')
+    refused(await src.act({ type: 'setting', key: 'merge.preflight', value: 'echo web' }))
+    expect(stored().everywhere?.['merge.preflight']).toBeUndefined()
+    expect(await src.act({ type: 'setting', key: 'merge.preflight', value: 'echo web', capability: src.writeCapability })).toEqual({ ok: true })
+    expect(stored().everywhere?.['merge.preflight']).toBe('echo web')
+    expect(await src.act({ type: 'setting', key: 'merge.preflight', value: null, capability: src.writeCapability })).toEqual({ ok: true })
+    // a shell on this machine sets it, and shepherdr show lists it, off by default
+    expect((await src.cli(['show'], { local: true })).out).toMatch(/merge\.preflight\s+off\s+\(default\)/)
+    expect((await src.cli(['set', 'merge.preflight', 'tools/check --static "$SHEPHERDR_BASE"'], { local: true })).code).toBe(0)
+    expect((await src.cli(['show'], { local: true })).out).toContain('merge.preflight')
+    expect((await src.cli(['unset', 'merge.preflight'], { local: true })).code).toBe(0)
+  })
+
   test('the worker checks the proof its own link gave the main, not one a caller chose', async () => {
     // the main rewires a gated write to the worker's proof before forwarding; on the worker only its own token works
     const workerProof = 'e'.repeat(64)

@@ -184,6 +184,9 @@ Done or the merge question.
 
 - `shepherdr merge` reports a conflict: rebase, check, push and merge again, without asking. It says **You have a new
   message in your chat**: handle that first, then merge again.
+- `shepherdr merge` says its **merge pre-flight** failed (a space's cheap check, run before the merge takes a place in
+  line): nothing was merged and you hold no place in line. Fix what its lines name (its full log is kept at the path it
+  gives), commit, and merge again; the merge gate runs after it passes.
 - `shepherdr merge` says the base checkout **holds work of its own that would be overwritten**, naming a file: that
   file is someone's uncommitted work in the space's own folder, not the task's. Do not commit, stash, move or remove
   it; say so in one line and merge again once they have dealt with it. The same for every other refusal it can give —

@@ -1,4 +1,5 @@
-// What a merge gate run leaves behind (server/live/engine/gate-log.ts): its log and one line of the ledger, both bounded.
+// What a merge gate run, or a pre-flight run, leaves behind (server/live/engine/gate-log.ts): its log and one line of the
+// ledger, both bounded.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -31,6 +32,10 @@ describe('the names a gate run goes by', () => {
     expect(gateName(undefined, 'POL-1', 1700000000000, 'ab12cd34')).toBe('POL-1-1700000000000-ab12cd34')
   })
 
+  test("a pre-flight run's files end in .pre, so its logs are told from a gate's by name", () => {
+    expect(gateName('Lyvora App', 'POL-1', 1700000000000, 'ab12cd34', 'preflight')).toBe('lyvora-app.POL-1-1700000000000-ab12cd34.pre')
+  })
+
   test("the last line is the gate's last non-empty one, without control characters, cut at 200", () => {
     expect(lastLine('building\n2 tests failed\n\n  \n')).toBe('2 tests failed')
     expect(lastLine('')).toBe('')
@@ -51,6 +56,7 @@ describe('the ledger', () => {
       {
         started: '2023-11-14T22:13:20.000Z',
         ended: '2023-11-14T22:13:22.400Z',
+        kind: 'gate',
         space: 'lyvora-app',
         task: 'POL-1',
         members: ['POL-1', 'POL-2'],
@@ -62,6 +68,19 @@ describe('the ledger', () => {
         log: log.split('/').at(-1),
         last: '3 failed',
       },
+    ])
+  })
+
+  test("a pre-flight run says so in its line, whose other fields are a gate run's", () => {
+    const dir = tmp('gate-ledger-pre')
+    const log = join(dir, `${gateName('lyvora-app', 'POL-1', 1_700_000_000_000, 'ab12cd34', 'preflight')}.log`)
+    writeFileSync(log, 'lint: 2 problems\n')
+    const ledger = new GateLedger(dir)
+    ledger.record(run(log, { kind: 'preflight', members: ['POL-1', 'POL-2'] }), 'refused', { code: 1, out: 'lint: 2 problems\n' }, 1_700_000_001_000)
+    ledger.record(run(''), 'passed', { code: 0, out: 'ok\n' }, 1_700_000_001_000)
+    expect(lines(dir).map((l) => [l.kind, l.end, l.members, l.log])).toEqual([
+      ['preflight', 'refused', ['POL-1', 'POL-2'], 'lyvora-app.POL-1-1700000000000-ab12cd34.pre.log'],
+      ['gate', 'passed', undefined, ''],
     ])
   })
 
@@ -139,6 +158,37 @@ describe('the logs kept', () => {
     // a run's log with no space part is its own group: the ones made without a space
     expect(pruneGateLogs(dir, '', 0)).toBe(1)
     expect(existsSync(bare)).toBe(false)
+  })
+
+  test("a pre-flight's logs and a gate's are two groups: each keeps its own newest, and pruning one never touches the other", () => {
+    const dir = tmp('gate-prune-kinds')
+    const pre = (i: number) => {
+      const path = join(dir, `${gateName('lyvora-app', 'POL-1', 1_700_000_000_000 + i, '0000000a', 'preflight')}.log`)
+      writeFileSync(path, 'pre\n')
+      return path
+    }
+    const gates = [1, 2, 3].map((i) => logOf(dir, 'lyvora-app', 1_700_000_000_000 + i))
+    const pres = [4, 5, 6].map(pre)
+    expect(pruneGateLogs(dir, 'lyvora-app', 1, [], 'preflight')).toBe(2)
+    expect(pres.map((p) => existsSync(p))).toEqual([false, false, true])
+    expect(gates.every((p) => existsSync(p))).toBe(true)
+    expect(pruneGateLogs(dir, 'lyvora-app', 1)).toBe(2)
+    expect(gates.map((p) => existsSync(p))).toEqual([false, false, true])
+    expect(existsSync(pres[2])).toBe(true)
+  })
+
+  test("recording a pre-flight run prunes the pre-flight logs only: a busy line's cheap checks never push a gate's log out", () => {
+    const dir = tmp('gate-prune-record-pre')
+    const ledger = new GateLedger(dir)
+    ledger.keep = 1
+    const gate = logOf(dir, 'lyvora-app', 1_700_000_000_001)
+    for (let i = 2; i <= 4; i++) {
+      const log = join(dir, `${gateName('lyvora-app', 'POL-1', 1_700_000_000_000 + i, '0000000a', 'preflight')}.log`)
+      writeFileSync(log, 'pre\n')
+      ledger.record({ log, at: 1_700_000_000_000 + i, head: 'h', tip: 't', space: 'lyvora-app', task: 'POL-1', kind: 'preflight' }, 'passed')
+    }
+    expect(logs(dir).filter((f) => f.endsWith('.pre.log'))).toHaveLength(1)
+    expect(existsSync(gate)).toBe(true)
   })
 
   test('the log of a run that is going on is never removed, however old', () => {

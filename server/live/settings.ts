@@ -349,12 +349,12 @@ export function fitCaps(text: string): { text: string; converted: boolean; lower
 const OLD_VALUES: Record<string, Record<string, string>> = { 'brief.merge': { 'by itself': 'on its own', 'after your yes': 'ask me first' } }
 
 /**
- * Settings whose value is handed to a shell: alerts.command and alerts.doneCommand (wait-alerts.ts) and merge.gate
- * (engine.ts). A write of one that comes through the screen needs the page's own per-boot capability (source.act);
+ * Settings whose value is handed to a shell: alerts.command and alerts.doneCommand (wait-alerts.ts), merge.gate and
+ * merge.preflight (engine.ts). A write of one that comes through the screen needs the page's own per-boot capability (source.act);
  * the shepherdr command writes settings directly, for the operator, and keeps working (SEC-04). Kept here beside the
  * rows so the gate and the rows' hints cannot drift apart.
  */
-export const EXECUTABLE_KEYS: ReadonlySet<string> = new Set(['alerts.command', 'alerts.doneCommand', 'merge.gate'])
+export const EXECUTABLE_KEYS: ReadonlySet<string> = new Set(['alerts.command', 'alerts.doneCommand', 'merge.gate', 'merge.preflight'])
 
 export const CATALOG: Section[] = [
   {
@@ -394,6 +394,15 @@ export const CATALOG: Section[] = [
         value: 'off',
         text: true,
         hint: "A command run in the task's worktree after its rebase, before its change goes into its base (here, or through its pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and the base stays as it was. Off: none. Web writes of a command here need this page's own proof; shepherdr set still works from a local terminal.",
+      },
+      // a cheap command run before the gate (engine.preflight): where the gate is a full check of minutes, this says in
+      // seconds whether a change can possibly pass it. It never lets anything in: only a gate run does
+      {
+        label: 'Merge pre-flight',
+        key: 'merge.preflight',
+        value: 'off',
+        text: true,
+        hint: "With a merge gate: a cheap command (seconds to a minute) that says whether a change can possibly pass the gate, such as a lint or a static check. It runs in the task's worktree on its branch as it is when a merge is asked for, before the merge takes its place in line: exit 0 lets it queue, anything else (or 5 minutes without an end) refuses the merge at once, with the end of its output, and the task keeps no place in line. When a merge train forms it also runs on the stack, and a car whose change fails it goes to its own gate instead. It gets SHEPHERDR_TASK and SHEPHERDR_BASE as the gate does, plus SHEPHERDR_PREFLIGHT=1, and never replaces the gate. Off: none. Web writes of a command here need this page's own proof; shepherdr set still works from a local terminal.",
       },
       // with a merge gate, the first merges in line go in together on one gate run (engine.train)
       {
