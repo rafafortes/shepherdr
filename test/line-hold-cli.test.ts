@@ -78,6 +78,62 @@ describe('shepherdr line hold, release and the line', () => {
     expect(src.engine.line(p).hold).toBeUndefined()
   })
 
+  test('--wait is at most what the command can wait: more is refused saying so, with nothing reserved, and the most is taken', async () => {
+    const { p } = await space('line-cli-wait')
+    const over = await cli(['line', 'hold', p.name, '--wait', '46', '--why', 'x'])
+    expect(over.code).toBe(1)
+    expect(over.out).toBe(
+      "--wait is at most 45 minutes (the gate's own limit): this command gives up after 47, and a hold that waited longer would be left behind with nobody told. Wait less, or ask again once the merge in flight has ended.",
+    )
+    expect((await cli(['line', 'hold', p.name, '--wait', '9999', '--why', 'x'])).code).toBe(1)
+    expect(src.engine.line(p).hold).toBeUndefined()
+    // the cap itself is fine, and so is any smaller wait
+    for (const wait of ['45', '1.5']) {
+      expect((await cli(['line', 'hold', p.name, '--wait', wait, '--why', 'x'])).code).toBe(0)
+      expect((await cli(['line', 'release', p.name])).code).toBe(0)
+    }
+  })
+
+  test('a command that is gone reserves nothing; one that goes away as the hold takes effect releases it, since nobody is left to be told', async () => {
+    const { p } = await space('line-cli-gone')
+    const before = new AbortController()
+    before.abort()
+    const none = await cli(['line', 'hold', p.name, '--why', 'x'], { signal: before.signal })
+    expect(none.code).toBe(1)
+    expect(none.out).toBe(`The command that asked to hold ${p.name}'s merge line is gone: nothing is held.`)
+    expect(src.engine.line(p).hold).toBeUndefined()
+    // gone just as the hold took effect (the engine's own answer is the last thing the command waits for)
+    const gone = new AbortController()
+    const real = src.engine.lineHold.bind(src.engine)
+    src.engine.lineHold = async (...a: Parameters<typeof real>) => {
+      const r = await real(...a)
+      gone.abort()
+      return r
+    }
+    const logged: string[] = []
+    const stderr = console.error
+    console.error = (m: unknown) => void logged.push(String(m))
+    try {
+      const late = await cli(['line', 'hold', p.name, '--why', 'x'], { signal: gone.signal })
+      expect(late.code).toBe(1)
+      expect(late.out).toBe(`The command that asked to hold ${p.name}'s merge line went away as the hold took effect: it was released, nothing is held.`)
+    } finally {
+      src.engine.lineHold = real
+      console.error = stderr
+    }
+    // the log says whose release it was: the gone command's, not the person's
+    expect(logged.filter((l) => l.includes('released by'))).toEqual([
+      expect.stringContaining(`line hold on ${p.name} released by you (terminal)'s command, gone as the hold took effect (held by you (terminal)`),
+    ])
+    expect(src.engine.line(p).hold).toBeUndefined()
+    // a command that is still there keeps its hold
+    const still = new AbortController()
+    expect((await cli(['line', 'hold', p.name, '--why', 'x'], { signal: still.signal })).code).toBe(0)
+    still.abort()
+    expect(src.engine.line(p).hold).toMatchObject({ state: 'held' })
+    await cli(['line', 'release', p.name])
+  })
+
   test("a task's agent is refused: it neither holds nor releases the line, though it may read it; a space that is not there is named", async () => {
     const { p } = await space('line-cli-c')
     const t = src.engine.add({ project: p.name, title: 'A task', by: 'test' })

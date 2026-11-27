@@ -98,7 +98,7 @@ How to do the work inside a task is its agent's judgment, not yours.
    run `shepherdr merge <id>`. A task whose work is over with nothing to merge: `shepherdr task close <id>`.
    **A merge made by hand** (yours with the human's OK, or theirs): a commit that goes into the base outside Shepherdr moves
    it under any gate that runs, so take the line's turn first. `shepherdr line hold <space> --for 20 --why "<what you
-   land>"` waits for the merge or gate in flight, keeps the next one from starting meanwhile, then holds the line and prints
+   land>"` waits for the merge or gate in flight (at most 45 minutes, `--wait`'s limit), keeps the next one from starting meanwhile, then holds the line and prints
    the base's tip: gate and land your commit while it holds (no gate, train or landing of Shepherdr starts, merges asked for
    queue in order and their rows say who holds, until when and why), then `shepherdr line release <space>` at once. The
    hold ends by itself at its time (20 minutes unless `--for`, at most 60), and a space whose merges go through a pull

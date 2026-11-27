@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { taskAlert } from '../../shared/alerts.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { ATTACH_MAX, isMedia, isVideo } from '../../shared/files.ts'
+import { LINE_HOLD_COMMAND_WAIT, LINE_HOLD_WAIT_MAX } from '../../shared/line-wait.ts'
 import { placeOrder } from '../../shared/space-order.ts'
 import { type Action, type Alert, doneNewestFirst, type Peer, type Place, type RestartInfo, ROW_MAX, STATUS_MAX } from '../../shared/types.ts'
 import { startsWords, whenFrom } from '../../shared/when.ts'
@@ -509,7 +510,12 @@ export class CliCommands {
     return `Review round ${round} of ${r.rounds} for ${t.id} ran in a herdr pane (${reviewer.kind}); its pane is closed and its reviewer is free. Prompt: ${file}.\n\n${cut}${got.findings || 'The reviewer wrote no findings before its turn ended.'}${unrecorded}`
   }
 
-  async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
+  async command(
+    p: Parsed,
+    /** `signal` aborts when the caller goes away (its command gave up or was interrupted, its connection closed): only a command that must not outlive its caller reads it (line hold) */
+    ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; signal?: AbortSignal },
+    onStep?: (words: string) => void,
+  ): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0) return HELP
     if (a0 === 'help') return helpTopic(a1)
@@ -1581,9 +1587,11 @@ export class CliCommands {
   /**
    * shepherdr line [<space>] | hold <space> [--for <minutes>] --why "<text>" [--wait <minutes>] | release <space>: one space's
    * merge line. The human or a coordinator takes its turn so a commit can be gated and landed by hand with the base not
-   * moving under it; never a task's agent. Showing the line is for anyone.
+   * moving under it; never a task's agent. Showing the line is for anyone. A hold never outlives the command that asks for
+   * it: `--wait` is at most what the command can wait, and a command that goes away (`ctx.signal`) before the hold has
+   * taken effect takes its reservation with it.
    */
-  private async lineCommand(a1: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string }) {
+  private async lineCommand(a1: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string; signal?: AbortSignal }) {
     const verb = a1 === 'hold' || a1 === 'release' ? a1 : undefined
     const named = verb ? rest[0] : a1
     const space = (name?: string) => this.projectFor({ ...p, opts: { ...p.opts, ...(name ? { space: [name] } : {}) } }, ctx)
@@ -1605,10 +1613,21 @@ export class CliCommands {
       if (!Number.isFinite(minutes) || minutes <= 0) throw new Error('--for takes a number of minutes, more than 0.')
       const wait = one(p, 'wait') === undefined ? undefined : Number(one(p, 'wait'))
       if (wait !== undefined && (!Number.isFinite(wait) || wait <= 0)) throw new Error('--wait takes a number of minutes, more than 0.')
+      // the command gives up after LINE_HOLD_COMMAND_WAIT: a wait asked for beyond what it can wait would leave a reservation nobody was told about
+      if (wait !== undefined && wait * 60_000 > LINE_HOLD_WAIT_MAX)
+        throw new Error(
+          `--wait is at most ${LINE_HOLD_WAIT_MAX / 60_000} minutes (the gate's own limit): this command gives up after ${LINE_HOLD_COMMAND_WAIT / 60_000}, and a hold that waited longer would be left behind with nobody told. Wait less, or ask again once the merge in flight has ended.`,
+        )
       const pr = space(named)
       const ms = Math.min(minutes * 60_000, HOLD_MAX)
-      const r = await this.engine.lineHold(pr, { by: this.holderName(ctx), why }, ms, wait === undefined ? undefined : wait * 60_000)
+      const by = this.holderName(ctx)
+      const r = await this.engine.lineHold(pr, { by, why }, ms, wait === undefined ? undefined : wait * 60_000, ctx.signal)
       if (!r.ok) throw new Error(r.error)
+      // the command went away just as the hold took effect: nobody is left to be told, so the hold goes with it (the log says it)
+      if (ctx.signal?.aborted) {
+        this.engine.lineRelease(pr, `${by}'s command, gone as the hold took effect`)
+        throw new Error(`The command that asked to hold ${pr.name}'s merge line went away as the hold took effect: it was released, nothing is held.`)
+      }
       const lasts = Math.round(((r.hold.until - r.hold.at) / 60_000) * 10) / 10
       return [
         `Held ${pr.name}'s merge line for ${lasts} minute${lasts === 1 ? '' : 's'}${minutes * 60_000 > HOLD_MAX ? ` (the most a hold lasts)` : ''}, until ${clock(r.hold.until)}${r.after ? `; ${r.after}'s merge, in flight when you asked, has ended` : ''}.`,

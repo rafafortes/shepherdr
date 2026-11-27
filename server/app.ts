@@ -364,7 +364,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
             source as Source & {
               cli?(
                 a: string[],
-                c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+                c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string; signal?: AbortSignal },
                 onStep?: (words: string) => void,
               ): Promise<{ out: string; code: number }>
             }
@@ -382,6 +382,11 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const b = (await req.json()) as { args: string[]; chat?: string; pane?: string; cwd?: string; stdin?: string }
           // some commands wait long (shepherdr checks waits for GitHub's): no idle cut-off for these
           srv.timeout(req, 0)
+          // the caller going away (its command gave up or was interrupted, its connection closed) aborts this: a command that
+          // must not outlive its caller reads it (shepherdr line hold, whose reservation would become a hold nobody was told
+          // about); every other command goes on to its end, as below
+          const gone = new AbortController()
+          req.signal.addEventListener('abort', () => gone.abort(), { once: true })
           const ctx = {
             chat: b.chat,
             pane: b.pane,
@@ -389,14 +394,16 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
             stdin: b.stdin,
             local: direct(req),
             proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
+            signal: gone.signal,
           }
           // only a caller that says it can read them gets the interim steps: the new command sends Accept:
           // application/x-ndjson. An older helper (or command) on another machine gets the one application/json
           // object it knows, so the change works across versions in both directions (UXD-08).
           if (!(req.headers.get('accept') ?? '').includes('application/x-ndjson')) return json(await cli.call(source, b.args ?? [], ctx))
           // one {step} line as each step finishes, then the one final {out, code}, as application/x-ndjson. A caller
-          // that goes away mid-call (a timeout, Ctrl-C) must never stop the work: guard the enqueue with a flag
-          // written by cancel(), so doctor goes on repairing the machines after the client has left.
+          // that goes away mid-call (a timeout, Ctrl-C) must never stop the work (but for the commands that read `signal`,
+          // which tell it so): guard the enqueue with a flag written by cancel(), so doctor goes on repairing the machines
+          // after the client has left.
           const enc = new TextEncoder()
           let closed = false
           const body = new ReadableStream<Uint8Array>({
@@ -425,6 +432,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
             },
             cancel() {
               closed = true
+              gone.abort()
             },
           })
           return new Response(body, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } })

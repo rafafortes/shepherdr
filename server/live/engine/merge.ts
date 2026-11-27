@@ -881,13 +881,23 @@ export class MergeRunner {
    * shepherdr line hold: keep `p`'s line from starting its next turn for `ms`, so a commit made by hand can be gated and
    * landed with the base not moving under it. It waits (at most `waitMs`) for the merge or gate in flight, if any, to end
    * (reserving the next turn meanwhile, so nothing slips in ahead of it), then says the base's tip. A space whose merges
-   * go through a pull request has no line here to hold. Not told to a task's agent: the command refuses that.
+   * go through a pull request has no line here to hold. Not told to a task's agent: the command refuses that. `gone` aborts
+   * when the command that waits for the answer does (it gave up, was interrupted, or its connection closed): a hold that
+   * still waits then ends with nothing held (line-hold.ts reserve).
    */
-  async hold(p: Space, who: { by: string; why: string }, ms: number, waitMs: number): Promise<{ ok: true; hold: Hold; tip: string; after?: string } | { ok: false; error: string }> {
+  async hold(
+    p: Space,
+    who: { by: string; why: string },
+    ms: number,
+    waitMs: number,
+    gone?: AbortSignal,
+  ): Promise<{ ok: true; hold: Hold; tip: string; after?: string } | { ok: false; error: string }> {
+    // a command that has gone already reserves nothing
+    if (gone?.aborted) return { ok: false, error: `The command that asked to hold ${p.name}'s merge line is gone: nothing is held.` }
     const after = this.mergingNow.get(p.path)
     // the request reserves the line's next turn here, before anything is awaited: what kind of merges the space makes is
     // asked after, so no merge slips in ahead of the hold meanwhile
-    const reserved = this.holds.reserve(p.path, who, ms, !!after, waitMs)
+    const reserved = this.holds.reserve(p.path, who, ms, !!after, waitMs, gone)
     if (!reserved.ok) return reserved
     const pull = await this.hub(p).then(
       (g) => (g ? ('a pull request' as const) : undefined),

@@ -48,9 +48,18 @@ export const spanOf = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(m
 /** a hold's reason on one line, as the log and the rows keep it */
 export const whyLine = (why: string) => why.replace(/\s+/g, ' ').trim().slice(0, 200)
 
+/** a reservation: a hold asked for that waits for the merge in flight */
+interface Waiting {
+  by: string
+  why: string
+  at: number
+  ms: number
+  end: (r: Held) => void
+}
+
 export class LineHolds {
   /** a hold asked for while a merge runs: who, why, how long it will last once in effect, and how it ends */
-  private waiting = new Map<string, { by: string; why: string; at: number; ms: number; end: (r: Held) => void }>()
+  private waiting = new Map<string, Waiting>()
   /** each hold in effect's expiry */
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   /** the turns waiting at the gate, per repo */
@@ -100,8 +109,8 @@ export class LineHolds {
    * Hold `repo`'s line for `ms`, in one go: with no merge in flight (`flying` false) it is in effect at once; with one, it
    * waits for it (see `reserve`). Asking for a line that is held, or already asked for, says who holds it.
    */
-  ask(repo: string, who: { by: string; why: string }, ms: number, flying: boolean, waitMs: number): Promise<Held> {
-    const r = this.reserve(repo, who, ms, flying, waitMs)
+  ask(repo: string, who: { by: string; why: string }, ms: number, flying: boolean, waitMs: number, gone?: AbortSignal): Promise<Held> {
+    const r = this.reserve(repo, who, ms, flying, waitMs, gone)
     if (!r.ok) return Promise.resolve(r)
     if (!flying) this.idle(repo)
     return r.done
@@ -112,9 +121,11 @@ export class LineHolds {
    * moment no turn of `repo` starts, though the merge in flight, if any, goes on; the hold is in effect once `idle` says
    * nothing is in flight (at once, if nothing was), for at most `waitMs` of waiting: then it ends with no hold left behind.
    * `done` is how it ends. The caller checks what else it must (the space's kind of merge) and ends the reservation with
-   * `cancel`, or lets it take effect.
+   * `cancel`, or lets it take effect. A reservation never outlives the command that waits for it: when `gone` aborts (the
+   * command gave up, was interrupted or its connection closed) while it still waits, it ends with nothing held, and the log
+   * says so; one that took effect before is a hold and stays.
    */
-  reserve(repo: string, who: { by: string; why: string }, ms: number, flying: boolean, waitMs: number): { ok: false; error: string } | { ok: true; done: Promise<Held> } {
+  reserve(repo: string, who: { by: string; why: string }, ms: number, flying: boolean, waitMs: number, gone?: AbortSignal): { ok: false; error: string } | { ok: true; done: Promise<Held> } {
     const held = this.active(repo)
     const name = this.host.name(repo)
     if (held) return { ok: false, error: `${name}'s merge line is already held by ${held.by} until ${clockOf(held.until)}: ${held.why}. Release it first, or wait for it to end.` }
@@ -125,6 +136,7 @@ export class LineHolds {
       const give = setTimeout(
         () => {
           this.waiting.delete(repo)
+          gone?.removeEventListener('abort', leave)
           this.open(repo)
           this.host.changed(repo)
           this.host.log(`line hold on ${name}: ${who.by} gave up waiting for the merge in flight to end (${spanOf(waitMs)}): nothing is held`)
@@ -135,16 +147,29 @@ export class LineHolds {
         },
         Math.max(1, waitMs),
       )
-      this.waiting.set(repo, {
+      const mine: Waiting = {
         by: who.by,
         why,
         at: this.host.now(),
         ms,
         end: (r) => {
           clearTimeout(give)
+          gone?.removeEventListener('abort', leave)
           resolve(r)
         },
-      })
+      }
+      /** the command that waits for this reservation is gone: nothing is held, and the turns go on */
+      const leave = () => {
+        // it ended some other way meanwhile (in effect, released, given up, cancelled): another reservation is not ours to end
+        if (this.waiting.get(repo) !== mine) return
+        this.waiting.delete(repo)
+        mine.end({ ok: false, error: `The command that asked to hold ${name}'s merge line is gone: nothing is held, and the line goes on as it was.` })
+        this.host.log(`line hold on ${name}: ${who.by}'s command went away while the hold waited for the merge in flight to end: nothing is held`)
+        this.open(repo)
+        this.host.changed(repo)
+      }
+      this.waiting.set(repo, mine)
+      gone?.addEventListener('abort', leave, { once: true })
     })
     if (flying) this.host.log(`line hold on ${name}: ${who.by} waits for the merge in flight to end, and keeps the next turn from starting (${why})`)
     this.host.changed(repo)

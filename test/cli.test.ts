@@ -6,7 +6,9 @@ import { describe, expect, test } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { LINE_HOLD_COMMAND_WAIT, LINE_HOLD_WAIT_MAX } from '../shared/line-wait.ts'
 import { tmp } from './tmp.ts'
+import { until } from './engine-world.ts'
 
 const root = join(import.meta.dir, '..')
 const perl = spawnSync('perl', ['-MJSON::PP', '-e1']).status === 0
@@ -142,6 +144,62 @@ describe('every shepherdr call ends with words when the server gives no answer',
     } finally {
       served.stop(true)
       never.stop(true)
+    }
+  })
+
+  test("the line hold's wait is one number: the cap on --wait sits under what the commands wait, here and in the helper", () => {
+    expect(LINE_HOLD_WAIT_MAX).toBe(45 * 60_000)
+    expect(LINE_HOLD_COMMAND_WAIT).toBe(47 * 60_000)
+    // the helper's shepherdr is Perl and cannot import it: its number is this one, to the millisecond
+    expect(readFileSync(join(root, 'helper', 'shepherdr'), 'utf8')).toContain(`$bound->('SHEPHERDR_LINE_WAIT', ${LINE_HOLD_COMMAND_WAIT})`)
+    expect(readFileSync(join(root, 'server', 'cli.ts'), 'utf8')).toContain("envWait('SHEPHERDR_LINE_WAIT', LINE_HOLD_COMMAND_WAIT)")
+  })
+
+  test('a line hold that gives up closes its end: the server sees the request go, so the hold it waited for is cancelled', async () => {
+    let gone = false
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      idleTimeout: 0,
+      fetch: (req) => {
+        req.signal.addEventListener('abort', () => (gone = true))
+        return new Promise<Response>(() => {})
+      },
+    })
+    try {
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'line', 'hold', 'lyvora-app', '--why', 'x'], {
+        SHEPHERDR_URL: `http://127.0.0.1:${server.port}`,
+        SHEPHERDR_LINE_WAIT: '1000',
+      })
+      expect(r.code).toBe(1)
+      expect(r.err).toContain('shepherdr line got no answer from Shepherdr in 1 s')
+      await until(() => gone)
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test.if(perl)('on another machine: the helper that gives up closes its end of the tunnel too, and the server sees the request go', async () => {
+    const dir = tmp('cli-line-gone')
+    let gone = false
+    // main.sock is the tunnel's end on this machine; the server behind it notices a call that is dropped
+    const server = Bun.serve({
+      unix: join(dir, 'main.sock'),
+      fetch: (req) => {
+        req.signal.addEventListener('abort', () => (gone = true))
+        return new Promise<Response>(() => {})
+      },
+    })
+    try {
+      const helper = join(dir, 'bin', 'shepherdr')
+      mkdirSync(join(dir, 'bin'))
+      copyFileSync(join(root, 'helper', 'shepherdr'), helper)
+      const r = await run(['perl', helper, 'line', 'hold', 'lyvora-app', '--why', 'x'], { SHEPHERDR_LINE_WAIT: '1000' })
+      expect(r.code).toBe(1)
+      expect(r.err).toContain('shepherdr line got no answer from Shepherdr in 1 s')
+      await until(() => gone)
+    } finally {
+      server.stop(true)
     }
   })
 
