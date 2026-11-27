@@ -31,8 +31,9 @@ The files are in `test/`.
 - **Nothing lands that no gate run passed on exactly the stack that lands.** The base moves only through `G.landStack`,
   from the commit the run saw and onto the trees it gated; a base that moved meanwhile lands nothing (`moved`). A
   pre-flight never lets anything in. `engine-merge-train-bisect.test.ts` (each ledger line's `head` is the commit its run
-  gated), `engine-merge-train-bisect-line.test.ts` ("main moves while a half goes on its gate run") and
-  `engine-merge-train.test.ts` ("main moves while the train's gate runs").
+  gated), `engine-merge-train-bisect-line.test.ts` ("main moves while a half goes on its gate run"),
+  `engine-merge-train.test.ts` ("main moves while the train's gate runs") and `engine-merge-train-resume.test.ts` (a run a
+  restart found is taken up only for the stack it gated).
 - **A mark is saved before the next gate starts, so a restart finds the same halves.** `bisect` and `alone` are written
   with `saveNow()` before the gate they decide. `engine-merge-train-bisect-line.test.ts` ("the marks are on disk before
   the next gate starts", "a restart between the halves") and `engine-merge-train.test.ts` ("a refused train's marks are
@@ -66,7 +67,7 @@ time on a machine at a load average of 4 to 11:
 | --- | --- |
 | `train-bisect`, `gate-log`, `line-hold`, `line-hold-cli`, `engine-line-hold-pr`, `engine-line-hold-restart` | under 2 s |
 | `engine-line-hold`, `engine-merge-preflight`, `engine-merge-train-preflight` and its `-faults`, `-position` and `-bound` | 10 to 17 s |
-| `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate` | 17 to 21 s |
+| `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate`, `engine-merge-train-resume` | 15 to 21 s |
 | `engine-merge-train-bisect` (25 s), `engine-merge-train` (34 s) | the longest |
 
 All of them one after another take about 3.5 minutes. The engine files run real git and real gate commands: a gate in a
@@ -99,6 +100,19 @@ as [AGENTS.md](../AGENTS.md), "Tests", says: alone, on the base, and nothing mer
   formation on the stack, so a command that calls a script with a new option fails on every branch that does not have
   the option yet, and refuses all of them at the door. Rule: a new option in a script a `merge.preflight` command calls
   must be tolerated by trees without it (the command checks that the script has it, and passes through when it does not).
-- **A swap of the running server can end a gate run that is going on**: with merges waiting in line behind it and trains
-  on, the resumed merge forms a train first (`mergeNow()` asks `train()` before `gate()`), and `runGate()` ends the old
-  run it cannot take up again. [upstream](upstream.md), "How a release is cut", says when to swap.
+- **A restart threw away a gate run that was still going.** The resumed merge went through `mergeNow()`, which asks
+  `train()` first; with merges waiting in line behind it and trains on, a train formed over the run, its stack's top was
+  another commit than the run's, and `runGate()` ended the run (377 s lost on 2026-11-26, a `stopped` ledger line followed
+  by a new run of the same task). Rule: a turn that goes on from a restart takes up the run it finds before it stacks
+  anything (`train()` reads it with `foundRun()`: a lone run's head is the branch's own commit and goes alone on it, a
+  train's run, named by `GateRun.members`, is rebuilt from exactly those members and kept only when its stack is the
+  run's commit on the run's base), and a run it cannot take up is ended through `endFound()` with a log line that says
+  why. Any step added before `runGate()` in a resumed turn leaves the run alone or ends it that way. Tests:
+  `engine-merge-train-resume.test.ts`, `engine-merge-train.test.ts` ("a restart while the train's gate runs") and
+  `engine-merge-train-bisect-line.test.ts` ("a restart between the halves"). What a swap still costs, and that swapping on
+  an empty line or under a hold stays the safe way, is in [upstream](upstream.md), "How a release is cut".
+- **A restart test that fabricated a run the server never wrote.** Two train restart tests started their run by hand with
+  no `members`: a record only an older Shepherdr leaves (2.0.85 and before kept no task either), so once a run's record is
+  what decides, they took the older rules and proved nothing about the current ones. Rule: a restart test writes
+  the run's record as the server does (`space`, and `members` for a train's), and a test for the older records deletes
+  `task`, `members` and `space` on purpose (`engine-merge-train-resume.test.ts`, the two "older Shepherdr" tests).

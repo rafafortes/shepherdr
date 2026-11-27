@@ -216,9 +216,13 @@
   that the gate still runs. If the base moved anyway while it ran, the branch is rebased on it and the gate runs again
   (three times at most). It is never a git hook: a hook that refuses an update leaves what it would write in the space's
   checkout. The gate runs detached, its words and exit code in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
-  merges once it passes, unless merges wait in line behind it and the space takes trains: the merge that goes on forms
-  a train first, whose stack is another commit than the run's, so that run is ended (`stopped` in the ledger, its minutes
-  lost) and the train's gate starts. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
+  merges once it passes, whether or not merges wait in line behind it and the space takes trains. A lone merge's run is
+  taken up by that merge alone (the merges behind it wait their turn, none is stacked over it); a train's run, whose
+  record names its members, by the train of exactly those members, so a merge that joined the line after the train formed
+  waits for the turn after it. Only a run that can no longer be taken up is ended (`stopped` in the ledger, its minutes
+  lost, the server's log saying `cannot go on` and why): its base moved while the server was down, a member left the line,
+  cannot ride any more or changed, the train's size shrank, or the branch changed; the merge then gates again as it
+  would have without the run. A run an older Shepherdr started is kept for a lone merge. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
   exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
   (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted. On startup a
   gate past its limit, or one whose task is gone or no longer waits for it, is stopped too; a young gate of a task that

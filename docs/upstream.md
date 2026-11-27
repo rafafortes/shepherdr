@@ -130,16 +130,24 @@ Only with the operator's yes, and patch bumps (`v2.0.1`, `v2.0.2`, …) unless t
 4. On a machine: `herdr plugin install rafafortes/shepherdr --ref v2.0.<n> --yes`, then the plugin's **start** action,
    which swaps the running server. Each install gets its own checkout; the previous one stays for rollback
    (`herdr plugin install rafafortes/shepherdr --ref v2.0.<n-1> --yes`, then start again).
-   **A swap can end the merge gate run that is going on.** The run itself survives the restart and the merge goes on
-   from it, unless merges wait in line behind it and the space takes trains: the merge that goes on forms a train first,
-   a stack that is another commit than the run's, so the run is ended (`stopped` in the gate ledger, the minutes it ran
-   are lost) and the train's gate starts at once. The swap to 2.0.86 was made while a gate ran and lost 377 s of it that
-   way; the swap to 2.0.87 was made when `shepherdr line` showed nothing running, and lost nothing. So swap when no merge
-   is running in any space (`shepherdr line` run from a folder no space owns, the home folder say, lists every space with
-   something going on, or says there is none; run inside a space's folder it shows that space only), or hold the line of
-   the busy space first (`shepherdr line hold <space> --why "server swap"` waits for the merge in flight, then keeps the
-   next turn from starting, and the hold survives the restart) and release it after the swap (`shepherdr line release
-   <space>`). What a swap did is read afterwards in the gate ledger, `gates/ledger.jsonl` in Shepherdr's home: a line
-   with `end` `stopped` is a run the swap ended, and the next line of that task is its new run.
+   **A swap leaves the merge gate run that is going on alone.** The run itself survives the restart and the merge goes on
+   from it, with trains on or off: a lone merge's run is taken up by that merge alone (the merges waiting in line behind
+   it wait their turn as they would have, none is stacked over it), and a train's run (its record names its members) by
+   the train of exactly those members, also when another merge joined the line after it formed (that one waits for the
+   turn after the train's). A run is ended only when what it gated is no longer what would land: its base moved while the
+   server was down, a member left the line, cannot ride any more or changed, the space's train size shrank, or the
+   branch changed. Then the server's log says why (`cannot go on`), the gate ledger has a `stopped` line for it and the
+   merge gates again at once, as a turn with no run to find would. A run an older Shepherdr started (2.0.85 and before
+   recorded no task) is kept for a lone merge, and a train's is taken up only when the stack comes out the same. Before
+   this was fixed a swap ended every such run that had merges waiting behind it (the swap to 2.0.86 lost 377 s of a gate
+   run that way). What a swap still costs: a merge it cut short in its pre-flight or in its `merge` step, with nothing
+   left to find, is told to run `shepherdr merge` again (its place in line is gone), and a train whose cars changed
+   gates again. So the safe way is unchanged: swap when no merge is running in any space (`shepherdr line` run from a
+   folder no space owns, the home folder say, lists every space with something going on, or says there is none; run
+   inside a space's folder it shows that space only), or hold the line of the busy space first (`shepherdr line hold
+   <space> --why "server swap"` waits for the merge in flight, then keeps the next turn from starting, and the hold
+   survives the restart) and release it after the swap (`shepherdr line release <space>`). What a swap did is read
+   afterwards in the gate ledger, `gates/ledger.jsonl` in Shepherdr's home: a line with `end` `stopped` is a run the
+   swap ended, and the next line of that task is its new run.
 5. Check after the swap: `shepherdr status`, `shepherdr doctor`, the app answers through the lab-ingress URL, and a
    real task runs end to end on pi.

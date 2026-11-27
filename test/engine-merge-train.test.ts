@@ -19,7 +19,16 @@ const waitFor = (go: string, dir: string, after = 'echo ok') =>
 
 /** every gate this file starts by hand, so a failing or interrupted test cannot leave one behind */
 const gatesStarted: number[] = []
-async function gate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }, limitMs?: number, hasTimeout?: boolean) {
+async function gate(
+  cmd: string,
+  wt: string,
+  env: Record<string, string>,
+  dir: string,
+  id: string,
+  at: { head: string; tip: string; space?: string; members?: string[] },
+  limitMs?: number,
+  hasTimeout?: boolean,
+) {
   const { startGate } = await import('../server/live/engine/engine.ts')
   const run = startGate(cmd, wt, env, dir, id, at, limitMs, hasTimeout)
   gatesStarted.push(run.pid)
@@ -389,9 +398,12 @@ describe('shepherdr merge', () => {
         // with the mark of the train they ride
         sh(`git checkout -q --detach ${top}`, a.worktree!)
         a.landing = { step: 'gate', at: 1, cars: 3 }
+        // the record a train's run carries since 2.0.86: its space and the merges it gates
         a.gateRun = await gate(w.settings.get('merge.gate', space), a.worktree!, { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME!, 'gates'), a.id, {
           head: top,
           tip: at,
+          space,
+          members: [a.id, b.id, c.id],
         })
         b.landing = { step: 'queue', at: 2, behind: a.id, gate: true, train: a.id }
         c.landing = { step: 'queue', at: 3, behind: a.id, gate: true, train: a.id }

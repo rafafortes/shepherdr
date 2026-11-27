@@ -4746,6 +4746,22 @@ export class Engine extends Emitter<Events> {
     return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
   }
 
+  /** the gate run of `t`'s merge that is going on, or done with its exit file there: the one a restart found (resumeMerges keeps
+   *  only such a run). A turn of a Shepherdr that has been up has none: runGate clears the record when its run ends */
+  private foundRun(t: TaskRec): GateRun | undefined {
+    const g = t.gateRun
+    return g && (fs.existsSync(g.exit) || alive(g.pid)) ? g : undefined
+  }
+
+  /** the run a restart found cannot go on (what it gated is no longer what the merge would gate): it is ended, its line in the
+   *  ledger says stopped, and the log says why; the turn then goes on as it would have without it */
+  private endFound(t: TaskRec, run: GateRun, line: string) {
+    trainLog(line)
+    this.dropRun(run)
+    t.gateRun = undefined
+    this.saveNow()
+  }
+
   /**
    * One run of the gate in `wt` at `head`, on the base at `at`: this very commit's run on the base as it is, still going
    * (or done) since Shepherdr restarted, when there is one, not a second beside it; else a new one, detached (startGate).
@@ -4762,8 +4778,7 @@ export class Engine extends Emitter<Events> {
       return { code: r.code, out, run: { pid: 0, log, exit: '', at: started, head, tip: at, task: t.id, ...who } }
     }
     const g = t.gateRun
-    const run =
-      g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(this.dir, 'gates'), t.id, { head, tip: at, ...who }, this.gateTimeout)
+    const run = g && g.head === head && g.tip === at && this.foundRun(t) ? g : startGate(cmd, wt, env, join(this.dir, 'gates'), t.id, { head, tip: at, ...who }, this.gateTimeout)
     // an earlier run this one does not pick up is unwanted: it is stopped, and its files (including a late exit) go
     if (g && g !== run) this.dropRun(g)
     t.gateRun = run
@@ -4912,7 +4927,46 @@ export class Engine extends Emitter<Events> {
     // change does not stack on main
     const why = new Map<TaskRec, string>(inLine.flatMap((e) => (e.why ? [[e.t, e.why] as const] : [])))
     const leftOut = () => [t, ...inLine.map((e) => e.t)].flatMap((x) => (why.has(x) ? [why.get(x)!] : []))
+    // The gate run a restart found for this merge (resumeMerges keeps it) is never thrown away by the turn that goes on from
+    // it: a lone merge's run (its commit is the branch's own) is taken up by the head alone, with nothing stacked over it; a
+    // train's run (its record names the members) by the train of exactly those members. Only a run that can no longer be
+    // taken up is ended, with its why. A run an older Shepherdr started names no task and no members: kept when it is a lone
+    // merge's, and otherwise left to the rules that were (a train forms, runGate decides).
+    const found = this.foundRun(t)
+    if (found && !found.members?.length) {
+      const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
+      const main = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+      if (found.head === head && found.tip === main) {
+        if (inLine.length)
+          trainLog(
+            `${t.id}'s merge goes alone: its gate run, which a restart found, goes on; ${inLine.map((e) => e.t.id).join(', ')} wait${inLine.length > 1 ? '' : 's'} for ${inLine.length > 1 ? 'their turns' : 'its turn'}`,
+          )
+        return undefined
+      }
+      if (found.task) {
+        const because =
+          found.tip !== main
+            ? `${t.base} moved while Shepherdr was down: the run gated on ${found.tip.slice(0, 7)}, ${t.base} is at ${main.slice(0, 7)}`
+            : `its branch is no longer the commit the run gated`
+        this.endFound(t, found, `${t.id}'s merge gate run, which a restart found, cannot go on (${because}): it is ended, and the merge goes on as without it`)
+      }
+    }
+    let resume = found?.members?.length ? found : undefined
+    /** the run a restart found cannot go on: `stack` is who still stacks, `main` the base now (when it is known) */
+    const lose = (stack: TaskRec[], main?: string) => {
+      const run = resume!
+      resume = undefined
+      const missing = run.members!.filter((id) => !stack.some((x) => x.id === id))
+      const reason =
+        main && run.tip !== main
+          ? `${t.base} moved while Shepherdr was down: the run gated on ${run.tip.slice(0, 7)}, ${t.base} is at ${main.slice(0, 7)}`
+          : missing.length
+            ? missing.map((id) => [...why].find(([x]) => x.id === id)?.[1] ?? `${id} is no longer in line`).join('; ')
+            : `the stack is not the one the run gated (a car's change differs)`
+      this.endFound(t, run, `${t.id}'s merge train: its gate run, which a restart found (${run.members!.join(', ')}), cannot go on: ${reason}. It is ended, and the turn goes on as without it`)
+    }
     if (!riders.length) {
+      if (resume) lose([t])
       // nothing else in line: a quiet turn, nothing to explain; someone in line who can't ride is said here
       if (inLine.length) trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
       else if (t.bisect) trainLog(`${t.id}'s merge goes alone (its turn alone after a refused train: nobody else of its group waits in line)`)
@@ -4934,30 +4988,57 @@ export class Engine extends Emitter<Events> {
       const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
       return { tree, commit: c.out }
     }
-    const stacked: { t: TaskRec; tree: string; commit: string }[] = []
-    let top = at
-    for (const [i, x] of [t, ...riders].entries()) {
-      if (stacked.length === k) {
-        for (const r of riders.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
-        break
-      }
-      if (x !== t) {
-        await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
-        // a rider's commit goes into the base too: it must be one a round was recorded on, as the head's is (mergeNow)
-        const unreviewed = await this.reviewGate(x)
-        if (unreviewed) {
-          why.set(x, unreviewed)
+    /** the head's change stacked on main, and each of `pool` (in line order) on those before it, as many as the train takes */
+    const stackUp = async (pool: TaskRec[]) => {
+      const out: { t: TaskRec; tree: string; commit: string }[] = []
+      let top = at
+      for (const [i, x] of [t, ...pool].entries()) {
+        if (out.length === k) {
+          for (const r of pool.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
+          break
+        }
+        if (x !== t) {
+          await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+          // a rider's commit goes into the base too: it must be one a round was recorded on, as the head's is (mergeNow)
+          const unreviewed = await this.reviewGate(x)
+          if (unreviewed) {
+            why.set(x, unreviewed)
+            continue
+          }
+        }
+        // the head stacks on main, every other on those before it
+        const on = await stackOn(top, x, i ? 'those before it' : 'main')
+        if (typeof on === 'string') {
+          why.set(x, on)
           continue
         }
+        out.push({ t: x, ...on })
+        top = on.commit
       }
-      // the head stacks on main, every other on those before it
-      const on = await stackOn(top, x, i ? 'those before it' : 'main')
-      if (typeof on === 'string') {
-        why.set(x, on)
-        continue
+      return out
+    }
+    // a train's run that was found takes exactly the cars it gated (a group marked by a refused train has its own: its
+    // marks hold the halves), the merges that joined the line after it began wait for the turn after it
+    const only = resume && !t.bisect ? new Set(resume.members) : undefined
+    const before = new Map(why)
+    let stacked = await stackUp(only ? riders.filter((r) => only.has(r.id)) : riders)
+    // what the run gated, found again: the same cars on the same base give the same commit
+    if (resume) {
+      const first = halves(stacked, !!t.bisect?.suspect).go
+      if (at === resume.tip && first.at(-1)?.commit === resume.head && first.map((c) => c.t.id).join() === resume.members?.join()) {
+        for (const r of riders) if (!stacked.some((c) => c.t === r) && !why.has(r)) why.set(r, `${r.id} waits (its turn comes after the train whose gate run a restart found)`)
+      } else {
+        lose(
+          stacked.map((c) => c.t),
+          at,
+        )
+        // the turn goes on as without it: everyone in line may ride
+        if (only) {
+          why.clear()
+          for (const [x, reason] of before) why.set(x, reason)
+          stacked = await stackUp(riders)
+        }
       }
-      stacked.push({ t: x, ...on })
-      top = on.commit
     }
     if (stacked.length < 2 || stacked[0].t !== t) {
       trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
@@ -4968,7 +5049,7 @@ export class Engine extends Emitter<Events> {
     let cur = stacked
     // a fresh train (an unmarked head: a group being searched by halves is that search's) is first looked at by the
     // pre-flight, so a car with a fault a cheap check finds goes to its own gate instead of making the gate refuse the train
-    const pre = t.bisect ? undefined : this.runner.preflightOf(t, p.name)
+    const pre = t.bisect || resume ? undefined : this.runner.preflightOf(t, p.name)
     if (pre) {
       const cars = await this.preflightTrain(t, p, wt, pre, stacked, at, why, async (xs) => {
         const out: typeof stacked = []
@@ -5011,8 +5092,9 @@ export class Engine extends Emitter<Events> {
       }
       const tip = go[go.length - 1].commit
       const ride = suspect ? `: the first half of ${ids(cur).join(', ')}, which a gate run refused together` : t.bisect && !round ? ` (the rest of a refused train, tried together)` : ''
+      const goesOn = resume && !round ? '; its gate run, which a restart found, goes on' : ''
       trainLog(
-        `${t.id}'s merge train: ${names.join(', ')} (one gate run on ${tip.slice(0, 7)}, main at ${at.slice(0, 7)})${ride}${!round && leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`,
+        `${t.id}'s merge train: ${names.join(', ')} (one gate run on ${tip.slice(0, 7)}, main at ${at.slice(0, 7)})${ride}${goesOn}${!round && leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`,
       )
       // the gate, once, in t's worktree at the top of the stack; its branch is back as it was after
       let ran: { code: number; out: string; run: GateRun } | undefined
