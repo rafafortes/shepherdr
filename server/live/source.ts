@@ -5000,7 +5000,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   async cli(
     args: string[],
-    ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+    ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string; signal?: AbortSignal },
     /** the command's interim channel: doctor and checks say what they are doing while they work (UXD-08) */
     onStep?: (words: string) => void,
   ): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
@@ -5051,7 +5051,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** the CLI verbs live in cli-commands.ts; this keeps every importer and the /api/cli path untouched */
-  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
+  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; signal?: AbortSignal }, onStep?: (words: string) => void): Promise<string> {
     return this.cliCommands.command(p, ctx, onStep)
   }
 

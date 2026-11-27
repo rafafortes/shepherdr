@@ -87,6 +87,7 @@ import { MergeRunner, ghNow, trainLog, type MergeHost } from './merge.ts'
 import { groupId, halves, rideBlock, type Bisect } from './train-bisect.ts'
 import { gateName, GateLedger, type GateEnd, type GateWho } from './gate-log.ts'
 import type { Hold } from './line-hold.ts'
+import { LINE_HOLD_WAIT_MAX } from '../../../shared/line-wait.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 import { resolveTakenPr, takenPrRecord, type TakenPr, type TakenPrRecord } from './taken-pr.ts'
 
@@ -4491,8 +4492,8 @@ export class Engine extends Emitter<Events> {
   }
 
   /** shepherdr line hold: `p`'s merge line is kept from starting its next turn for `ms` (merge.ts hold) */
-  lineHold(p: Space, who: { by: string; why: string }, ms: number, waitMs = this.gateTimeout) {
-    return this.runner.hold(p, who, ms, waitMs)
+  lineHold(p: Space, who: { by: string; why: string }, ms: number, waitMs = Math.min(this.gateTimeout, LINE_HOLD_WAIT_MAX), gone?: AbortSignal) {
+    return this.runner.hold(p, who, ms, waitMs, gone)
   }
 
   /** shepherdr line release: the hold on `p`'s line ends now */

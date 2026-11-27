@@ -168,6 +168,49 @@ describe('holding the merge line', () => {
     expect((await Promise.all([first, asked])).map((x) => x.ok)).toEqual([true, true])
   })
 
+  test('a command that goes away while its hold waits for the merge in flight takes the reservation with it: nothing is held, the log says so, and the next turn is not kept back', async () => {
+    const { w, ts, space, blocker, riders, go, ran } = await trainWorld('hold-gone', 1, 'off')
+    const p = spaceOf(w, space)
+    const first = w.engine.merge(blocker.id, { self: true })
+    await until(() => blocker.landing?.step === 'gate')
+    const gone = new AbortController()
+    const holding = w.engine.lineHold(p, who, 600_000, 30_000, gone.signal)
+    // asked for while it waits: the next merge queues behind the reservation, as it would behind a hold
+    const asked = w.engine.merge(riders[0].id, { self: true })
+    await until(() => riders[0].landing?.step === 'queue')
+    expect(w.engine.line(p).hold).toMatchObject({ state: 'waiting', by: who.by })
+    expect(w.engine.subOf(riders[0])).toBe(`Merge line about to be held by ${who.by}: ${who.why}`)
+    gone.abort()
+    const r = await holding
+    expect(!r.ok && r.error).toContain('is gone: nothing is held')
+    expect(w.engine.line(p).hold).toBeUndefined()
+    expect(lines().filter((l) => l.includes('went away'))).toEqual([
+      `shepherdr: line hold on ${space}: ${who.by}'s command went away while the hold waited for the merge in flight to end: nothing is held`,
+    ])
+    // the end of the merge in flight holds nothing, and the merge that queued goes on
+    for (const t of ts) go(t)
+    expect((await Promise.all([first, asked])).map((x) => x.ok)).toEqual([true, true])
+    expect(ran()).toEqual([blocker.id, riders[0].id])
+    expect(w.engine.line(p).hold).toBeUndefined()
+  })
+
+  test('a command that is gone already reserves nothing; one that goes away after the hold took effect leaves it held', async () => {
+    const { w, space } = await trainWorld('hold-gone-late', 0, 'off')
+    const p = spaceOf(w, space)
+    const before = new AbortController()
+    before.abort()
+    const none = await w.engine.lineHold(p, who, 600_000, 30_000, before.signal)
+    expect(!none.ok && none.error).toBe(`The command that asked to hold ${space}'s merge line is gone: nothing is held.`)
+    expect(w.engine.line(p).hold).toBeUndefined()
+    const gone = new AbortController()
+    const held = await w.engine.lineHold(p, who, 600_000, 30_000, gone.signal)
+    expect(held.ok).toBe(true)
+    gone.abort()
+    expect(w.engine.line(p).hold).toMatchObject({ state: 'held', by: who.by })
+    expect(lines().filter((l) => l.includes('went away'))).toEqual([])
+    expect(w.engine.lineRelease(p, who.by)).toMatchObject({ state: 'held' })
+  })
+
   test('a merge that went in with a train on the turn a hold waited for has nothing left to wait for: its own request ends under the hold', async () => {
     const { w, dir, ts, blocker, riders, space, go, ran } = await trainWorld('hold-rider', 2, '2')
     const p = spaceOf(w, space)

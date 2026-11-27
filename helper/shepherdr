@@ -54,7 +54,8 @@ print $s "POST /api/cli HTTP/1.0\r\nHost: shepherdr\r\n${authorization}Content-T
 # The long verbs have their own server-side deadlines (engine.ts, git.ts, the same as server/cli.ts): checks waits
 # up to 9 minutes for GitHub plus one last gh call (120 s), pr may push and open a pull request with gh calls of
 # 120 s, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here), line hold up to the gate's 45 minutes plus the
-# hold's own seconds (47 minutes here); the rest get 30 s. A bad override
+# hold's own seconds (47 minutes here: LINE_HOLD_COMMAND_WAIT in shared/line-wait.ts, which this script cannot import; a test
+# keeps the two numbers equal); the rest get 30 s. A bad override
 # falls back, never disables the bound. The merge words below stay as they were: agents already parse them.
 my $bound = sub {
   my ($name, $fallback) = @_;

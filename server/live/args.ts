@@ -233,9 +233,11 @@ export const TOPIC = {
                                                  rows say who holds, until when and why. It returns once the hold is in
                                                  effect and prints the base branch's tip then. --for defaults to 20 minutes,
                                                  at most 60: the hold ends by itself then, so a holder that crashed cannot
-                                                 block the line; --wait (default: the gate's limit) bounds the wait for the
-                                                 merge in flight, and ends with no hold left behind. A space whose merges go
-                                                 through a pull request has no line to hold
+                                                 block the line; --wait (default and most: 45 minutes, the gate's limit; this
+                                                 command itself gives up after 47) bounds the wait for the merge in flight,
+                                                 and ends with no hold left behind, as does a command that is interrupted or
+                                                 gives up before the hold took effect. A space whose merges go through a pull
+                                                 request has no line to hold
   shepherdr line release <space>                 end the hold now: the next merge in line takes its turn (a line that is not
                                                  held says so, and that is fine)
   shepherdr restart <space|id> [--agent CLI] [--model ID] [--effort LEVEL] [--save]

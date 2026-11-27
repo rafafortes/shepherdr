@@ -17,7 +17,7 @@ const { ROW_MAX } = await import('../shared/types.ts')
 
 /** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
  *  dispatch verbs; this pins the text itself. Update it when help text is meant to change (as with --json on the lists). */
-const ORIGINAL_HELP_SHA = 'd4f3b53fa4cadabf1ffa0737c3ed91ffeacaaaf7e5d8a45d170174bf0b925f38'
+const ORIGINAL_HELP_SHA = 'ab10f8c2faaffc268f004c907d7f4a7a2a4d200109c0a6de5a22b27728ac98da'
 
 const src = new LiveSource()
 afterAll(() => src.stop())

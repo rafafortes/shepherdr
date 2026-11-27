@@ -175,6 +175,80 @@ describe('a reservation its caller gives up', () => {
   })
 })
 
+describe('a reservation never outlives the command that waits for it', () => {
+  test('a command that goes away while the hold waits ends it with nothing held, the turns go on, and the log says so', async () => {
+    const { h, stored, log, changed } = host()
+    const holds = new LineHolds(h)
+    const gone = new AbortController()
+    const asked = holds.ask(REPO, who, 600_000, true, 60_000, gone.signal)
+    let turn = false
+    const gate = holds.gate(REPO).then(() => {
+      turn = true
+    })
+    expect(holds.on(REPO)).toBe(true)
+    gone.abort()
+    const r = await asked
+    expect(!r.ok && r.error).toBe("The command that asked to hold lyvora-app's merge line is gone: nothing is held, and the line goes on as it was.")
+    await gate
+    expect(turn).toBe(true)
+    expect(stored).toEqual({})
+    expect(holds.on(REPO)).toBe(false)
+    expect(holds.pending(REPO)).toBeUndefined()
+    expect(changed.at(-1)).toBe(REPO)
+    expect(log.at(-1)).toBe("line hold on lyvora-app: you (terminal)'s command went away while the hold waited for the merge in flight to end: nothing is held")
+    // the end of the merge in flight, later, holds nothing
+    holds.idle(REPO)
+    expect(stored).toEqual({})
+  })
+
+  test('a hold that took effect before the command went away is kept: it is a hold, and it ends at its time or its release', async () => {
+    const { h, stored, log } = host()
+    const holds = new LineHolds(h)
+    const gone = new AbortController()
+    const asked = holds.ask(REPO, who, 600_000, true, 60_000, gone.signal)
+    holds.idle(REPO)
+    const r = await asked
+    expect(r.ok).toBe(true)
+    gone.abort()
+    expect(stored[REPO]).toBeDefined()
+    expect(holds.on(REPO)).toBe(true)
+    expect(log.some((l) => l.includes('went away'))).toBe(false)
+    expect(holds.release(REPO, who.by)).toMatchObject({ state: 'held' })
+  })
+
+  test("a command that goes away after its own reservation ended never ends another command's: however the first one ended", async () => {
+    const { h, stored, log } = host()
+    const holds = new LineHolds(h)
+    const endings: [string, (holds: LineHolds) => void][] = [
+      ['its wait ran out', () => undefined],
+      ['someone released it', (x) => void x.release(REPO, 'Atena')],
+      ['its caller cancelled it', (x) => x.cancel(REPO, 'a pull request')],
+      [
+        'it took effect and was released',
+        (x) => {
+          x.idle(REPO)
+          x.release(REPO, 'Atena')
+        },
+      ],
+    ]
+    for (const [i, [, end]] of endings.entries()) {
+      const first = new AbortController()
+      const asked = holds.ask(REPO, who, 600_000, true, i === 0 ? 20 : 60_000, first.signal)
+      end(holds)
+      await asked
+      expect(holds.on(REPO)).toBe(false)
+      // another command's reservation is waiting when the first command's signal aborts, late
+      const next = holds.ask(REPO, { by: 'Atena', why: 'next' }, 600_000, true, 60_000)
+      first.abort()
+      expect(holds.pending(REPO)).toMatchObject({ by: 'Atena', why: 'next' })
+      holds.release(REPO, 'Atena')
+      await next
+    }
+    expect(stored).toEqual({})
+    expect(log.filter((l) => l.includes('went away'))).toEqual([])
+  })
+})
+
 describe('the end of a hold', () => {
   test('releasing a line that is not held says nothing was held', () => {
     const { h, log } = host()

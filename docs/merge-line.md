@@ -19,6 +19,9 @@ All of it is under `server/live/engine/` unless said.
 - `gate-log.ts`: every run's log, the ledger `gates/ledger.jsonl` in Shepherdr's home, pruning (`GateLedger`).
 - `line-hold.ts`: `LineHolds`, the reservation, the expiry and the per-repo gate every turn passes first.
 - `server/live/cli-commands.ts` (`lineCommand()`) and `server/live/args.ts` (the help, the verb list): `shepherdr line`.
+  `shared/line-wait.ts`: how long a line hold may wait (`LINE_HOLD_WAIT_MAX`) and how long the command waits for it
+  (`LINE_HOLD_COMMAND_WAIT`), used by the server and `server/cli.ts`; `helper/shepherdr` is Perl and holds the same number.
+  `server/app.ts` gives a command `ctx.signal`, which aborts when its caller goes away.
   `server/live/settings.ts`: the rows `merge.gate`, `merge.preflight`, `merge.train`; the train's cap `TRAIN_MAX` (8) is
   in `engine.ts` and its options also in `src/LimitsPage.tsx` and `test/models-matrix.test.ts`.
 - A change of behaviour changes `docs/tasks.md`, `docs/settings.md` and the two skills (`skill/shepherdr-agent`,
@@ -48,9 +51,10 @@ The files are in `test/`.
   refuses, a train's search makes at most 12 runs a turn, and cars are marked only once the search ended.
   `engine-merge-preflight.test.ts` ("it never holds the line") and the four `engine-merge-train-preflight*.test.ts`.
 - **A held line starts no turn, and a hold always ends**: released, expired (also after a restart), or given up when the
-  wait for the merge in flight runs out, with no hold left behind. `engine-line-hold.test.ts`,
-  `engine-line-hold-restart.test.ts`, `engine-line-hold-pr.test.ts`, `line-hold.test.ts` (the class alone) and
-  `line-hold-cli.test.ts` (the command).
+  wait for the merge in flight runs out or the command that waits for it goes away, with no hold left behind: a
+  reservation never outlives its command. `engine-line-hold.test.ts`, `engine-line-hold-restart.test.ts`,
+  `engine-line-hold-pr.test.ts`, `line-hold.test.ts` (the class alone), `line-hold-cli.test.ts` (the command, its `--wait`
+  cap), `app-cli-gone.test.ts` (the route's signal) and `cli.test.ts` (both commands close their end when they give up).
 - **Every decision is one log line, and every run is one ledger line with its log kept.**
   `engine-merge-train-bisect.test.ts` ("the lines say what each decision was", "every gate run of a search keeps its log
   and has its line"), the hold tests (they read the log) and `gate-log.test.ts` (names, ledger, rotation, pruning).
@@ -65,12 +69,12 @@ time on a machine at a load average of 4 to 11:
 
 | Files | Each takes |
 | --- | --- |
-| `train-bisect`, `gate-log`, `line-hold`, `line-hold-cli`, `engine-line-hold-pr`, `engine-line-hold-restart` | under 2 s |
+| `train-bisect`, `gate-log`, `line-hold`, `line-hold-cli`, `app-cli-gone`, `engine-line-hold-pr`, `engine-line-hold-restart` | under 2 s |
 | `engine-line-hold`, `engine-merge-preflight`, `engine-merge-train-preflight` and its `-faults`, `-position` and `-bound` | 10 to 17 s |
 | `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate`, `engine-merge-train-resume` | 15 to 21 s |
 | `engine-merge-train-bisect` (25 s), `engine-merge-train` (34 s) | the longest |
 
-All of them one after another take about 3.5 minutes. The engine files run real git and real gate commands: a gate in a
+All of them one after another take about 3.5 minutes. `cli` (37 s, the commands' own timeouts) is one more for a change to a command's wait or to the helper. The engine files run real git and real gate commands: a gate in a
 test is a shell loop that waits for a `go-<task>` file and ends by itself, so a test that hangs is a gate waiting for a
 file the test never wrote. Build a new test on `test/train-world.ts` (`trainWorld()`: a blocker holds the line while the
 members queue; `bisectRows()`; `trainLog()` reads the server's log) and `test/train-preflight-world.ts` (`ledger()`,
@@ -116,3 +120,12 @@ as [AGENTS.md](../AGENTS.md), "Tests", says: alone, on the base, and nothing mer
   what decides, they took the older rules and proved nothing about the current ones. Rule: a restart test writes
   the run's record as the server does (`space`, and `members` for a train's), and a test for the older records deletes
   `task`, `members` and `space` on purpose (`engine-merge-train-resume.test.ts`, the two "older Shepherdr" tests).
+- **A line hold whose command gave up left a hold nobody was told about.** `--wait` had no upper bound while the command
+  itself gives up after 47 minutes, so a `--wait` past that ended the caller with "no answer" while the reservation lived on
+  in the server and later became a hold in effect, ending only at its `--for` expiry. Rule: a reservation never outlives
+  the command that waits for it. `--wait` is capped under what the command waits (`shared/line-wait.ts`, one number for
+  `server/cli.ts` and the server; the Perl helper's literal is held equal by `cli.test.ts`), and a command that goes away
+  for any reason before the hold took effect (its own limit, an interrupt, the connection closing) cancels the
+  reservation through `ctx.signal` with a log line. A new long-waiting command that keeps state in the server for its caller
+  reads `ctx.signal` the same way: `/api/cli` otherwise lets a command go on after its caller left, on purpose
+  (`doctor` repairs the machines after the client is gone).

@@ -333,7 +333,8 @@
   or a coordinator, never a task's agent, takes one space's turn with `shepherdr line hold <space> [--for <minutes>] --why
   "<text>"`: it waits until the merge or gate of that repo that is in flight, if any, has ended (and meanwhile already keeps
   the next turn from starting: the request itself reserves it, so nothing slips in ahead of it; `--wait <minutes>`, by
-  default the gate's limit, bounds that wait and then ends the command with a clear message and no hold left behind), then
+  default and at most the gate's limit (45 minutes: the command itself gives up after 47, and a longer `--wait` is refused
+  with that said), bounds that wait and then ends the command with a clear message and no hold left behind), then
   holds the line and prints the base branch's tip at that moment. While it holds, no merge of that repo starts its turn (no
   gate, no train, no landing): merges asked for meanwhile queue and keep their order, and their rows read `Merge line held by
   <who> until <time>: <why>` (`about to be held by …` while the hold still waits for the merge in flight). `--for` is the
@@ -344,8 +345,11 @@
   and why. A second hold says who holds. A task's agent is refused (its chat says it is one); a space whose merges go through a
   pull request has no line of Shepherdr's to hold, and says so. The hold is kept in `tasks.json` with its expiry, so it
   survives a restart (the Shepherdr that comes back reads it and ends one found past its time); every hold, release, expiry
-  and wait that gave up is one `shepherdr: line hold on <space> …` line of the server's log. A merge a train already took
-  along, or with nothing to merge, does not wait for the hold: it has no turn's work left.
+  and wait that gave up is one `shepherdr: line hold on <space> …` line of the server's log. **A reservation never outlives
+  the command that waits for it**: when that command ends before the hold took effect, whatever the reason (its own limit,
+  an interrupt, the connection closing), the reservation is cancelled with a log line (`… command went away while the hold
+  waited …`) and the line goes on as it was; a hold that took effect is kept to its expiry, or its release. A merge a train
+  already took along, or with nothing to merge, does not wait for the hold: it has no turn's work left.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
   conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a
