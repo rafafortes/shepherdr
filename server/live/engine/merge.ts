@@ -826,9 +826,11 @@ export class MergeRunner {
       if (train) return train
       // the space's merge gate, on the branch as it would go in: its last line goes into the commit
       const gate = await this.e.gate(t, p.path, p.name, wt)
-      // its turn alone is over once its gate ran to its end, however that ended: it may ride a train again
-      if (t.alone && !(!gate.ok && gate.stopped)) {
+      // its turn alone is over once its gate ran to its end, however that ended: it may ride a train again, and a mark
+      // of a refused train's group (bisect) goes with it
+      if ((t.alone || t.bisect) && !(!gate.ok && gate.stopped)) {
         t.alone = undefined
+        t.bisect = undefined
         this.e.saveNow()
       }
       if (!gate.ok) return { ok: false, error: gate.error }

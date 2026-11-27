@@ -17,6 +17,16 @@ setDefaultTimeout(60_000)
 const waitFor = (go: string, dir: string, after = 'echo ok') =>
   `i=0; while [ ! -f ${go} ] && [ -d ${dir} ] && kill -0 ${process.pid} 2>/dev/null && [ \$i -lt 1200 ]; do sleep 0.05; i=\$((i+1)); done; ${after}`
 
+/** the gate folder of this test's home, and its ledger's lines */
+const gatesDir = () => join(process.env.SHEPHERDR_HOME ?? '', 'gates')
+const ledger = (): { space: string; task: string; end: string; code: number | null; log: string; last: string; head: string; base: string; seconds: number; members?: string[] }[] =>
+  readFileSync(join(gatesDir(), 'ledger.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l))
+/** the files a run that is going on, or was stopped halfway, leaves besides its log */
+const exitFiles = () => readdirSync(gatesDir()).filter((f) => f.endsWith('.exit') || f.endsWith('.exit.tmp'))
+
 /** every gate this file starts by hand, so a failing or interrupted test cannot leave one behind */
 const gatesStarted: number[] = []
 async function gate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }, limitMs?: number, hasTimeout?: boolean) {
@@ -55,11 +65,20 @@ describe('shepherdr merge', () => {
     }
 
     test('it runs in the worktree after the rebase: exit 0 lets it in, and its last line goes into the merge commit', async () => {
-      const { w, dir, t } = await gated('gate-ok', 'test -f hello.txt && echo checking && echo "Merge gate: green for $SHEPHERDR_TASK on $SHEPHERDR_BASE"')
+      const { w, dir, p, t } = await gated('gate-ok', 'test -f hello.txt && echo checking && echo "Merge gate: green for $SHEPHERDR_TASK on $SHEPHERDR_BASE"')
+      const base = sh('git rev-parse main', dir)
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
       expect(sh('git log -1 --format=%b', dir)).toBe(`Added hello.txt.\n\nMerge gate: green for ${t.id} on main`)
-      // a run's files go once its outcome is read
-      expect(readdirSync(join(process.env.SHEPHERDR_HOME!, 'gates'))).toEqual([])
+      // a run's exit files go once its outcome is read; its log stays, named by its one line in the ledger
+      const [line, ...more] = ledger()
+      expect(more).toEqual([])
+      expect(exitFiles()).toEqual([])
+      expect(readdirSync(gatesDir()).sort()).toEqual([line.log, 'ledger.jsonl'].sort())
+      expect(readFileSync(join(gatesDir(), line.log), 'utf8')).toBe(`checking\nMerge gate: green for ${t.id} on main\n`)
+      expect(line).toMatchObject({ space: p.name, task: t.id, end: 'passed', code: 0, last: `Merge gate: green for ${t.id} on main`, base })
+      expect(line.head).toMatch(/^[0-9a-f]{40}$/)
+      expect(line.members).toBeUndefined()
+      expect(line.log).toMatch(new RegExp(`^${p.name}\\.${t.id}-\\d{13}-[0-9a-f]{8}\\.log$`))
       expect(w.engine.statusOf(t)).toBe('done')
     })
 
@@ -68,8 +87,12 @@ describe('shepherdr merge', () => {
       const main = sh('git rev-parse main', dir)
       const r = await w.engine.merge(t.id, { self: true })
       expect(r.ok).toBe(false)
+      // the refusal says where the run's whole log is kept, and the ledger has the run: refused, its code and its last line
+      const [line] = ledger()
+      expect(line).toMatchObject({ task: t.id, end: 'refused', code: 3, last: '2 tests failed' })
+      expect(readFileSync(join(gatesDir(), line.log), 'utf8')).toBe('building\n2 tests failed\n')
       expect(r.error).toBe(
-        `${t.id}'s merge gate (echo building; echo "2 tests failed" >&2; exit 3) failed (exit 3): nothing was merged, and main is as it was. Its output ends:\nbuilding\n2 tests failed\nThe merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first.`,
+        `${t.id}'s merge gate (echo building; echo "2 tests failed" >&2; exit 3) failed (exit 3): nothing was merged, and main is as it was. Its output ends:\nbuilding\n2 tests failed\nIts full log is kept at ${join(gatesDir(), line.log)}\nThe merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first.`,
       )
       expect(sh('git rev-parse main', dir)).toBe(main)
       expect(sh('git status --porcelain', dir)).toBe('')
@@ -227,13 +250,20 @@ describe('shepherdr merge', () => {
       const stale = await gate(waitFor(go, goDir, 'echo stale'), t.worktree!, {}, gates, t.id, { head: 'old-head', tip: 'old-tip' })
       t.gateRun = stale
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
-      expect(readdirSync(gates)).toEqual([])
+      expect(exitFiles()).toEqual([])
+      // both runs have their line: the dropped one stopped (no exit code), the new one passed; both logs are kept
+      const lines = ledger()
+      expect(lines.map((l) => [l.end, l.code])).toEqual([
+        ['stopped', null],
+        ['passed', 0],
+      ])
+      expect(readdirSync(gates).filter((f) => f.endsWith('.log'))).toHaveLength(2)
       // the dropped run's whole process group is gone, not left to end: it can no longer fork sleep
       await until(() => gateGone(stale), 20_000)
       // even an exit code written as the kill landed goes to its own files, and the late cleanup removes it
       writeFileSync(stale.exit, '0\n')
       expect(existsSync(stale.exit)).toBe(true)
-      await until(() => readdirSync(gates).length === 0, 20_000)
+      await until(() => exitFiles().length === 0, 20_000)
     })
 
     test('a restart that finds a gate run dead with no exit code drops it with its files', async () => {
@@ -248,7 +278,10 @@ describe('shepherdr merge', () => {
       t.gateRun = { pid: 999_999_999, log, exit: join(gates, 'dead.exit'), at: Date.now(), head: 'x', tip: 'y' }
       w.engine.resumeMerges()
       expect(t.gateRun).toBeUndefined()
-      expect(readdirSync(gates)).toEqual([])
+      // its half-written exit file goes; its log stays, and the ledger says it was stopped with no exit code
+      expect(exitFiles()).toEqual([])
+      expect(readdirSync(gates).sort()).toEqual(['dead.log', 'ledger.jsonl'])
+      expect(ledger()).toMatchObject([{ task: '', end: 'stopped', code: null, log: 'dead.log', head: 'x', base: 'y' }])
       expect(w.engine.subOf(t)).toBe('Merge gate interrupted by a restart: run shepherdr merge again')
     })
 

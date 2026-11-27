@@ -65,7 +65,8 @@ describe('shepherdr merge', () => {
       afterEach(() => {
         console.error = stderr
       })
-      const decisions = () => log.filter((l) => /merge (train|goes alone)/.test(l) && mine.some((id) => l.startsWith(`shepherdr: ${id}'s `)))
+      // a refused train names the log of its run, which has a random name: `log <file>` stands for it
+      const decisions = () => log.filter((l) => /merge (train|goes alone)/.test(l) && mine.some((id) => l.startsWith(`shepherdr: ${id}'s `))).map((l) => l.replace(/; log \S+\.log\)/, '; log <file>)'))
       /** a commit's short id (7 characters), as the train's lines name it */
       const short = (dir: string, ref: string | undefined) => sh(`git rev-parse --short=7 ${ref}`, dir)
 
@@ -153,7 +154,7 @@ describe('shepherdr merge', () => {
         expect(ran()).toEqual([x.id, a.id])
       })
 
-      test('one that conflicts stays out for its own turn; a refusal goes back to one at a time', async () => {
+      test('one that conflicts stays out for its own turn; a refused pair is searched by halves: the head alone, then the other', async () => {
         // the gate refuses whenever 4.txt (the last task's) is in the tree it checks
         const { w, dir, ts, go, ran, heads } = await train('train-red', 4, '4', 'test -f 4.txt && { echo "4.txt is not wanted"; exit 1; }; ')
         const [x, a, b, c] = ts
@@ -166,7 +167,7 @@ describe('shepherdr merge', () => {
         for (const t of [x, a, c]) go(t)
         const [rx, ra, rb, rc] = await Promise.all(runs)
         expect([rx.ok, ra.ok]).toEqual([true, true])
-        // the train (a and c) was refused, so a went alone; b then conflicted with a on its own turn; c was refused alone
+        // the train (a and c) was refused, so a went alone, its half; b then conflicted with a on its own turn; c was refused alone
         expect(ran()).toEqual([x.id, a.id, a.id, c.id])
         expect(rb.error).toContain('Conflict with main')
         expect(rc.error).toContain(`${c.id}'s merge gate`)
@@ -175,7 +176,8 @@ describe('shepherdr merge', () => {
         // b's conflict is named, with the file; the train of a and c is refused, and c's own turn alone comes last
         expect(decisions()).toEqual([
           `shepherdr: ${a.id}'s merge train: ${a.id}, ${c.id} (one gate run on ${heads()[1]}, main at ${short(dir, x.squash)}). Left out: ${b.id} conflicts with those before it (2.txt)`,
-          `shepherdr: ${a.id}'s merge train refused (exit 1): each goes alone once`,
+          `shepherdr: ${a.id}'s merge train refused (exit 1; log <file>): ${a.id}, ${c.id} are searched by halves, ${a.id} first and ${c.id} after`,
+          `shepherdr: ${a.id}'s merge goes alone: the first half of ${a.id}, ${c.id} is ${a.id}; ${c.id} goes alone after it`,
           `shepherdr: ${c.id}'s merge goes alone (its turn alone after a refused train)`,
         ])
       })
@@ -183,7 +185,7 @@ describe('shepherdr merge', () => {
       /** the gate refuses while bad.txt is in the tree (a task's commit of its own) */
       const REFUSE_BAD = 'test -f bad.txt && { echo "bad.txt is not wanted"; exit 1; }; '
 
-      test('a refused train: each member goes alone once, only the one whose change fails is told, and it rides again after its turn alone', async () => {
+      test('a refused train of three: its head goes alone, the other two after it; only the one whose change fails is told, and it rides again after its turn alone', async () => {
         const { w, dir, ts, go, ran, heads } = await train('train-refused', 4, '3', REFUSE_BAD)
         const [x, a, b, c] = ts
         const space = w.engine.view(x).place.split(':').pop()!
@@ -197,14 +199,18 @@ describe('shepherdr merge', () => {
         go(b)
         const [rx, ra, rb, rc] = await Promise.all(runs)
         expect([rx.ok, ra.ok, rb.ok]).toEqual([true, true, true])
-        // the train of a, b and c is refused by c's change: a goes alone and goes in, then b, then c alone is refused
+        // the train of a, b and c is refused by c's change: its first half is a alone, which goes in, then b alone, then c alone is refused
         expect(ran()).toEqual([x.id, a.id, a.id, b.id, c.id])
         expect(rc.error).toContain(`${c.id}'s merge gate`)
         expect(rc.error).toContain('bad.txt is not wanted')
         expect(rb.error).toBeUndefined()
         // nobody but c heard about a refused train: none of the three was sent a word on it
         expect(w.sent.filter((m) => m.text.includes('train'))).toEqual([])
-        expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
+        expect([a, b, c].map((t) => [t.alone, t.bisect])).toEqual([
+          [undefined, undefined],
+          [undefined, undefined],
+          [undefined, undefined],
+        ])
         expect(c.landing).toBeUndefined()
         // c fixes its change: it rides again, behind d (its train's head, queued first) while e's gate runs
         sh('git rm -q bad.txt && git commit -qm "c drops bad.txt"', c.worktree!)
@@ -234,7 +240,8 @@ describe('shepherdr merge', () => {
         expect(sh(`git log -1 --format=%b ${c.squash}`, dir)).toContain(`Merge train: ${d.id}, ${c.id} (one merge gate run)`)
         expect(decisions()).toEqual([
           `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id}, ${c.id} (one gate run on ${heads()[1]}, main at ${short(dir, x.squash)})`,
-          `shepherdr: ${a.id}'s merge train refused (exit 1): each goes alone once`,
+          `shepherdr: ${a.id}'s merge train refused (exit 1; log <file>): ${a.id}, ${b.id}, ${c.id} are searched by halves, ${a.id} first and ${b.id}, ${c.id} after`,
+          `shepherdr: ${a.id}'s merge goes alone: the first half of ${a.id}, ${b.id}, ${c.id} is ${a.id}; ${b.id}, ${c.id} go alone after it`,
           `shepherdr: ${b.id}'s merge goes alone (its turn alone after a refused train)`,
           `shepherdr: ${c.id}'s merge goes alone (its turn alone after a refused train)`,
           `shepherdr: ${d.id}'s merge train: ${d.id}, ${c.id} (one gate run on ${heads()[6]}, main at ${short(dir, e.squash)})`,
@@ -242,8 +249,8 @@ describe('shepherdr merge', () => {
         ])
       })
 
-      test("a refused train's members keep their turn alone across a restart: the Shepherdr that comes back reads the marks", async () => {
-        const { w, ts, go, ran } = await train('train-mark', 4, '3', REFUSE_BAD)
+      test("a refused train's marks are on disk across a restart: the Shepherdr that comes back reads them, and nobody skips a gate", async () => {
+        const { w, ts, go, ran, heads } = await train('train-mark', 4, '3', REFUSE_BAD)
         const [x, a, b, c] = ts
         writeFileSync(join(c.worktree!, 'bad.txt'), 'bad\n')
         sh('git add -A && git commit -qm "c adds bad.txt"', c.worktree!)
@@ -251,15 +258,29 @@ describe('shepherdr merge', () => {
         await until(() => x.landing?.step === 'gate')
         for (const t of [a, b, c]) runs.push(w.engine.merge(t.id, { self: true }))
         go(x)
-        // a's turn alone waits for its go: until then the three are marked, a in its turn and b and c in line
+        // a's turn alone waits for its go: until then the three are marked, a (its half's head) with its group and b and c, in line,
+        // to go alone
         await until(() => ran().length === 3 && !!b.alone && !!c.alone)
         const second = world()
-        expect([a, b, c].map((t) => second.engine.task(t.id)!.alone)).toEqual([true, true, true])
+        expect(
+          [a, b, c].map((t) => {
+            const kept = second.engine.task(t.id)
+            return [kept?.alone, kept?.bisect]
+          }),
+        ).toEqual([
+          [undefined, { id: `${a.id}@${heads()[1]}`, suspect: true }],
+          [true, undefined],
+          [true, undefined],
+        ])
         go(a)
         go(b)
         expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, false])
         expect(ran()).toEqual([x.id, a.id, a.id, b.id, c.id])
-        expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
+        expect([a, b, c].map((t) => [t.alone, t.bisect])).toEqual([
+          [undefined, undefined],
+          [undefined, undefined],
+          [undefined, undefined],
+        ])
       })
 
       test("main moves while the train's gate runs: nothing lands as a train, the head goes alone, its riders wait in line with no mark", async () => {

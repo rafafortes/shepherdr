@@ -223,7 +223,21 @@
   still wants it survives and is found again. A merge that only waited in line takes its place in line again by itself,
   in the order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that
   was stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart:
-  run shepherdr merge again` and its agent told so. A gate set on a space whose merges go through a pull request runs on
+  run shepherdr merge again` and its agent told so. **Every gate run keeps its log** (`gates/` in Shepherdr's home,
+  `~/.shepherdr/gates/` by default): the run's words are in `<space>.<task>-<start>-<random>.log` and stay there however
+  the run ends (passed, refused, stopped, a train's half or a lone gate), so a refusal can be read in full later, not only
+  its last 20 lines. The refusal a task is told ends its output with `Its full log is kept at <path>`, and the server's
+  log line for a refused train names the file too (`refused (exit 1; log <file>)`). Each run also adds one JSON line to
+  `gates/ledger.jsonl` beside the logs, written once when its outcome is known: `started` and `ended` (ISO, UTC),
+  `space`, `task` (the head, for a train), `members` (the merges a train's run gated, in line order), `head` (the commit
+  it ran on), `base` (the base it ran on), `seconds`, `code` (its exit code; null when it ended with none), `end` (`passed`,
+  `refused`, `moved` for a pass whose base had moved meanwhile, `stopped` for a restart, a kill or a task that went away,
+  `not-started`), `log` (the file's name) and `last` (the gate's last non-empty line, at most 200 characters, without
+  control characters). It holds ids, commits, numbers and that one line, never anything of Shepherdr's own secrets. Both
+  are bounded: each space keeps its newest 200 logs (older ones are removed when a run is written; only files named as a
+  gate log, with that space's name, are ever removed, never the ledger, a run that is still going, or anything else in the
+  folder), and the ledger is rotated to `ledger.jsonl.1` (the older rotation going) when it passes about a megabyte. A
+  gate that runs on another machine's link keeps its words here too. A gate set on a space whose merges go through a pull request runs on
   the pull request's path too: the branch is first brought onto GitHub's base (`origin/<base>`, rebased whenever it moved,
   not only on a conflict, so that what the gate checks is what will land), the gate runs on that very commit before
   anything is pushed, and the pull request merges only while its head is still that commit and GitHub's base is still the
@@ -242,7 +256,7 @@
   same tree pays nothing. A merge train runs its gate on the top of its stack, a tree no single run recorded, so a train
   always pays one full run.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
-  by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
+  by default, or 2 to 8, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
   and the gate runs once on the top of that stack, in the head task's worktree (detached there, so no task's branch
   changes). If it passes, each merge goes in as its own commit, with its task's words and the gate's last line, and the
@@ -251,10 +265,26 @@
   keeps its place and goes in on its own turn, as usual. Only merges made here take part: a space whose merges go
   through a pull request takes no train, and the server's log says so (`… merges through a pull request, and a merge
   train is for merges made here`).
-  If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
-  a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
-  runs, the head goes alone and the riders wait in line as before. The server's log names each train decision and why a
-  waiting merge was left out, one `shepherdr: ` line each (`server.log` in the server's run folder: the herdr plugin's state
+  If the gate refuses the train, nothing of it lands, and the fault is searched by halves rather than by sending every
+  member to a gate of its own. The members that rode are marked as one group, suspect, and in the same turn the first
+  half of them (the smaller half, at least the head) goes on a gate run of its own, as a smaller train; the rest wait in
+  line, unproven. A half that passes lands, as a train does, and the half beside it is known to hold the fault (or an
+  interaction): it is split before its next gate, never gated whole again. A half that is refused is halved the same way,
+  down to the head alone, which goes on to its own gate and is the one told of the refusal, with the gate's lines; the
+  members that were left out unproven go in together on one gate run of their own, and are searched the same way if that
+  is refused. So the members that are fine still go in together, a single fault is found in about log2(n) refused runs,
+  and a train of two or three costs what sending each to its own gate did (for one fault, never more gate runs than
+  before, and clearly fewer from five members up: eight members with one fault cost five or six runs, not nine). Two
+  faults, or a fault that only shows in combination, cost more than one fault, as they must; a fault that only a long
+  stack has, with every half passing on its own, ends with everything landed and nobody refused. Only the task whose
+  change fails alone is told: the riders of a refused train hear nothing of it. A member rides only with its own group,
+  in its own state (suspect or unproven), until its own gate passed or refused it alone, so a faulty change cannot spoil
+  train after train; other tasks in line keep their place and ride with each other as usual. The marks are kept in
+  `tasks.json` before the next gate run starts, so a restart finds the same halves, re-attaches to a half's gate run
+  that was still going, and no member goes in without a gate run that passed on exactly the stack that lands; a task
+  marked by an older version as going alone still goes alone once. If main moves while a train's gate runs, the head goes
+  alone and the riders wait in line as before, with the marks they had. The server's log names each train decision and
+  why a waiting merge was left out, one `shepherdr: ` line each (`server.log` in the server's run folder: the herdr plugin's state
   folder, or `run/` in Shepherdr's home, `~/.shepherdr` by default); a turn with nobody else in line says nothing.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
