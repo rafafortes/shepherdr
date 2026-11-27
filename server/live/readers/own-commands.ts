@@ -35,6 +35,7 @@ const ALLOWED = [
   'ready',
   'done',
   'merge',
+  'line',
   'heartbeat',
   'automation',
   'todo',

@@ -82,6 +82,7 @@ describe('the shepherdr verb lists', () => {
       'ready',
       'done',
       'merge',
+      'line',
       'heartbeat',
       'automation',
       'todo',

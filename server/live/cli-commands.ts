@@ -30,6 +30,8 @@ import { HELD_NAMED, HOME_NO_PLACE, minutesOf, statusLine } from './cli-shared.t
 import { swallowedReport } from './debug.ts'
 import { age, checkTitle, type Engine, ended, fitStatus, type HeldWhy, type Retune, retuneLine, reviewRetuneLine, type TaskRec } from './engine/engine.ts'
 import { validateBase } from './engine/git.ts'
+import { clockOf, HOLD_DEFAULT, HOLD_MAX } from './engine/line-hold.ts'
+import type { LineView } from './engine/merge.ts'
 import { agyModelId } from './agy.ts'
 import { type Monitor, perfReport, summary } from './health.ts'
 import { type Heartbeats, heartbeatFile, WAKE_ANYWAY, wakesAnyway } from './heartbeat.ts'
@@ -666,6 +668,8 @@ export class CliCommands {
       }
       case 'merge':
         return this.mergeCommand(a1, ctx)
+      case 'line':
+        return this.lineCommand(a1, rest, p, ctx)
       case 'pr':
       case 'checks': {
         const t = this.engine.task(a1 ?? '')
@@ -1572,6 +1576,70 @@ export class CliCommands {
     if (r.waiting) return `${target}'s machine is out of reach: it restarts once it is back.`
     if (!r.ok) throw new Error(r.error ?? 'It could not be restarted.')
     return `Restarted ${t?.id ?? peer?.id ?? place!.name} on ${r.on}${p.flags.has('save') ? `, now its space's Settings too` : ''}. A card in its chat says so.`
+  }
+
+  /**
+   * shepherdr line [<space>] | hold <space> [--for <minutes>] --why "<text>" [--wait <minutes>] | release <space>: one space's
+   * merge line. The human or a coordinator takes its turn so a commit can be gated and landed by hand with the base not
+   * moving under it; never a task's agent. Showing the line is for anyone.
+   */
+  private async lineCommand(a1: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string }) {
+    const verb = a1 === 'hold' || a1 === 'release' ? a1 : undefined
+    const named = verb ? rest[0] : a1
+    const space = (name?: string) => this.projectFor({ ...p, opts: { ...p.opts, ...(name ? { space: [name] } : {}) } }, ctx)
+    if (verb && ctx.chat?.includes('/')) throw new Error(`A task's agent doesn't ${verb} the merge line: its coordinator or the human does.`)
+    const clock = (ms: number) => clockOf(ms, this.settings.zone())
+    if (verb === 'release') {
+      if (!named) throw new Error('shepherdr line release <space>')
+      const pr = space(named)
+      const r = this.engine.lineRelease(pr, this.holderName(ctx))
+      if (!r) return `${pr.name}'s merge line is not held: nothing to release.`
+      if (r.state === 'waiting') return `Cancelled the wait to hold ${pr.name}'s merge line (${r.by}: ${r.why}). The line goes on as it was.`
+      return `Released ${pr.name}'s merge line (held by ${r.by}: ${r.why}). The next merge in line takes its turn now.`
+    }
+    if (verb === 'hold') {
+      if (!named) throw new Error('shepherdr line hold <space> [--for <minutes>] --why "<text>"')
+      const why = one(p, 'why')?.trim()
+      if (!why) throw new Error('Say why the merge line is held: shepherdr line hold <space> --why "<text>" (it shows on every waiting merge).')
+      const minutes = one(p, 'for') === undefined ? HOLD_DEFAULT / 60_000 : Number(one(p, 'for'))
+      if (!Number.isFinite(minutes) || minutes <= 0) throw new Error('--for takes a number of minutes, more than 0.')
+      const wait = one(p, 'wait') === undefined ? undefined : Number(one(p, 'wait'))
+      if (wait !== undefined && (!Number.isFinite(wait) || wait <= 0)) throw new Error('--wait takes a number of minutes, more than 0.')
+      const pr = space(named)
+      const ms = Math.min(minutes * 60_000, HOLD_MAX)
+      const r = await this.engine.lineHold(pr, { by: this.holderName(ctx), why }, ms, wait === undefined ? undefined : wait * 60_000)
+      if (!r.ok) throw new Error(r.error)
+      const lasts = Math.round(((r.hold.until - r.hold.at) / 60_000) * 10) / 10
+      return [
+        `Held ${pr.name}'s merge line for ${lasts} minute${lasts === 1 ? '' : 's'}${minutes * 60_000 > HOLD_MAX ? ` (the most a hold lasts)` : ''}, until ${clock(r.hold.until)}${r.after ? `; ${r.after}'s merge, in flight when you asked, has ended` : ''}.`,
+        `${pr.base} is at ${r.tip || '(unreadable)'}: nothing lands in it until you release the line, and no merge starts its turn (no gate, no train, no landing); merges asked for meanwhile queue in order.`,
+        `Gate and land your commit by hand, then shepherdr line release ${pr.name}. The hold ends by itself at ${clock(r.hold.until)}.`,
+      ].join('\n')
+    }
+    // the line, as it stands: one space's (named, or the one this command runs for), or every space's that has something going on
+    const show = (v: LineView) => {
+      const run = v.running
+      const since = run?.since ? `, since ${clock(run.since)} (${Math.max(0, Math.round((Date.now() - run.since) / 60_000))} min)` : ''
+      const steps: Record<string, string> = { gate: 'in its merge gate', merge: 'merging', rebase: 'rebasing', checks: 'waiting for checks' }
+      const h = v.hold
+      const held = !h ? 'no' : h.state === 'held' ? `by ${h.by} until ${clock(h.until ?? 0)}: ${h.why}` : `${h.by} is waiting for the merge in flight to end, then holds it: ${h.why}`
+      return [
+        `${v.name} (${v.base}): merge line`,
+        `  running: ${run ? `${run.train.length > 1 ? `a train of ${run.train.length} (${run.train.join(', ')})` : run.id}, ${steps[run.step ?? 'merge'] ?? 'merging'}${since}` : 'nothing'}`,
+        `  waiting: ${v.waiting.length ? v.waiting.map((id, i) => `${i + 1}. ${id}`).join(' · ') : 'nobody'}`,
+        ...(v.checking.length ? [`  in their pre-flight: ${v.checking.join(', ')}`] : []),
+        `  held: ${held}`,
+      ].join('\n')
+    }
+    const here = named ? space(named) : this.placeOfCommand(p, ctx)
+    if (here) return show(this.engine.line(here))
+    const busy = this.places.spaces.map((x) => this.engine.line(x)).filter((v) => v.running || v.waiting.length || v.checking.length || v.hold)
+    return busy.length ? busy.map(show).join('\n\n') : 'No merge is running or waiting in any space, and no merge line is held.'
+  }
+
+  /** who a hold is taken in the name of: the coordinator whose chat asked, or you at the command */
+  private holderName(ctx: { chat?: string }) {
+    return ctx.chat ? `${this.chatName(ctx.chat)}'s coordinator` : 'you (terminal)'
   }
 
   /** a task's own agent merges its own task only; coordinators and you merge any */

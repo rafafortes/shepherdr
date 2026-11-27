@@ -220,6 +220,24 @@ export const TOPIC = {
   shepherdr task pin <id>                        only when the human asks: show it in Pinned at the top of its
                                                  tasks (it keeps its status); archiving or deleting it drops the pin
   shepherdr task unpin <id>                      put it back in its own group
+  shepherdr line [<space>]                       a space's merge line: what runs now (the merge or train, since when), who
+                                                 waits in order, who is still in their pre-flight, and the hold if any;
+                                                 with no space, the one this command runs for, else every space with
+                                                 something going on
+  shepherdr line hold <space> [--for <minutes>] --why "<text>" [--wait <minutes>]
+                                                 only the human or a coordinator, never a task's agent: take the line's
+                                                 turn so a commit made by hand can be gated and landed with the base not
+                                                 moving under it. It waits for the merge or gate in flight, if any, to end
+                                                 (meanwhile no merge starts its turn: the next one is its), then holds: no
+                                                 gate, train or landing starts, merges asked for queue in order and their
+                                                 rows say who holds, until when and why. It returns once the hold is in
+                                                 effect and prints the base branch's tip then. --for defaults to 20 minutes,
+                                                 at most 60: the hold ends by itself then, so a holder that crashed cannot
+                                                 block the line; --wait (default: the gate's limit) bounds the wait for the
+                                                 merge in flight, and ends with no hold left behind. A space whose merges go
+                                                 through a pull request has no line to hold
+  shepherdr line release <space>                 end the hold now: the next merge in line takes its turn (a line that is not
+                                                 held says so, and that is fine)
   shepherdr restart <space|id> [--agent CLI] [--model ID] [--effort LEVEL] [--save]
                                                  only when the human asks: start a space's coordinator or a task's
                                                  agent again on Settings' CLI, model and effort for its role (or
@@ -422,6 +440,7 @@ export const CLI_VERBS = [
   'done',
   'todo',
   'merge',
+  'line',
   'pr',
   'checks',
   'plan',
@@ -459,6 +478,7 @@ export const VERB_TOPIC: Record<Verb, Topic> = {
   done: 'tasks',
   todo: 'tasks',
   merge: 'tasks',
+  line: 'tasks',
   pr: 'tasks',
   checks: 'tasks',
   plan: 'tasks',

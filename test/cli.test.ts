@@ -125,6 +125,26 @@ describe('every shepherdr call ends with words when the server gives no answer',
     }
   })
 
+  test('line hold keeps the long wait it needs for the merge in flight, with its own override, not the short default', async () => {
+    const served = slow(2000)
+    const never = slow(0)
+    try {
+      // a 2 s answer gets through where the default is 1 s; only `line hold` waits that long, the rest of the verb does not
+      const url = `http://127.0.0.1:${served.port}`
+      expect((await run([process.execPath, join(root, 'server', 'cli.ts'), 'line', 'hold', 'lyvora-app', '--why', 'x'], { SHEPHERDR_URL: url, SHEPHERDR_CLI_WAIT: '1000' })).out).toBe('ok\n')
+      expect((await run([process.execPath, join(root, 'server', 'cli.ts'), 'line', 'release', 'lyvora-app'], { SHEPHERDR_URL: url, SHEPHERDR_CLI_WAIT: '1000' })).code).toBe(1)
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'line', 'hold', 'lyvora-app', '--why', 'x'], {
+        SHEPHERDR_URL: `http://127.0.0.1:${never.port}`,
+        SHEPHERDR_LINE_WAIT: '1000',
+      })
+      expect(r.code).toBe(1)
+      expect(r.err).toContain('shepherdr line got no answer from Shepherdr in 1 s')
+    } finally {
+      served.stop(true)
+      never.stop(true)
+    }
+  })
+
   test('merge keeps its own wait and words, whatever the default is set to', async () => {
     const server = slow(0)
     try {
@@ -182,6 +202,9 @@ describe('every shepherdr call ends with words when the server gives no answer',
         expect(long.code).toBe(1)
         expect(long.err).toContain(`shepherdr ${verb} got no answer`)
       }
+      const line = await run(['perl', helper, 'line', 'hold', 'lyvora-app', '--why', 'x'], { SHEPHERDR_LINE_WAIT: '1000' })
+      expect(line.code).toBe(1)
+      expect(line.err).toContain('shepherdr line got no answer')
       const told = await run(['perl', helper, 'task', 'tell', 'SHE-9', 'hi'], { SHEPHERDR_CLI_WAIT: '1000' })
       expect(told.code).toBe(1)
       expect(told.err).toContain('shepherdr task tell got no answer')

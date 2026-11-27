@@ -18,6 +18,7 @@ import { CLI_NAME, type Settings } from '../settings.ts'
 import type { Chats } from '../chats.ts'
 import { ended, type Engine, type Landing, type TaskRec } from './engine.ts'
 import * as G from './git.ts'
+import { clockOf, type Hold, LineHolds } from './line-hold.ts'
 
 /** one line of the server's log about a merge train's decision: what it decided and why, never a file's contents */
 export const trainLog = (line: string) => console.error(`shepherdr: ${line}`)
@@ -128,6 +129,8 @@ export interface MergeHost {
   train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined>
   /** how many merges a space's train takes at most (merge.train) */
   trainSize(space: string): number
+  /** the holds in effect on each repo's line (shepherdr line hold), by repo path: the engine's record, kept in tasks.json */
+  holds(): Record<string, Hold>
 }
 
 /**
@@ -157,6 +160,17 @@ export async function autoChecks(g: G.GitHub, cwd: string, n: number, base: stri
   return onlyRequired(c, await G.requiredChecks(g, cwd, n, base)) ?? c
 }
 
+/** a repo's merge line as shepherdr line shows it: what runs now, who waits in order, who is in their pre-flight, the hold */
+export interface LineView {
+  name: string
+  base: string
+  /** the merge whose turn it is (a train: its head, with every car in `train`), and since when */
+  running?: { id: string; step?: Landing['step']; since?: number; train: string[] }
+  waiting: string[]
+  checking: string[]
+  hold?: { state: 'held' | 'waiting'; by: string; why: string; at: number; until?: number }
+}
+
 export class MergeRunner {
   /** one merge at a time per repo: each one's main checkout is shared. The engine reads it too: a task being deleted
    *  waits for its repo's merge first (deleteTask) */
@@ -176,7 +190,21 @@ export class MergeRunner {
   /** a look at main's checks is under way */
   private watchingMain = false
 
-  constructor(private e: MergeHost) {}
+  /** the holds of each repo's line (shepherdr line hold): no turn of a held line starts, the merges asked for queue in order */
+  readonly holds: LineHolds
+  /** when the merge in flight in each repo took its turn */
+  private turnSince = new Map<string, number>()
+
+  constructor(private e: MergeHost) {
+    this.holds = new LineHolds({
+      stored: () => this.e.holds(),
+      save: () => this.e.saveNow(),
+      log: (line) => trainLog(line),
+      changed: (repo) => this.heldRows(repo),
+      name: (repo) => this.e.places.spaces.find((p) => p.path === repo)?.name ?? repo,
+      now: () => Date.now(),
+    })
+  }
 
   /* ---------- GitHub: pull requests ---------- */
 
@@ -706,11 +734,14 @@ export class MergeRunner {
       timer = setTimeout(() => {
         this.lateFor.add(t.id)
         const l = t.landing
+        const held = l?.step === 'queue' ? this.heldBy(this.e.places.space(t.project)?.path ?? '') : undefined
         const where =
           l?.step === 'queue' && l.train
             ? `goes in with ${l.train}'s merge train (its gate runs)`
             : l?.step === 'queue'
-              ? `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}`
+              ? held
+                ? `waits in line: the merge line is ${held}`
+                : `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}`
               : l?.step === 'gate'
                 ? 'is in its gate: its merge gate still runs'
                 : l?.pre
@@ -731,23 +762,34 @@ export class MergeRunner {
    * never does, so it can hold nobody up.
    */
   private enter(t: TaskRec, repo: string, self: boolean): Promise<{ ok: boolean; error?: string; note?: string }> {
-    // in line behind another merge into its repo: its row says whose, and whether that one runs the gate
+    // in line behind another merge into its repo, or behind a hold on it: its row says whose, and whether that one runs the gate
     const ahead = this.mergingNow.get(repo)
-    if (ahead && ahead !== t.id && t.reported && !ended(t)) {
-      t.landing = { step: 'queue', at: Date.now(), behind: ahead, gate: this.gateOf(t) !== undefined }
+    if (((ahead && ahead !== t.id) || this.holds.on(repo)) && t.reported && !ended(t)) {
+      t.landing = { step: 'queue', at: Date.now(), behind: ahead ?? '', gate: this.gateOf(t) !== undefined }
       this.e.saveNow()
       this.e.settle(t)
     }
     const now = (this.merging.get(repo) ?? Promise.resolve())
+      // a held line starts no turn: this one waits here, with its place in line, until the hold ends. A merge that went in with
+      // a train, or has nothing to merge, has no turn's work left and does not wait for it
+      .then(() => (t.merged || t.closed ? undefined : this.holds.gate(repo)))
       .then(() => {
         this.mergingNow.set(repo, t.id)
+        this.turnSince.set(repo, Date.now())
         this.inLineBehind(repo, t)
         return this.onGitHub(
           () => this.mergeNow(t, self),
           (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` }),
         )
       })
-      .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
+      .finally(() => {
+        if (this.mergingNow.get(repo) === t.id) {
+          this.mergingNow.delete(repo)
+          this.turnSince.delete(repo)
+        }
+        // the turn is over: a hold that waited for it is in effect now
+        if (!this.mergingNow.has(repo)) this.holds.idle(repo)
+      })
       // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
       .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate' || t.landing?.step === 'queue') && this.land(t), r))
       // its caller heard by the deadline that it goes on: its agent hears now how it went, and wakes on it
@@ -806,6 +848,21 @@ export class MergeRunner {
     return undefined
   }
 
+  /** how a held line reads, in a row and in the words of a merge that waits for it: held by whom until when and why, or about
+   *  to be (a hold waiting for the merge in flight to end); nothing when the line is not held */
+  heldBy(repo: string): string | undefined {
+    const short = (why: string) => (why.length > 80 ? `${why.slice(0, 79)}…` : why)
+    const hold = this.holds.peek(repo)
+    if (hold) return `held by ${hold.by} until ${clockOf(hold.until, this.e.settings.zone())}: ${short(hold.why)}`
+    const waits = this.holds.pending(repo)
+    return waits ? `about to be held by ${waits.by}: ${short(waits.why)}` : undefined
+  }
+
+  /** the merges waiting in `repo`'s line say that it is held, or no longer is */
+  private heldRows(repo: string) {
+    for (const x of this.e.tasks()) if (x.landing?.step === 'queue' && (this.e.places.space(x.project)?.path ?? '') === repo) this.e.settle(x)
+  }
+
   /** `t`'s merge into `repo` takes its turn: each merge still in line there now waits behind it, and its row says so */
   private inLineBehind(repo: string, t: TaskRec) {
     let moved = false
@@ -816,6 +873,65 @@ export class MergeRunner {
       moved = true
     }
     if (moved) this.e.saveNow()
+  }
+
+  /* ---------- holding the line ---------- */
+
+  /**
+   * shepherdr line hold: keep `p`'s line from starting its next turn for `ms`, so a commit made by hand can be gated and
+   * landed with the base not moving under it. It waits (at most `waitMs`) for the merge or gate in flight, if any, to end
+   * (reserving the next turn meanwhile, so nothing slips in ahead of it), then says the base's tip. A space whose merges
+   * go through a pull request has no line here to hold. Not told to a task's agent: the command refuses that.
+   */
+  async hold(p: Space, who: { by: string; why: string }, ms: number, waitMs: number): Promise<{ ok: true; hold: Hold; tip: string; after?: string } | { ok: false; error: string }> {
+    const after = this.mergingNow.get(p.path)
+    // the request reserves the line's next turn here, before anything is awaited: what kind of merges the space makes is
+    // asked after, so no merge slips in ahead of the hold meanwhile
+    const reserved = this.holds.reserve(p.path, who, ms, !!after, waitMs)
+    if (!reserved.ok) return reserved
+    const pull = await this.hub(p).then(
+      (g) => (g ? ('a pull request' as const) : undefined),
+      (e: Error) => e.message,
+    )
+    if (pull) {
+      const error =
+        pull === 'a pull request' ? `${p.name}'s merges go through a pull request on GitHub, so Shepherdr keeps no merge line there to hold: GitHub's own checks and queue are the line.` : pull
+      this.holds.cancel(p.path, error)
+      return { ok: false, error }
+    }
+    // nothing in flight: it takes effect now; one in flight: when that ends (its turn's end says so)
+    if (!this.mergingNow.has(p.path)) this.holds.idle(p.path)
+    const held = await reserved.done
+    if (!held.ok) return held
+    return { ...held, tip: (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${p.base}`)).out, after }
+  }
+
+  /** shepherdr line release: the hold on `p`'s line ends now (or the wait for one): who held it, or nothing when it was not */
+  release(p: Space, by: string) {
+    return this.holds.release(p.path, by)
+  }
+
+  /** `p`'s line as shepherdr line shows it */
+  line(p: Space): LineView {
+    const mine = this.e.tasks().filter((x) => !ended(x) && (this.e.places.space(x.project)?.path ?? '') === p.path)
+    const turn = this.mergingNow.get(p.path)
+    const head = turn ? mine.find((x) => x.id === turn) : undefined
+    // the cars a train carries go in on the head's turn
+    const train = head ? [head.id, ...mine.filter((x) => x !== head && x.landing?.step === 'queue' && x.landing.train === head.id).map((x) => x.id)] : []
+    const waiting = mine
+      .filter((x) => x.landing?.step === 'queue' && !train.includes(x.id))
+      .sort((a, b) => a.landing!.at - b.landing!.at)
+      .map((x) => x.id)
+    const hold = this.holds.active(p.path)
+    const waits = this.holds.pending(p.path)
+    return {
+      name: p.name,
+      base: p.base,
+      running: head ? { id: head.id, step: head.landing?.step, since: this.turnSince.get(p.path), train } : undefined,
+      waiting,
+      checking: mine.filter((x) => x.landing?.pre).map((x) => x.id),
+      hold: hold ? { state: 'held', ...hold } : waits ? { state: 'waiting', ...waits } : undefined,
+    }
   }
 
   /**
