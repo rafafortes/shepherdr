@@ -91,7 +91,12 @@ describe('a refused merge train searched by halves, in its line', () => {
     const group = { id: `${a.id}@${top.slice(0, 7)}`, suspect: true as const }
     for (const t of riders) t.bisect = group
     a.landing = { step: 'gate', at: 1, cars: 2 }
-    a.gateRun = startGate(w.settings.get('merge.gate', space), wtOf(a), { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME ?? '', 'gates'), a.id, { head: top, tip: at })
+    a.gateRun = startGate(w.settings.get('merge.gate', space), wtOf(a), { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME ?? '', 'gates'), a.id, {
+      head: top,
+      tip: at,
+      space,
+      members: [a.id, b.id],
+    })
     gatesStarted.push(a.gateRun.pid)
     b.landing = { step: 'queue', at: 2, behind: a.id, gate: true, train: a.id }
     c.landing = { step: 'queue', at: 3, behind: a.id, gate: true }
