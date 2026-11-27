@@ -477,12 +477,26 @@ describe('shepherdr merge', () => {
       const main = sh('git rev-parse main', dir)
       // a marked task's lone turn: a gate that never ended keeps the mark
       t.alone = true
-      const run = w.engine.merge(t.id, { self: true })
-      await until(() => !!t.gateRun?.pid)
-      killGroup(t.gateRun!.pid)
-      expect((await run).error).toContain(`${t.id}'s merge gate (sleep 30) was stopped before it ended`)
+      const said: string[] = []
+      const stderr = console.error
+      console.error = (m: unknown) => void said.push(String(m))
+      try {
+        const run = w.engine.merge(t.id, { self: true })
+        await until(() => !!t.gateRun?.pid)
+        killGroup(t.gateRun!.pid)
+        expect((await run).error).toContain(`${t.id}'s merge gate (sleep 30) was stopped before it ended`)
+      } finally {
+        console.error = stderr
+      }
       expect(sh('git rev-parse main', dir)).toBe(main)
       expect(t.alone).toBe(true)
+      // a run judged gone says how its shell ended, in the server's log and as the last line the ledger keeps
+      expect(said.filter((l) => l.includes('gate run '))).toEqual([
+        expect.stringMatching(
+          new RegExp(`^shepherdr: gate run gate-killed\\.${t.id}-\\d{13}-[0-9a-f]{8}\\.log \\(${t.id}\\): its shell was killed by SIGKILL with no exit code, \\d+ ms after it started$`),
+        ),
+      ])
+      expect(ledger().at(-1)).toMatchObject({ end: 'stopped', code: null, last: expect.stringMatching(/^its shell was killed by SIGKILL with no exit code, \d+ ms after it started$/) })
     })
 
     test('off, or none set: no gate', async () => {

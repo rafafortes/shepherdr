@@ -243,7 +243,9 @@
   it ran on), `base` (the base it ran on), `seconds`, `code` (its exit code; null when it ended with none), `end` (`passed`,
   `refused`, `moved` for a pass whose base had moved meanwhile, `stopped` for a restart, a kill or a task that went away,
   `not-started`), `log` (the file's name) and `last` (the gate's last non-empty line, at most 200 characters, without
-  control characters). It holds ids, commits, numbers and that one line, never anything of Shepherdr's own secrets. Both
+  control characters; for a `stopped` run whose shell died with no exit code, the line says how it ended: `its shell was
+  killed by SIGKILL with no exit code, 311 ms after it started`, or `exited with status 2` (what a shell that cannot
+  fork leaves), and the server's log says the same in a line `gate run <file>: …`). It holds ids, commits, numbers and that one line, never anything of Shepherdr's own secrets. Both
   are bounded: each space keeps its newest 200 logs (older ones are removed when a run is written; only files named as a
   gate log, with that space's name, are ever removed, never the ledger, a run that is still going, or anything else in the
   folder), and the ledger is rotated to `ledger.jsonl.1` (the older rotation going) when it passes about a megabyte. A

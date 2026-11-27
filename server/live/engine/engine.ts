@@ -581,8 +581,16 @@ export function startGate(
   const line = gateCommand(cmd, log, exit, Math.max(1, Math.ceil(limitMs / 1000)), hasTimeout)
   const c = spawn('/bin/sh', ['-c', line], { cwd: wt, env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
   c.unref()
-  return { pid: c.pid ?? 0, log, exit, at: start, task: id, ...at }
+  const run: GateRun = { pid: c.pid ?? 0, log, exit, at: start, task: id, ...at }
+  shellEnd.set(run, '')
+  c.on('exit', (code, signal) => shellEnd.set(run, signal ? `was killed by ${signal}` : `exited with status ${code}`))
+  c.on('error', (e) => shellEnd.set(run, `could not start (${e.message})`))
+  return run
 }
+
+/** how a run's shell ended, once its `exit` event came ('' until then): kept beside the run (never in its record in
+ *  tasks.json: a run a restart finds has no entry), and read only when the run is judged gone, to say what ended it */
+const shellEnd = new WeakMap<GateRun, string>()
 
 /** a gate run's exit files once its outcome is read: nothing keeps them, each run has its own. Its log stays: the ledger
  *  names it (gate-log.ts), and the newest ones of each space are what is kept */
@@ -600,7 +608,8 @@ function dropGate(run: GateRun) {
 }
 
 /** a gate's end: its exit code and words; past timeoutMs from its start, its process group is killed (124); gone with no
- *  code, GATE_GONE */
+ *  code, GATE_GONE: and then how its shell ended is said in the server's log and as the last line of its words (the
+ *  ledger keeps that line), since a shell that dies leaves nothing else to tell a kill from a failure */
 export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Promise<{ code: number; out: string }> {
   const read = () => (fs.existsSync(run.log) ? fs.readFileSync(run.log, 'utf8') : '')
   for (;;) {
@@ -608,7 +617,13 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
     if (!alive(run.pid)) {
       // it may have written its code just as it ended
       await Bun.sleep(50)
-      return fs.existsSync(run.exit) ? { code: Number(fs.readFileSync(run.exit, 'utf8').trim()), out: read().trimEnd() } : { code: GATE_GONE, out: read().trimEnd() }
+      if (fs.existsSync(run.exit)) return { code: Number(fs.readFileSync(run.exit, 'utf8').trim()), out: read().trimEnd() }
+      // its shell is gone, so its `exit` event is on its way: the run's own label is waited for (a moment), not its fate
+      for (let i = 0; i < 10 && shellEnd.get(run) === ''; i++) await Bun.sleep(50)
+      const words = read().trimEnd()
+      const how = `its shell ${shellEnd.get(run) || 'is gone'} with no exit code, ${Date.now() - run.at} ms after it started`
+      trainLog(`gate run ${basename(run.log)} (${run.task ?? 'no task'}): ${how}${words ? `; its words end: ${words.slice(-300)}` : ''}`)
+      return { code: GATE_GONE, out: [words, how].filter(Boolean).join('\n') }
     }
     if (Date.now() - run.at > timeoutMs) {
       killGroup(run.pid)

@@ -7,7 +7,7 @@ import { basename, join } from 'node:path'
 import { sh, repo, world, until, started } from './engine-world.ts'
 import { tmp } from './tmp.ts'
 import { wtOf } from './train-world.ts'
-import { processes } from '../server/procs.ts'
+import { killGroup, processes } from '../server/procs.ts'
 
 setDefaultTimeout(60_000)
 
@@ -189,6 +189,56 @@ describe('the merge pre-flight', () => {
     expect(r.error).toContain('was stopped before it ended (a restart, or a kill): nothing was merged')
     expect(ledger()).toMatchObject([{ kind: 'preflight', end: 'stopped', code: null }])
     await until(() => !processes().some((p) => p.cmd.includes('.pre.exit')), 30_000)
+  })
+
+  test('a pre-flight whose shell is killed from outside is judged gone, and says how its shell ended', async () => {
+    const goDir = tmp('pre-killed')
+    const { w, t } = await gated('pre-killed', waitFor(join(goDir, 'go'), goDir, 'echo ok'))
+    const said: string[] = []
+    const stderr = console.error
+    console.error = (m: unknown) => void said.push(String(m))
+    try {
+      const run = w.engine.merge(t.id, { self: true })
+      // the shell that holds its command: its command line names this run's exit file
+      await until(() => processes().some((p) => p.cmd.startsWith('/bin/sh -c (timeout') && p.cmd.includes(`${gatesDir()}/`)), 30_000)
+      const shell = processes().find((p) => p.cmd.startsWith('/bin/sh -c (timeout') && p.cmd.includes(`${gatesDir()}/`))
+      if (!shell) throw new Error('its shell is not running')
+      killGroup(shell.pid)
+      const r = await run
+      expect(r.error).toContain('pre-flight (')
+      expect(r.error).toContain('was stopped before it ended (a restart, or a kill): nothing was merged')
+    } finally {
+      console.error = stderr
+    }
+    expect(said.filter((l) => l.includes('gate run '))).toEqual([
+      expect.stringMatching(
+        new RegExp(`^shepherdr: gate run pre-killed\\.${t.id}-\\d{13}-[0-9a-f]{8}\\.pre\\.log \\(${t.id}\\): its shell was killed by SIGKILL with no exit code, \\d+ ms after it started$`),
+      ),
+    ])
+    expect(ledger()).toMatchObject([{ kind: 'preflight', end: 'stopped', code: null, last: expect.stringMatching(/^its shell was killed by SIGKILL with no exit code/) }])
+  })
+
+  test('a pre-flight whose shell cannot write its exit code is judged gone, and its status is said', async () => {
+    const { chmodSync } = await import('node:fs')
+    // the command ends well, then takes the folder's write permission away: the shell cannot leave its exit code
+    const { w, t } = await gated('pre-mute', `chmod 500 ${gatesDir()}; echo checked`)
+    const said: string[] = []
+    const stderr = console.error
+    console.error = (m: unknown) => void said.push(String(m))
+    try {
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(r.error).toContain('was stopped before it ended (a restart, or a kill)')
+    } finally {
+      console.error = stderr
+      chmodSync(gatesDir(), 0o700)
+    }
+    expect(said.filter((l) => l.includes('gate run '))).toEqual([
+      expect.stringMatching(
+        /^shepherdr: gate run pre-mute\.PM-1-\d{13}-[0-9a-f]{8}\.pre\.log \(PM-1\): its shell exited with status 2 with no exit code, \d+ ms after it started; its words end: checked$/,
+      ),
+    ])
+    // the ledger lives in the same folder, which cannot be written: its line is the one thing this case loses
+    expect(ledger()).toEqual([])
   })
 
   test("the sweep a start makes for orphans never ends a pre-flight of this Shepherdr's own, only one a restart left behind", async () => {
