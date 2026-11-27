@@ -534,6 +534,22 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(refusal).not.toContain('base moved')
   })
 
+  test('a word that only sits inside a base word cannot explain an inserted negation', async () => {
+    const w = world()
+    const t = await conflict(w, 'token-boundary', 'the run is fast.\n', 'the run is fast and quiet.\n', 'the run cannot be slow, 30 frames.\n', 'the run is not fast and quiet, 30 frames.\n')
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+  })
+
+  test('a number the task and the base share does not excuse an inserted word', async () => {
+    const w = world()
+    const t = await conflict(w, 'shared-number', 'fast 30 seconds.\n', 'fast quiet 30 seconds.\n', 'not slow, 30 seconds.\n', 'not fast quiet 30 seconds.\n')
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+  })
+
   test('a word of an unrelated base line the resolution drops cannot explain a new own word', async () => {
     const w = world()
     const t = await conflict(

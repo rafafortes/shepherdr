@@ -3958,9 +3958,19 @@ export class Engine extends Emitter<Events> {
     for (const cur of newLines) {
       const base = kin(cur, changed)
       const baseNumbers = base ? new Set(base.numbers) : new Set<string>()
-      const baseOnLine = cur.numbers.some((x) => baseNumbers.has(x))
-      // words that are not the task's next one must be a contiguous piece of this line's changed base line; a single
-      // inserted word (a negation like "not" the base happens to carry) needs a base number beside it as well
+      // numbers are paired per line: a number the base moved may replace the task's on it, but a number that came
+      // from another line, or a task number that vanished without a base number beside it, is work of its own
+      const reviewedNumbers = kin(cur, oldLines)?.numbers.slice() ?? []
+      const fresh: string[] = []
+      for (const x of cur.numbers) {
+        const i = reviewedNumbers.indexOf(x)
+        if (i >= 0) reviewedNumbers.splice(i, 1)
+        else fresh.push(x)
+      }
+      // only a number the task did not already have can speak for the base; a number they share excuses nothing
+      const baseOnLine = fresh.some((x) => baseNumbers.has(x))
+      // words that are not the task's next one must be a whole contiguous piece of this line's changed base line; a
+      // single inserted word (a negation like "not" the base happens to carry) needs a base number beside it as well
       const runs: string[][] = []
       let run: string[] = []
       for (const w of cur.words) {
@@ -3971,16 +3981,8 @@ export class Engine extends Emitter<Events> {
         } else run.push(w)
       }
       if (run.length) runs.push(run)
-      if (runs.some((r) => !base || (r.length < 2 && !baseOnLine) || !base.words.join('\u0001').includes(r.join('\u0001')))) return false
-      // numbers are paired per line: a number the base moved may replace the task's on it, but a number that came
-      // from another line, or a task number that vanished without a base number beside it, is work of its own
-      const reviewedNumbers = kin(cur, oldLines)?.numbers.slice() ?? []
-      const fresh: string[] = []
-      for (const x of cur.numbers) {
-        const i = reviewedNumbers.indexOf(x)
-        if (i >= 0) reviewedNumbers.splice(i, 1)
-        else fresh.push(x)
-      }
+      const hasRun = (haystack: string[], needle: string[]) => haystack.some((_, i) => needle.every((w, j) => haystack[i + j] === w))
+      if (runs.some((r) => !base || (r.length < 2 && !baseOnLine) || !hasRun(base.words, r))) return false
       if ((fresh.length || reviewedNumbers.length) && !baseOnLine) return false
     }
     return at === was.words.length
@@ -4048,9 +4050,10 @@ export class Engine extends Emitter<Events> {
       // a line the task replaced that the base changed since is a conflict; its resolution, when it only merges the two sides,
       // loses nothing of the task's and adds nothing of its own (mergedLines). The pool is the base's own changed lines,
       // not the lines HEAD newly drops: the latter are what the resolution did, not what the base moved.
+      // only what the base now carries can explain a resolution: its removed lines are the old text, not its move
       const baseChanged = (await baseDiff(file))
         .split('\n')
-        .filter((l) => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---'))
+        .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
         .map((l) => l.slice(1))
       if (!(missingRemoved.length && missingAdded.length && appearedAdded.length && baseChanged.length && this.mergedLines(missingAdded, appearedAdded, baseChanged)))
         await check(file, missingAdded, appearedAdded, next.added)
