@@ -130,5 +130,16 @@ Only with the operator's yes, and patch bumps (`v2.0.1`, `v2.0.2`, …) unless t
 4. On a machine: `herdr plugin install rafafortes/shepherdr --ref v2.0.<n> --yes`, then the plugin's **start** action,
    which swaps the running server. Each install gets its own checkout; the previous one stays for rollback
    (`herdr plugin install rafafortes/shepherdr --ref v2.0.<n-1> --yes`, then start again).
+   **A swap can end the merge gate run that is going on.** The run itself survives the restart and the merge goes on
+   from it, unless merges wait in line behind it and the space takes trains: the merge that goes on forms a train first,
+   a stack that is another commit than the run's, so the run is ended (`stopped` in the gate ledger, the minutes it ran
+   are lost) and the train's gate starts at once. The swap to 2.0.86 was made while a gate ran and lost 377 s of it that
+   way; the swap to 2.0.87 was made when `shepherdr line` showed nothing running, and lost nothing. So swap when no merge
+   is running in any space (`shepherdr line` run from a folder no space owns, the home folder say, lists every space with
+   something going on, or says there is none; run inside a space's folder it shows that space only), or hold the line of
+   the busy space first (`shepherdr line hold <space> --why "server swap"` waits for the merge in flight, then keeps the
+   next turn from starting, and the hold survives the restart) and release it after the swap (`shepherdr line release
+   <space>`). What a swap did is read afterwards in the gate ledger, `gates/ledger.jsonl` in Shepherdr's home: a line
+   with `end` `stopped` is a run the swap ended, and the next line of that task is its new run.
 5. Check after the swap: `shepherdr status`, `shepherdr doctor`, the app answers through the lab-ingress URL, and a
    real task runs end to end on pi.

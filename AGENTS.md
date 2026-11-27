@@ -100,6 +100,24 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   failure and says so, or it stops, says what fails and why the failure is not its own, and its coordinator decides.
   While you work, `bun run typecheck` (seconds) and `bun run test changed` (a quarter of the cores, like the check, but
   no lock) are enough to keep moving.
+- **A red full check is read before it is repeated, and it still blocks the merge.** Two full runs at a load average of
+  39 to 53 on 32 cores (2026-11-26/27) failed the tests step on three different timing-sensitive tests the change did not
+  touch (`test/layout-message-box.test.ts`, `test/agents-save.test.ts`, `test/layout-models.test.ts`); each passed
+  alone, and the same tree passed whole at a load of about 21. To tell the change's failure from a loaded machine's: run
+  the failing file alone (`bun run test test/<file>.test.ts`), run it on the base too (a worktree of `origin/herdr-tui`),
+  and see what the change reaches (`bun run test changed --list`). A failing test the change reaches is the change's
+  until shown otherwise; one it does not reach that passes alone and on the base is the machine's. Either way nothing
+  merges on a red run: run the full check again when the machine is quieter (`uptime`, the load average against the
+  cores) and merge on a green one. A retry of one test, a lower worker count or a looser limit is never the way past.
+- **A coverage failure on a screen file the change does not touch is the browser tests' run-to-run wobble, and is
+  settled the same way.** A full run passed all 4192 tests and failed the coverage step on `plugins/artifacts/client.tsx`
+  (6 more unrun lines than the baseline, against the 4 allowed: `slack` in `scripts/coverage.ts`, half a percent of the
+  file's lines and at least 3), a file the change did not touch; the next full run passed. Read the lines the step names
+  (`coverage/report.txt`), check that the change does not reach the file, run the full check again; never raise the
+  allowance, move the baseline or exempt lines to get past it. A file the change does touch is its own to cover.
+- **A quick run says nothing about coverage**: it has no coverage step, so "quick passed" is no evidence that the ratchet
+  holds, and a file the change adds that no test reaches passes it. It is the pre-ready run, never the proof that a
+  change may merge: only a green full run is.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a proof home at `SHEPHERDR_HOME=$SHEPHERDR_TMP/home` under this task's
@@ -139,6 +157,14 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
   `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
   --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.
+
+## The merge line
+
+The line of merges into a space's base, the merge gate, merge trains, the pre-flight and `shepherdr line hold` are the
+code every task lands through: a mistake there lands a broken base or stalls every space. Before you change any of it,
+read [docs/merge-line.md](docs/merge-line.md): where the code is, the properties every change keeps and the test file
+that holds each, how to run those files one at a time, and the mistakes already made. What the user sees is in
+[docs/tasks.md](docs/tasks.md) (the merge gate, the pre-flight, trains, holding the line).
 
 ## Plugins
 
