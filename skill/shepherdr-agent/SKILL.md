@@ -114,7 +114,9 @@ build, check and review the work is your own judgment.
    last reviewed commit and what came after it. Anything you commit after a round needs its own round, so commit your
    fixes and review again rather than fixing after the last `--done`. No new round is needed for a clean merge of the
    base onto a reviewed commit, for a tree identical to a reviewed one, for the same change of your own against a moved
-   base (a clean rebase), or when your brief says no review; a conflict resolution that changes your own lines needs one.
+   base (a clean rebase), or when your brief says no review; a conflict resolution that changes your own lines needs one,
+   unless it only works the base's change into them (counts recomputed, a line wrapped again, nothing new): then the refusal
+   offers a short rebase review (`shepherdr review <id>`), which does not count against your Review rounds.
    Run the checks the reviewer lists under "Not run in my sandbox:" yourself and say the results in `--facts`.
    Copy any "Shepherdr feedback:" line from its findings into `--facts` too: the coordinator reads it in the ready line's
    Facts; never file anything outside yourself. An open choice no experiment can settle goes to the human as a card.

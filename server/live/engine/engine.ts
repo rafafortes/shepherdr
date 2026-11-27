@@ -659,6 +659,15 @@ export const HELD = {
 /** a task held only by the spacing between starts (machine.startEvery), with nothing ahead of it: its line says so */
 export const TURN_GAP = 'Waiting for the gap between starts'
 
+/** a word, a number or one symbol of a line's text (Engine.words) */
+const TOKEN = /\p{L}[\p{L}\p{N}_'-]*|\p{N}+|[^\s\p{L}\p{N}]/gu
+/** the numbers a text spells out: a count a conflict resolution recomputes is not a word of the task's own */
+const NUMBER_WORDS = new Set(
+  'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand'.split(
+    ' ',
+  ),
+)
+
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
 
@@ -3900,6 +3909,85 @@ export class Engine extends Emitter<Events> {
     return s.trim().replace(/\b[0-9a-f]{40}\b|\b[0-9a-f]{64}\b/g, '#')
   }
 
+  /** the words and symbols of some lines in their order, and apart from them their numbers (digits and spelled out): a
+   *  count a resolution recomputed (a total of 796 that became 856, "seven groups" that became "eight") is the same
+   *  text, and so is a paragraph wrapped again */
+  private words(lines: string[]) {
+    const words: string[] = []
+    const numbers: string[] = []
+    for (const l of lines)
+      for (const w of this.lineKey(l).toLowerCase().match(TOKEN) ?? []) {
+        if (/^\p{N}/u.test(w) || NUMBER_WORDS.has(w)) numbers.push(w)
+        else words.push(w)
+      }
+    return { words, numbers }
+  }
+
+  /**
+   * Whether a file's new own lines are a mechanical merge of what the task changed there and what the base changed in the
+   * same lines: a conflict between the task's line and the base's (a table's count, a list's new item, a paragraph's
+   * numbers) resolved by keeping both. The task's words are all still there, in their order (a paragraph wrapped again
+   * keeps them); every inserted run is a contiguous piece of the base line the resolution pairs with; and numbers are
+   * paired per line, so a base-moved number may replace the task's on it but a number borrowed from another line, or a
+   * task number that vanished without a base number beside it, is work of its own: `a < b` made `b < a`, a 30 made 300,
+   * or a word like "not" the base happens to carry inserted on its own, is not a merge.
+   */
+  private mergedLines(reviewed: string[], now: string[], baseLines: string[]) {
+    const was = this.words(reviewed)
+    const lines = (ls: string[]) => ls.map((l) => ({ words: this.words([l]).words, numbers: this.words([l]).numbers }))
+    const oldLines = lines(reviewed)
+    const newLines = lines(now)
+    const changed = lines(baseLines)
+    // the line of the other side that this one resolves against: the changed line it shares the most words with,
+    // preferring the one whose numbers are on it too (a base line moved from 496 to 556 explains 556, not 496)
+    const kin = (line: (typeof newLines)[number], pool: typeof newLines) => {
+      let best: (typeof newLines)[number] | undefined
+      let score = 0
+      for (const c of pool) {
+        const shared = c.words.filter((w) => line.words.includes(w)).length
+        if (shared < 2) continue
+        const s = shared * 10 + c.numbers.filter((x) => line.numbers.includes(x)).length
+        if (s > score) {
+          score = s
+          best = c
+        }
+      }
+      return best
+    }
+    let at = 0
+    for (const cur of newLines) {
+      const base = kin(cur, changed)
+      const baseNumbers = base ? new Set(base.numbers) : new Set<string>()
+      // numbers are paired per line: a number the base moved may replace the task's on it, but a number that came
+      // from another line, or a task number that vanished without a base number beside it, is work of its own
+      const reviewedNumbers = kin(cur, oldLines)?.numbers.slice() ?? []
+      const fresh: string[] = []
+      for (const x of cur.numbers) {
+        const i = reviewedNumbers.indexOf(x)
+        if (i >= 0) reviewedNumbers.splice(i, 1)
+        else fresh.push(x)
+      }
+      // only a number the task did not already have can speak for the base; a number they share excuses nothing
+      const baseOnLine = fresh.some((x) => baseNumbers.has(x))
+      // words that are not the task's next one must be a whole contiguous piece of this line's changed base line; a
+      // single inserted word (a negation like "not" the base happens to carry) needs a base number beside it as well
+      const runs: string[][] = []
+      let run: string[] = []
+      for (const w of cur.words) {
+        if (at < was.words.length && w === was.words[at]) {
+          if (run.length) runs.push(run)
+          run = []
+          at++
+        } else run.push(w)
+      }
+      if (run.length) runs.push(run)
+      const hasRun = (haystack: string[], needle: string[]) => haystack.some((_, i) => needle.every((w, j) => haystack[i + j] === w))
+      if (runs.some((r) => !base || (r.length < 2 && !baseOnLine) || !hasRun(base.words, r))) return false
+      if ((fresh.length || reviewedNumbers.length) && !baseOnLine) return false
+    }
+    return at === was.words.length
+  }
+
   /**
    * How HEAD's own change differs from a reviewed one. 'same' is the gate's existing pass; 'base' is only a derived
    * value or a conflict resolution caused by the base moving, and may use a short rebase review outside the cap;
@@ -3959,7 +4047,16 @@ export class Engine extends Emitter<Events> {
       const missingRemoved = old.removed.filter((l) => !next.removed.includes(l))
       const appearedRemoved = next.removed.filter((l) => !old.removed.includes(l))
       lines.push(...[...delta(old.added, next.added), ...delta(old.removed, next.removed)].map((l) => `${file}: ${l}`))
-      await check(file, missingAdded, appearedAdded, next.added)
+      // a line the task replaced that the base changed since is a conflict; its resolution, when it only merges the two sides,
+      // loses nothing of the task's and adds nothing of its own (mergedLines). The pool is the base's own changed lines,
+      // not the lines HEAD newly drops: the latter are what the resolution did, not what the base moved.
+      // only what the base now carries can explain a resolution: its removed lines are the old text, not its move
+      const baseChanged = (await baseDiff(file))
+        .split('\n')
+        .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+        .map((l) => l.slice(1))
+      if (!(missingRemoved.length && missingAdded.length && appearedAdded.length && baseChanged.length && this.mergedLines(missingAdded, appearedAdded, baseChanged)))
+        await check(file, missingAdded, appearedAdded, next.added)
       await check(file, missingRemoved, appearedRemoved, next.removed, fromBaseRemoved)
     }
     // a file new to the own diff gets the same per-line check, even when the base touched it: a new own line there

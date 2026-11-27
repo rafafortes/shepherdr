@@ -54,8 +54,18 @@
   recorded on, when its tree is identical to a reviewed tree, when only clean merges of the base came after it, when its
   own change against the moved base is the one a round read (a clean rebase, Shepherdr's own included), or when the brief
   says no review. A conflict resolution that changes the task's own lines (what it adds or takes away), or anything committed since a
-  round, needs one. A merge train's riders are held to it too: a rider whose head is unreviewed stays out and its own turn
-  refuses it.
+  round, needs one, with one exception: a rebase that differs from the reviewed change only where the base moved gets a
+  short rebase review of just those lines (`shepherdr review <id>` offers it, the refusal names the lines). That is a value
+  the base derives (a hash), or a conflict resolution that keeps both sides of a line the task and the base both changed:
+  the base's lines and the task's own, their counts recomputed ("seven groups" that became "eight", a total that grew,
+  beside a count the base moved) or their text wrapped again, made of the task's words in their order and the base's and
+  nothing new. A rebase review is kept out of the Review rounds (`task show` says "plus 1 rebase review"), so it is
+  there when they are spent or one was added. A line of the task's own that the resolution words anew, reorders, adds or
+  recounts without a count of the base's beside it, or work of its own that it takes away, is not covered: new work gets
+  a normal round, and dropped work is named and must come back first. The match is per file: one conflict there opens it
+  for every line the resolution replaced in that file, but words must come from the base line each one pairs with and
+  numbers must stay on their own line unless the base moved one beside them. A merge train's riders are held to it too: a
+  rider whose head is unreviewed stays out and its own turn refuses it.
   Tasks from before these records have none, and are left as they were; so is a task whose agent never counted a round
   (the rule starts with its first). A round after
   the first gets the change since the last reviewed commit as its focus, with the whole diff still read for context: both
