@@ -683,6 +683,58 @@ describe('a review is tied to the commit it reviewed', () => {
     await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
   })
 
+  test('a short rebase review is not refused by a merge parked on a stopped rebase', async () => {
+    const w = world()
+    const t = await recounted(w, 'parked-rebase-review', MERGED)
+    // the merge stopped on the conflict and parked its landing: nothing is in flight, but the task was reported
+    t.reported = true
+    t.landing = { step: 'rebase', at: Date.now() }
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('short review')
+    expect(refusal).toContain('counted apart')
+    // the rebase round Shepherdr offers outside the cap is not refused by that landing
+    const r = await w.engine.reviewRound(t.id)
+    if ('wait' in r) throw new Error('no reviewer free for the round')
+    expect(r.rebase).toBe(true)
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(t.rebaseReviews).toBe(1)
+    expect(w.engine.normalReviews(t)).toBe(1)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+  })
+
+  test('a short rebase review that waits for a reviewer is still counted while the rebase landing is parked', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'parked-rebase-wait')
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n")
+    sh('git add -A && git commit -qm "add derived hash"', t.worktree!)
+    t.rounds = 1
+    await round(w, t)
+    writeFileSync(join(dir, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && git commit -qm "base moves the hash"', dir)
+    sh('git rebase main || true', t.worktree!)
+    writeFileSync(join(t.worktree!, 'hash.txt'), "const HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n")
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
+    t.reported = true
+    t.landing = { step: 'rebase', at: Date.now() }
+    // hold the reviewer so the rebase round has to wait, then wake it once it is free
+    const h = w.engine.reviewChain(t)[0].h
+    const key = keyOf(h.kind, h.model)
+    expect(w.settings.set('models.maxAtOnce', `${h.kind}=1`, 'all').ok).toBe(true)
+    w.engine.lease('hold-reviewer', 'reviewer', key, '')
+    w.engine.reviewDeadline = 20
+    w.engine.reviewPoll = 5
+    const waited = await w.engine.reviewRound(t.id)
+    expect('wait' in waited).toBe(true)
+    expect(t.reviewWait?.rebase).toBe(true)
+    w.engine.unlease('hold-reviewer')
+    w.engine.retryReviews()
+    expect(t.rebaseReviews).toBe(1)
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+  })
+
   test('a rebase round that waited for a reviewer stays a rebase round when it is woken', async () => {
     const w = world()
     const dir = repo()
