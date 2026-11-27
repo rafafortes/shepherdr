@@ -62,7 +62,9 @@
   nothing new. A rebase review is kept out of the Review rounds (`task show` says "plus 1 rebase review"), so it is
   there when they are spent or one was added. A line of the task's own that the resolution words anew, reorders, adds or
   recounts without a count of the base's beside it, or work of its own that it takes away, is not covered: new work gets
-  a normal round, and dropped work is named and must come back first. A merge train's riders are held to it too: a
+  a normal round, and dropped work is named and must come back first. The match is per file: one conflict there opens it
+  for every line the resolution replaced in that file, but words must come from the base line each one pairs with and
+  numbers must stay on their own line unless the base moved one beside them. A merge train's riders are held to it too: a
   rider whose head is unreviewed stays out and its own turn refuses it.
   Tasks from before these records have none, and are left as they were; so is a task whose agent never counted a round
   (the rule starts with its first). A round after

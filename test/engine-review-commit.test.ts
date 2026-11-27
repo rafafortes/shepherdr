@@ -68,24 +68,26 @@ const MERGED = cases(
   STOP(30),
 )
 
-/** a task with its one round spent on MINE, the base moved to THEIRS, and the rebase's conflicts resolved as `resolved` */
-async function recounted(w: World, name: string, resolved: string) {
+/** a task with its one round spent on `mine`, the base moved to `theirs`, and the rebase's conflicts resolved as `resolved` */
+async function conflict(w: World, name: string, original: string, mine: string, theirs: string, resolved: string) {
   const dir = repo()
-  writeFileSync(join(dir, 'cases.md'), ORIGINAL)
+  writeFileSync(join(dir, 'cases.md'), original)
   sh('git add -A && git commit -qm "add cases"', dir)
   const { t } = await started(w, dir, name)
-  writeFileSync(join(t.worktree!, 'cases.md'), MINE)
-  sh('git add -A && git commit -qm "add the l1 group"', t.worktree!)
+  writeFileSync(join(t.worktree!, 'cases.md'), mine)
+  sh('git add -A && git commit -qm "change cases"', t.worktree!)
   t.rounds = 1
   await round(w, t)
   expect(w.engine.reviewsLeft(t)).toBe(0)
-  writeFileSync(join(dir, 'cases.md'), THEIRS)
-  sh('git add -A && git commit -qm "base adds the memory group"', dir)
+  writeFileSync(join(dir, 'cases.md'), theirs)
+  sh('git add -A && git commit -qm "base changes cases"', dir)
   expect(sh('git rebase main || true', t.worktree!)).toContain('CONFLICT')
   writeFileSync(join(t.worktree!, 'cases.md'), resolved)
   sh('git add -A && GIT_EDITOR=true git rebase --continue', t.worktree!)
   return t
 }
+
+const recounted = (w: World, name: string, resolved: string) => conflict(w, name, ORIGINAL, MINE, THEIRS, resolved)
 
 describe('a review is tied to the commit it reviewed', () => {
   test('ready refuses an unreviewed final commit and names the last reviewed commit and what came after', async () => {
@@ -502,12 +504,15 @@ describe('a review is tied to the commit it reviewed', () => {
     expect(await w.engine.reviewGate(t)).toBeUndefined()
   })
 
-  test('a resolution that merges the two sides but also raises a count, swaps words, drops a row or words a line anew is not a base move', async () => {
-    // the resolution also touches the task's own lines that no conflict reached: 30 seconds made 300 (a number the task's
-    // lines have elsewhere, but no count of the base's is on this line), `a < b` made `b < a` (the same words, in another
-    // order), its row left out of the table the base also grew and a sentence worded anew
+  test('a resolution that merges the two sides but also changes a count, swaps words, drops a row or words a line anew is not a base move', async () => {
+    // each resolution touches the task's own lines beyond a mechanical merge: a count raised or borrowed from another
+    // line, a task number dropped, two task numbers traded, `a < b` made `b < a`, its row left out of the table the base
+    // also grew, or a sentence worded anew
     for (const [name, resolved] of [
       ['raised-count', MERGED.replace(STOP(30), STOP(300))],
+      ['reused-number', MERGED.replace(STOP(30), STOP(496))],
+      ['dropped-number', MERGED.replace(STOP(30), 'stop when a < b after seconds')],
+      ['swapped-numbers', MERGED.replace(L1, '| l1_correction | 30 |').replace(STOP(30), STOP(300))],
       ['swapped-words', MERGED.replace(STOP(30), 'stop when b < a after 30 seconds')],
       ['left-out-row', MERGED.replace(`${L1}\n`, '')],
       ['reworded-line', MERGED.replace('group needs its own --only; the slices are walked with --offset.', 'group needs its own --only; run it as an overnight batch.')],
@@ -519,6 +524,29 @@ describe('a review is tied to the commit it reviewed', () => {
       expect(refusal, name).not.toContain('base moved')
       await expect(w.engine.reviewRound(t.id)).rejects.toThrow('review rounds are used')
     }
+  })
+
+  test('a negation inserted from a word the base carries is own work, not a merge', async () => {
+    const w = world()
+    const t = await conflict(w, 'inserted-negation', 'the run is fast.\n', 'the run is fast and quiet.\n', 'the run is not slow.\n', 'the run is not fast and quiet.\n')
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
+  })
+
+  test('a word of an unrelated base line the resolution drops cannot explain a new own word', async () => {
+    const w = world()
+    const t = await conflict(
+      w,
+      'unrelated-base-words',
+      'the run is fast.\nthe log is verbose.\n',
+      'the run is fast and quiet.\nthe log is verbose.\n',
+      'the run is quicker.\nthe log is not verbose.\n',
+      'the run is not fast and quiet.\n',
+    )
+    const refusal = await w.engine.reviewGate(t)
+    expect(refusal).toContain('All 1 of')
+    expect(refusal).not.toContain('base moved')
   })
 
   test("a resolution that takes the base's side whole drops the task's own lines and is refused as dropped work", async () => {
