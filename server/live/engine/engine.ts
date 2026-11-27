@@ -290,6 +290,8 @@ export interface Landing {
   train?: string
   /** gate: the merges its run is for, this one's included, when it gates a train */
   cars?: number
+  /** merge: its pre-flight (merge.preflight) is running, before the merge takes its place in line */
+  pre?: true
   at: number
   due?: number
   /** its agent, at rest with the checks through, was told to merge once */
@@ -299,7 +301,7 @@ export interface Landing {
 /** a landing task's line: "Checks running · ~3m", "Rebasing on main", "Merging" */
 export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'rebase') return `Rebasing on ${base}`
-  if (l.step === 'merge') return 'Merging'
+  if (l.step === 'merge') return l.pre ? 'Running the merge pre-flight' : 'Merging'
   if (l.step === 'gate') return l.cars ? `Running the merge gate (a train of ${l.cars})` : 'Running the merge gate'
   if (l.step === 'queue' && l.train) return `Going in with ${l.train}'s merge train`
   if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
@@ -501,6 +503,12 @@ const splitRef = (ref: string): [string | undefined, string] => {
 const PARK_REPLIES = 4
 /** how long a space's merge gate may run (engine.gate) before it is stopped and the merge refused */
 export const GATE_TIMEOUT = 45 * 60_000
+/** how long a space's pre-flight (merge.preflight) may run before it is stopped and counts as a failure */
+export const PREFLIGHT_TIMEOUT = 5 * 60_000
+/** the most pre-flight runs one merge train's turn may make, the stack's own and the probes that look for the car that fails */
+export const PREFLIGHT_TRAIN_RUNS = 12
+/** what an agent is told when the pre-flight refuses its merge: it is a cheap check of what the gate would fail on */
+export const PREFLIGHT_AGAIN = "The pre-flight is the merge gate's cheap first look: fix what its lines name, then run shepherdr merge again; the gate runs once it passes."
 /** what an agent is told when the gate refuses its merge: the gate is the merge's full check, so none of its own */
 export const GATE_AGAIN = "The merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first."
 
@@ -563,7 +571,7 @@ export function startGate(
 ): GateRun {
   fs.mkdirSync(dir, { recursive: true })
   const start = Date.now()
-  const name = gateName(at.space, id, start, randomUUID().slice(0, 8))
+  const name = gateName(at.space, id, start, randomUUID().slice(0, 8), at.kind)
   const log = join(dir, `${name}.log`)
   const exit = join(dir, `${name}.exit`)
   for (const f of [log, exit]) fs.rmSync(f, { force: true })
@@ -860,7 +868,8 @@ export class Engine extends Emitter<Events> {
       const g = t.gateRun
       if ((t.landing!.step === 'gate' && g && (fs.existsSync(g.exit) || alive(g.pid))) || t.landing!.step === 'queue') {
         this.runner.lateFor.add(t.id)
-        void this.merge(t.id, { self: true }).catch(() => undefined)
+        // it took its place in line (or its gate) only after its pre-flight passed: it goes on, not through the door again
+        void this.merge(t.id, { self: true, resumed: true }).catch(() => undefined)
         continue
       }
       const gate = t.landing!.step === 'gate'
@@ -870,6 +879,8 @@ export class Engine extends Emitter<Events> {
       t.mergeStop = `Merge${gate ? ' gate' : ''} interrupted by a restart: run shepherdr merge again`
       this.saveNow()
       this.settle(t)
+      // a train's pre-flight or gate the restart cut short left its head's worktree detached at a stack: back on its branch
+      void this.reattach(t)
       void this.agents
         .send(this.key(t), hidden(`Shepherdr restarted while your merge ran${gate ? ' (its gate was stopped)' : ''}: nothing was merged. Run shepherdr merge ${t.id} again.`, 'merge'))
         .catch(() => undefined)
@@ -883,9 +894,11 @@ export class Engine extends Emitter<Events> {
    */
   sweepGates() {
     const dir = join(this.dir, 'gates')
-    const live = new Set(
-      this.tasks.filter((t) => t.gateRun && !ended(t) && !t.stopped && !t.archived && t.landing?.step === 'gate' && Date.now() - t.gateRun.at <= GATE_TIMEOUT).map((t) => t.gateRun!.exit),
-    )
+    const live = new Set([
+      ...this.tasks.filter((t) => t.gateRun && !ended(t) && !t.stopped && !t.archived && t.landing?.step === 'gate' && Date.now() - t.gateRun.at <= GATE_TIMEOUT).map((t) => t.gateRun!.exit),
+      // a pre-flight this Shepherdr started is its own to wait for; only one a restart left behind is an orphan
+      ...[...this.preRuns.values()].flatMap((rs) => [...rs].map((r) => r.exit)),
+    ])
     // the command's exit-file path names the run, even when no task record for it is left: '<dir>/<name>.exit'.
     // No gate files: no process of this home's can be a gate, so do not walk /proc at all (finished runs keep their
     // logs, so once a gate has run here this is one walk a start).
@@ -922,11 +935,23 @@ export class Engine extends Emitter<Events> {
 
   /** a task going away (closed, stopped, archived or deleted) must not leave its gate running in its worktree */
   private dropTaskGate(t: TaskRec) {
+    // its pre-flight, still running in its worktree, goes too: its merge is told it was stopped
+    for (const r of this.preRuns.get(t.id) ?? []) dropGate(r)
     const g = t.gateRun
     if (!g) return
     this.dropRun(g)
     t.gateRun = undefined
     this.save()
+  }
+
+  /** a worktree a run cut short by a restart left detached (a train's stack checked out for its pre-flight or gate): back on its branch */
+  private async reattach(t: TaskRec) {
+    if (!t.worktree || !t.branch) return
+    try {
+      if (!(await G.git(t.worktree, 'branch', '--show-current')).out) await G.git(t.worktree, 'checkout', '--quiet', t.branch)
+    } catch {
+      // the folder is gone (the task was put away meanwhile): nothing is left to put back
+    }
   }
 
   /** how long shepherdr merge may take before it answers that it isn't through yet (tests shorten it) */
@@ -1005,7 +1030,7 @@ export class Engine extends Emitter<Events> {
   ) {
     super()
     // the logs of the runs going on are never pruned
-    this.gateLedger.live = () => this.tasks.flatMap((t) => (t.gateRun ? [t.gateRun.log] : []))
+    this.gateLedger.live = () => [...this.tasks.flatMap((t) => (t.gateRun ? [t.gateRun.log] : [])), ...[...this.preRuns.values()].flatMap((rs) => [...rs].map((r) => r.log))]
     // the merges, their pull requests and GitHub's checks (merge.ts): what they read of the engine is handed over here,
     // once; the two deadlines as getters, so a test that shortens one after the engine is made is read as it stands
     const engine = this
@@ -1044,6 +1069,7 @@ export class Engine extends Emitter<Events> {
       mergedAlready: (t) => engine.mergedAlready(t),
       reviewGate: (t) => engine.reviewGate(t),
       gate: (t, repo, space, wt, on, refresh) => engine.gate(t, repo, space, wt, on, refresh),
+      preflight: (t, repo, space, wt) => engine.preflight(t, repo, space, wt),
       train: (t, p, wt) => engine.train(t, p, wt),
       trainSize: (space) => engine.trainSize(space),
     } satisfies MergeHost)
@@ -4419,7 +4445,7 @@ export class Engine extends Emitter<Events> {
    */
 
   /** shepherdr merge: rebase the task's branch on main, squash-merge it and mark it merged */
-  merge(id: string, opts: { self?: boolean } = {}): Promise<{ ok: boolean; error?: string; note?: string }> {
+  merge(id: string, opts: { self?: boolean; resumed?: true } = {}): Promise<{ ok: boolean; error?: string; note?: string }> {
     return this.runner.merge(id, opts)
   }
 
@@ -4601,6 +4627,12 @@ export class Engine extends Emitter<Events> {
 
   /** how long a merge gate may run: GATE_TIMEOUT, shorter in a test */
   gateTimeout = GATE_TIMEOUT
+  /** how long a pre-flight (merge.preflight) may run: PREFLIGHT_TIMEOUT, shorter in a test */
+  preflightTimeout = PREFLIGHT_TIMEOUT
+  /** the most pre-flight runs a merge train's turn may make: PREFLIGHT_TRAIN_RUNS, fewer in a test */
+  preflightRuns = PREFLIGHT_TRAIN_RUNS
+  /** the pre-flight runs going on now, by task: dropped with their task (dropTaskGate), their logs never pruned */
+  private preRuns = new Map<string, Set<GateRun>>()
 
   /**
    * A space's merge gate (Settings → How tasks work → Merge gate, a command of its own): run in the task's worktree
@@ -4718,6 +4750,78 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
+   * The pre-flight at the door of the line (merge.preflight, MergeRunner.preflighting): the space's cheap command, run once
+   * in `t`'s worktree on its branch as it is, with the environment a gate gets and SHEPHERDR_PREFLIGHT=1, under a limit of
+   * its own (preflightTimeout). It is never under the line's one-at-a-time rule and lets nothing in: a pass is nothing, a
+   * failure (a timeout is one) is the refusal the merge answers with, and the run is kept (log, ledger line) like a gate's.
+   */
+  private async preflight(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: false; error: string } | undefined> {
+    const cmd = this.runner.preflightOf(t, space)
+    if (!cmd) return undefined
+    const at = (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+    const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
+    const ran = await this.runPreflight(t, cmd, wt, head, at, { space })
+    if (ran.code === GATE_GONE) {
+      this.gateLedger.record(ran.run, 'stopped', ran)
+      return {
+        ok: false,
+        error: `${t.id}'s merge pre-flight (${cmd}) was stopped before it ended (a restart, or a kill): nothing was merged, and ${t.id} keeps no place in line. Run shepherdr merge ${t.id} again.`,
+      }
+    }
+    if (ran.code === 0) {
+      this.gateLedger.record(ran.run, 'passed', ran)
+      return undefined
+    }
+    this.gateLedger.record(ran.run, 'refused', ran)
+    const said = ran.out.trim().split('\n').slice(-20).join('\n').slice(-2000)
+    // its row says it until the next merge: the last line the pre-flight printed
+    const last =
+      ran.out
+        .split('\n')
+        .filter((l) => l.trim())
+        .at(-1)
+        ?.trim() ?? (ran.code === 124 ? 'it ran out of time' : `exit ${ran.code}`)
+    t.mergeStop = `Refused by the pre-flight: ${last}`
+    const limit = this.preflightTimeout < 60_000 ? `${Math.round(this.preflightTimeout / 1000)} s` : `${Math.round(this.preflightTimeout / 60_000)} min`
+    const why = ran.code === 124 ? `didn't finish in ${limit}` : `failed (exit ${ran.code})`
+    const kept = ran.run.log && fs.existsSync(ran.run.log) ? `\nIts full log is kept at ${ran.run.log}` : ''
+    return {
+      ok: false,
+      error: `${t.id}'s merge pre-flight (${cmd}) ${why}: nothing was merged, and ${t.id} keeps no place in the merge line.${said ? ` Its output ends:\n${said}` : ''}${kept}\n${PREFLIGHT_AGAIN}`,
+    }
+  }
+
+  /**
+   * One run of the pre-flight in `wt` at `head`, on the base at `at`: detached like a gate (own session, its words and exit
+   * code in files of their own, its whole process group killed at the limit), but never kept for a restart to find: a run a
+   * restart cut short is simply run again, and the next start's sweep (sweepGates) ends the orphan. `who.members` names the
+   * cars of a train's stack it looks at.
+   */
+  private async runPreflight(t: TaskRec, cmd: string, wt: string, head: string, at: string, who: GateWho): Promise<{ code: number; out: string; run: GateRun }> {
+    const env = { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base!, SHEPHERDR_PREFLIGHT: '1' }
+    const kind = { ...who, kind: 'preflight' as const }
+    if (BOX) {
+      // a worker machine runs it over its own link, as it runs a gate; its words are kept here like any run's
+      const started = Date.now()
+      const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.preflightTimeout, env })
+      const out = [r.out, r.err].filter(Boolean).join('\n')
+      const log = this.gateLedger.keepOutput(gateName(who.space, t.id, started, randomUUID().slice(0, 8), 'preflight'), out)
+      return { code: r.code, out, run: { pid: 0, log, exit: '', at: started, head, tip: at, task: t.id, ...kind } }
+    }
+    const run = startGate(cmd, wt, env, join(this.dir, 'gates'), t.id, { head, tip: at, ...kind }, this.preflightTimeout)
+    const going = this.preRuns.get(t.id) ?? new Set<GateRun>()
+    going.add(run)
+    this.preRuns.set(t.id, going)
+    try {
+      return { ...(await waitGate(run, this.preflightTimeout)), run }
+    } finally {
+      going.delete(run)
+      if (!going.size) this.preRuns.delete(t.id)
+      forgetGate(run)
+    }
+  }
+
+  /**
    * The merges in line behind `t` in its repo (queued for a merge into its base, reported, with a branch), in line order:
    * those a train with `t` may take (riders), and every one of them with `why` set when it may not (another merge gate, marked
    * alone, its agent at work, a message it hasn't read). Its own turn decides what an agent still at work, or a message it
@@ -4791,6 +4895,19 @@ export class Engine extends Emitter<Events> {
     const at = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
     // made the same way each time (main's tip's date): after a restart, the same stack finds its gate's run again
     const date = (await G.git(p.path, 'log', '-1', '--format=%cI', at)).out
+    /** `x`'s change stacked on `top`, as the squash commit it would go in as (built by git, no checkout touched): its tree and
+     *  commit, or why it does not stack. `before` names what it stacks on, for the reason */
+    const stackOn = async (top: string, x: TaskRec, before: string): Promise<{ tree: string; commit: string } | string> => {
+      const merged = await G.git(p.path, 'merge-tree', '--write-tree', '--no-messages', '--name-only', top, x.branch!)
+      const tree = merged.out.split('\n')[0]
+      if (!merged.ok) {
+        const files = G.conflictedPaths(merged.out)
+        return `${x.id} conflicts with ${before}${files.length ? ` (${pathList(files)})` : ''}`
+      }
+      if (tree === (await G.git(p.path, 'rev-parse', `${top}^{tree}`)).out) return `${x.id} adds nothing to ${before}`
+      const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
+      return { tree, commit: c.out }
+    }
     const stacked: { t: TaskRec; tree: string; commit: string }[] = []
     let top = at
     for (const [i, x] of [t, ...riders].entries()) {
@@ -4807,22 +4924,14 @@ export class Engine extends Emitter<Events> {
           continue
         }
       }
-      const merged = await G.git(p.path, 'merge-tree', '--write-tree', '--no-messages', '--name-only', top, x.branch!)
-      const tree = merged.out.split('\n')[0]
       // the head stacks on main, every other on those before it
-      const before = i ? 'those before it' : 'main'
-      if (!merged.ok) {
-        const files = G.conflictedPaths(merged.out)
-        why.set(x, `${x.id} conflicts with ${before}${files.length ? ` (${pathList(files)})` : ''}`)
+      const on = await stackOn(top, x, i ? 'those before it' : 'main')
+      if (typeof on === 'string') {
+        why.set(x, on)
         continue
       }
-      if (tree === (await G.git(p.path, 'rev-parse', `${top}^{tree}`)).out) {
-        why.set(x, `${x.id} adds nothing to ${before}`)
-        continue
-      }
-      const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
-      stacked.push({ t: x, tree, commit: c.out })
-      top = c.out
+      stacked.push({ t: x, ...on })
+      top = on.commit
     }
     if (stacked.length < 2 || stacked[0].t !== t) {
       trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
@@ -4831,6 +4940,29 @@ export class Engine extends Emitter<Events> {
     const ids = (xs: { t: TaskRec }[]) => xs.map((c) => c.t.id)
     // the cars this round is about: all that stacked, then the half that was refused, and so on down
     let cur = stacked
+    // a fresh train (an unmarked head: a group being searched by halves is that search's) is first looked at by the
+    // pre-flight, so a car with a fault a cheap check finds goes to its own gate instead of making the gate refuse the train
+    const pre = t.bisect ? undefined : this.runner.preflightOf(t, p.name)
+    if (pre) {
+      const cars = await this.preflightTrain(t, p, wt, pre, stacked, at, why, async (xs) => {
+        const out: typeof stacked = []
+        let on = at
+        for (const [i, x] of xs.entries()) {
+          const s = await stackOn(on, x, i ? 'those before it' : 'main')
+          if (typeof s === 'string') why.set(x, s)
+          else {
+            out.push({ t: x, ...s })
+            on = s.commit
+          }
+        }
+        return out
+      })
+      if (!cars) {
+        trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
+        return undefined
+      }
+      cur = cars
+    }
     // a group refused together is never gated whole again: its first half goes
     let suspect = !!t.bisect?.suspect
     let group = t.bisect?.id
@@ -4925,6 +5057,115 @@ export class Engine extends Emitter<Events> {
       go.slice(1).forEach((c) => this.settle(c.t))
       return undefined
     }
+  }
+
+  /**
+   * The pre-flight at a train's formation (merge.preflight, train): the stack of `cars` (head first, each car's `commit` the
+   * stack up to it) is run once at its top, in `t`'s worktree detached there like the gate, its branch restored after. A
+   * pass leaves the train as it is. A failure is searched by halves over the stack's prefixes (each probe is one pre-flight at
+   * that prefix's commit; a prefix already run is not run again) for the first car whose prefix fails: that car is taken out
+   * and marked `alone` (it goes to its own gate at its turn, which tells it), the cars after it are stacked again without it
+   * (`restack`), and the top is tried again, until it passes, or fewer than two cars are left, or the head itself is the car
+   * that fails: then the head goes alone (nothing returned). The runs of one turn are bounded by `preflightRuns`; when they
+   * are spent the head goes alone too, whatever the stack's state, so a turn always ends in a gate run that decides. A
+   * failure only the whole stack has is the last car's: its prefix is the first to fail. Nothing lands on a pre-flight's
+   * word: the gate runs on exactly the stack that lands, and a car is marked only once its search ended.
+   */
+  private async preflightTrain(
+    t: TaskRec,
+    p: Space,
+    wt: string,
+    cmd: string,
+    cars: { t: TaskRec; tree: string; commit: string }[],
+    at: string,
+    why: Map<TaskRec, string>,
+    restack: (xs: TaskRec[]) => Promise<{ t: TaskRec; tree: string; commit: string }[]>,
+  ): Promise<{ t: TaskRec; tree: string; commit: string }[] | undefined> {
+    type Car = (typeof cars)[number]
+    const ids = (xs: Car[]) => xs.map((c) => c.t.id)
+    // every prefix's answer, by its commit: a prefix the search comes back to (the cars before a taken-out one stack the
+    // same again) is not run twice
+    const seen = new Map<string, { ok: boolean; code: number; log: string }>()
+    let runs = 0
+    const out: TaskRec[] = []
+    /** no answer: the search ends here, and the head goes alone */
+    const none = (why: string): 'none' => {
+      trainLog(`${t.id}'s merge train: ${why}`)
+      return 'none'
+    }
+    /** one probe: this prefix's pre-flight: passed, failed, or no answer (stopped, or the runs of this turn are spent) */
+    const probe = async (stack: Car[], i: number): Promise<'pass' | 'fail' | 'none'> => {
+      const commit = stack[i].commit
+      const done = seen.get(commit)
+      if (done) return done.ok ? 'pass' : 'fail'
+      if (runs >= this.preflightRuns) return none(`the pre-flight's ${this.preflightRuns} runs for this turn are spent`)
+      const detached = await G.git(wt, 'checkout', '--quiet', '--detach', commit)
+      // coverage-exempt: git checks out a commit it just built in a clean worktree; no test can make it refuse
+      if (!detached.ok) return none(`the pre-flight could not check out ${commit.slice(0, 7)}`)
+      runs++
+      const ran = await this.runPreflight(t, cmd, wt, commit, at, { space: p.name, members: ids(stack.slice(0, i + 1)) })
+      if (ran.code === GATE_GONE) {
+        this.gateLedger.record(ran.run, 'stopped', ran)
+        return none('its pre-flight stopped before it ended (a restart, or a kill)')
+      }
+      const ok = ran.code === 0
+      this.gateLedger.record(ran.run, ok ? 'passed' : 'refused', ran)
+      seen.set(commit, { ok, code: ran.code, log: ran.run.log })
+      return ok ? 'pass' : 'fail'
+    }
+    let cur = cars
+    // the cars before this index passed already: their prefixes are the same commits after a car is taken out
+    let known = 0
+    let left: Car[] | undefined
+    this.land(t, 'merge', undefined, { pre: true })
+    try {
+      for (;;) {
+        if (cur.length < 2) break
+        const top = await probe(cur, cur.length - 1)
+        if (top === 'none') break
+        if (top === 'pass') {
+          left = cur
+          break
+        }
+        // the first car whose prefix fails: the top's prefix is known to, the one before `lo` is known to pass
+        let lo = Math.min(known, cur.length - 1)
+        let hi = cur.length - 1
+        let stuck = false
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1
+          const r = await probe(cur, mid)
+          if (r === 'none') {
+            stuck = true
+            break
+          }
+          if (r === 'fail') hi = mid
+          else lo = mid + 1
+        }
+        if (stuck) break
+        const bad = cur[lo]
+        const said = seen.get(bad.commit)!
+        const kept = said.log && fs.existsSync(said.log) ? `; log ${basename(said.log)}` : ''
+        if (lo === 0) {
+          trainLog(`${t.id}'s merge train: the pre-flight fails on ${t.id} itself at ${bad.commit.slice(0, 7)} (exit ${said.code}${kept}): ${t.id} goes alone, to its own gate`)
+          break
+        }
+        trainLog(
+          `${t.id}'s merge train: the pre-flight fails once ${bad.t.id} is stacked, at ${bad.commit.slice(0, 7)} (exit ${said.code}${kept}): ${bad.t.id} goes alone, to its own gate, and the rest are stacked again`,
+        )
+        why.set(bad.t, `${bad.t.id} fails the pre-flight (it goes alone, to its own gate)`)
+        out.push(bad.t)
+        known = lo
+        cur = await restack(cur.filter((c) => c !== bad).map((c) => c.t))
+      }
+    } finally {
+      // detached for the probes, the head's branch is back whatever ended them; a car is marked only now, once the search
+      // that found it ended, so a pre-flight that did not finish leaves nobody marked
+      await G.git(wt, 'checkout', '--quiet', t.branch!)
+      if (t.landing?.pre) this.land(t, 'merge')
+      for (const x of out) x.alone = true
+      if (out.length) this.saveNow()
+    }
+    return left
   }
 
   /** what its agent must fix, written to it: it is at work again */

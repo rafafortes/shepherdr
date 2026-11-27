@@ -121,6 +121,9 @@ export interface MergeHost {
     on?: string,
     refresh?: () => Promise<void>,
   ): Promise<{ ok: true; line?: string; at?: string } | { ok: false; error: string; stopped?: true }>
+  /** the space's pre-flight (merge.preflight) on the branch as it is: why the merge is refused, or nothing when it passes
+   *  (the engine's own pre-flight) */
+  preflight(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: false; error: string } | undefined>
   /** others in line behind it go in with it on one gate run (the engine's own train) */
   train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined>
   /** how many merges a space's train takes at most (merge.train) */
@@ -286,6 +289,14 @@ export class MergeRunner {
   /** a task's merge gate command, its own --set first, then its space's; nothing while it is off */
   gateOf(t: TaskRec, space = this.e.nameOf(t)) {
     const cmd = (t.set?.['merge.gate'] ?? this.e.settings.get('merge.gate', space)).trim()
+    return cmd && cmd.toLowerCase() !== 'off' ? cmd : undefined
+  }
+
+  /** a task's pre-flight command (merge.preflight), its own --set first, then its space's; nothing while it is off, and
+   *  nothing while no merge gate is set: it only ever looks ahead of a gate, never stands in for one */
+  preflightOf(t: TaskRec, space = this.e.nameOf(t)) {
+    if (!this.gateOf(t, space)) return undefined
+    const cmd = (t.set?.['merge.preflight'] ?? this.e.settings.get('merge.preflight', space)).trim()
     return cmd && cmd.toLowerCase() !== 'off' ? cmd : undefined
   }
 
@@ -664,7 +675,7 @@ export class MergeRunner {
    * be the one asking). A conflict or failed checks stop it with what to do. Anyone but the task's own agent waits
    * until that agent's turn has ended, so no half-done work goes in.
    */
-  merge(id: string, opts: { self?: boolean } = {}): Promise<{ ok: boolean; error?: string; note?: string }> {
+  merge(id: string, opts: { self?: boolean; resumed?: true } = {}): Promise<{ ok: boolean; error?: string; note?: string }> {
     const t = this.e.req(id)
     if (this.closing) return Promise.resolve({ ok: false, error: `Shepherdr is restarting: nothing was merged. Run shepherdr merge ${t.id} again in a minute.` })
     // asked again while its merge still runs: the same one is waited for, never a second beside it
@@ -678,35 +689,15 @@ export class MergeRunner {
     }
     if (!run) {
       const repo = this.e.places.space(t.project)?.path ?? ''
-      // in line behind another merge into its repo: its row says whose, and whether that one runs the gate
-      const ahead = this.mergingNow.get(repo)
-      if (ahead && ahead !== t.id && t.reported && !ended(t)) {
-        t.landing = { step: 'queue', at: Date.now(), behind: ahead, gate: this.gateOf(t) !== undefined }
-        this.e.saveNow()
-        this.e.settle(t)
-      }
-      const now = (this.merging.get(repo) ?? Promise.resolve())
-        .then(() => {
-          this.mergingNow.set(repo, t.id)
-          this.inLineBehind(repo, t)
-          return this.onGitHub(
-            () => this.mergeNow(t, !!opts.self),
-            (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` }),
-          )
-        })
-        .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
-        // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
-        .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate' || t.landing?.step === 'queue') && this.land(t), r))
-        // its caller heard by the deadline that it goes on: its agent hears now how it went, and wakes on it
-        .then((r) => (this.lateFor.delete(t.id) && this.tellMerge(t, r), r))
-      run = now
-      this.landings.set(t.id, now)
-      const tail = now.catch(() => undefined)
-      tail.then(() => this.landings.get(t.id) === now && this.landings.delete(t.id))
-      // the next merge into this repo waits until this one is really through, however long: two at once would write
-      // over each other's main. Its caller still hears by the deadline
-      this.merging.set(repo, tail)
-      tail.then(() => this.merging.get(repo) === tail && this.merging.delete(repo))
+      // a cheap look first (merge.preflight), before the merge takes its place in line: a change that cannot pass its gate
+      // hears so in seconds and holds nobody up, and the line never waits for it. A merge resumed after a restart took its
+      // place only after one pass, so it is not looked at again; one the restart cut short in its pre-flight left no place,
+      // and is told to merge again (resumeMerges), which looks again
+      const looking = opts.resumed ? undefined : this.preflighting(t, !!opts.self)
+      const request = looking ? looking.then((refused) => refused ?? this.enter(t, repo, !!opts.self)) : this.enter(t, repo, !!opts.self)
+      run = request
+      this.landings.set(t.id, request)
+      request.catch(() => undefined).then(() => this.landings.get(t.id) === request && this.landings.delete(t.id))
     }
     // its caller hears by the deadline, whatever hangs on the way (git, gh, GitHub): never a command that waits on and
     // on until the agent's shell moves it to the background, where its answer is lost. The merge itself goes on.
@@ -722,7 +713,9 @@ export class MergeRunner {
               ? `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}`
               : l?.step === 'gate'
                 ? 'is in its gate: its merge gate still runs'
-                : `isn't through after ${Math.round(this.e.mergeDeadline / 1000)} s (git or GitHub is slow)`
+                : l?.pre
+                  ? 'is in its merge pre-flight, the cheap check before it takes its place in line (it queues once that passes)'
+                  : `isn't through after ${Math.round(this.e.mergeDeadline / 1000)} s (git or GitHub is slow)`
         done({
           ok: false,
           error: `${t.id}'s merge ${where}. Shepherdr goes on with it and tells you here how it went (merged, or what stopped it): end your turn now, without polling or sleeping. A shepherdr merge ${t.id} meanwhile only waits for this one.`,
@@ -730,6 +723,87 @@ export class MergeRunner {
       }, this.e.mergeDeadline)
     })
     return Promise.race([run, late]).finally(() => clearTimeout(timer))
+  }
+
+  /**
+   * The line a merge request takes: behind the merge in flight in `repo` (its row says whose), one turn at a time per
+   * repo, then its own merge. Everything a merge request waits for in line starts here; the pre-flight (preflighting)
+   * never does, so it can hold nobody up.
+   */
+  private enter(t: TaskRec, repo: string, self: boolean): Promise<{ ok: boolean; error?: string; note?: string }> {
+    // in line behind another merge into its repo: its row says whose, and whether that one runs the gate
+    const ahead = this.mergingNow.get(repo)
+    if (ahead && ahead !== t.id && t.reported && !ended(t)) {
+      t.landing = { step: 'queue', at: Date.now(), behind: ahead, gate: this.gateOf(t) !== undefined }
+      this.e.saveNow()
+      this.e.settle(t)
+    }
+    const now = (this.merging.get(repo) ?? Promise.resolve())
+      .then(() => {
+        this.mergingNow.set(repo, t.id)
+        this.inLineBehind(repo, t)
+        return this.onGitHub(
+          () => this.mergeNow(t, self),
+          (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` }),
+        )
+      })
+      .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
+      // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
+      .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate' || t.landing?.step === 'queue') && this.land(t), r))
+      // its caller heard by the deadline that it goes on: its agent hears now how it went, and wakes on it
+      .then((r) => (this.lateFor.delete(t.id) && this.tellMerge(t, r), r))
+    // the next merge into this repo waits until this one is really through, however long: two at once would write
+    // over each other's main. Its caller still hears by the deadline
+    const tail = now.catch(() => undefined)
+    this.merging.set(repo, tail)
+    tail.then(() => this.merging.get(repo) === tail && this.merging.delete(repo))
+    return now
+  }
+
+  /**
+   * The space's pre-flight (merge.preflight) at the door of the line: a cheap command run in the task's worktree on its
+   * branch as it is, before the merge takes its place in line and never under the line's one-at-a-time rule. A failure is
+   * the merge's answer at once (the refusal says nothing was merged and the task keeps no place in line); a pass lets it
+   * queue as it always did. Nothing when the space has none, or when the merge would be refused anyway for something
+   * cheaper (its own turn says so, in the same words as before).
+   */
+  private preflighting(t: TaskRec, self: boolean): Promise<{ ok: boolean; error?: string; note?: string } | undefined> | undefined {
+    const p = this.e.places.space(t.project)
+    if (!p || !t.worktree || !this.preflightOf(t, p.name) || this.early(t, self)) return undefined
+    this.land(t, 'merge', undefined, { pre: true })
+    const wt = t.worktree
+    return this.e.preflight(t, p.path, p.name, wt).then(
+      (refused) => {
+        // the turn that follows sets its own place; a refusal leaves the task Ready again, its row saying why
+        if (t.landing?.pre) this.land(t)
+        if (refused && this.lateFor.delete(t.id)) this.tellMerge(t, refused)
+        return refused
+      },
+      // a pre-flight that cannot even start (no folder for its files, no process) never keeps a merge out of the line: the
+      // gate, which needs the same, says what is wrong
+      (e: unknown) => {
+        if (t.landing?.pre) this.land(t)
+        trainLog(`${t.id}'s merge pre-flight could not run (${(e as Error).message}): it takes its place in line as it is`)
+        return undefined
+      },
+    )
+  }
+
+  /** why a merge cannot go on at all, in words, before it does any work; nothing when it can */
+  private early(t: TaskRec, self: boolean): { ok: false; error: string } | { ok: true; note: string } | undefined {
+    // one a merge train took along went in on that train's gate: its own turn only says so
+    if (t.merged) return t.train ? { ok: true, note: `it went in with ${t.train}'s merge train` } : { ok: false, error: `${t.id} is already merged` }
+    if (t.closed) return { ok: false, error: `${t.id} is Done: it had nothing to merge` }
+    if (!t.worktree || !t.branch || !t.base) return { ok: false, error: `${t.id} has no branch yet` }
+    if (!self && this.e.agents.status(this.e.key(t)) === 'working')
+      return { ok: false, error: `${t.id}'s agent is working: wait for its turn to end, or ask it to merge (shepherdr task tell ${t.id} "merge it").` }
+    // a late note from you or a coordinator, not read yet, may change what goes in
+    if (this.e.chats.unseen(this.e.key(t)).length)
+      return {
+        ok: false,
+        error: self ? 'You have a new message in your chat: read and handle it, then merge again.' : `${t.id}'s agent has a new message it hasn't read yet: let it handle that first.`,
+      }
+    return undefined
   }
 
   /** `t`'s merge into `repo` takes its turn: each merge still in line there now waits behind it, and its row says so */
@@ -764,18 +838,10 @@ export class MergeRunner {
   }
 
   private async mergeNow(t: TaskRec, self: boolean): Promise<{ ok: boolean; error?: string; note?: string }> {
-    // one a merge train took along went in on that train's gate: its own turn only says so
-    if (t.merged) return t.train ? { ok: true, note: `it went in with ${t.train}'s merge train` } : { ok: false, error: `${t.id} is already merged` }
-    if (t.closed) return { ok: false, error: `${t.id} is Done: it had nothing to merge` }
+    const early = this.early(t, self)
+    if (early) return early
+    // coverage-exempt: early() has refused a task that lacks a worktree, a branch or a base; this only narrows the types
     if (!t.worktree || !t.branch || !t.base) return { ok: false, error: `${t.id} has no branch yet` }
-    if (!self && this.e.agents.status(this.e.key(t)) === 'working')
-      return { ok: false, error: `${t.id}'s agent is working: wait for its turn to end, or ask it to merge (shepherdr task tell ${t.id} "merge it").` }
-    // a late note from you or a coordinator, not read yet, may change what goes in
-    if (this.e.chats.unseen(this.e.key(t)).length)
-      return {
-        ok: false,
-        error: self ? 'You have a new message in your chat: read and handle it, then merge again.' : `${t.id}'s agent has a new message it hasn't read yet: let it handle that first.`,
-      }
     // asked by you or a coordinator, with its agent at rest: going in, it is on its way into main as one reported is
     if (!t.reported) t.reported = true
     this.land(t, 'merge')

@@ -190,6 +190,24 @@ describe('a worker for another machine', () => {
     expect(r.error).toContain(`Its full log is kept at ${join(home, 'gates', line.log)}`)
   })
 
+  test('a pre-flight runs on that machine over its link too, its words kept here, and its failure there refuses the merge', async () => {
+    const t = { id: 'FA-2', title: 'Pre-flight there', base: 'main', set: { 'merge.gate': 'tools/far-gate.sh', 'merge.preflight': 'tools/far-lint.sh' } }
+    const preflight = (src.engine as unknown as Record<string, (...a: unknown[]) => Promise<{ ok: boolean; error?: string } | undefined>>).preflight.bind(src.engine)
+    const r = await preflight(t, join(boxHome, 'repo'), 'far', join(boxHome, 'wt'))
+    expect(r?.ok).toBe(false)
+    expect(r?.error).toContain("FA-2's merge pre-flight (tools/far-lint.sh) failed (exit 255): nothing was merged, and FA-2 keeps no place in the merge line")
+    expect((t as { mergeStop?: string }).mergeStop).toBe('Refused by the pre-flight: ssh: Could not resolve hostname (test)')
+    expect(readFileSync(sshLog, 'utf8')).toContain('tools/far-lint.sh')
+    const line = readFileSync(join(home, 'gates', 'ledger.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .at(-1)
+    expect(line).toMatchObject({ kind: 'preflight', space: 'far', task: 'FA-2', end: 'refused', code: 255 })
+    expect(line.log).toMatch(/\.pre\.log$/)
+    expect(readFileSync(join(home, 'gates', line.log), 'utf8')).toContain('Could not resolve hostname (test)')
+  })
+
   test("a file a chat names outside that machine's inbox is none of its own, even with no older inbox there", async () => {
     mkdirSync(join(boxHome, '.shepherdr', 'helper', 'inbox'), { recursive: true })
     const file = join(home, 'elsewhere.png')

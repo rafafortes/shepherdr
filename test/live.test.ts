@@ -1115,6 +1115,7 @@ describe('settings', () => {
       'review.rounds',
       'brief.merge',
       'merge.gate',
+      'merge.preflight',
       'merge.train',
       'reviewer.agent',
       'reviewer.model',

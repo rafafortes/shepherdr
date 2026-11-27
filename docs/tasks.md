@@ -229,7 +229,7 @@
   its last 20 lines. The refusal a task is told ends its output with `Its full log is kept at <path>`, and the server's
   log line for a refused train names the file too (`refused (exit 1; log <file>)`). Each run also adds one JSON line to
   `gates/ledger.jsonl` beside the logs, written once when its outcome is known: `started` and `ended` (ISO, UTC),
-  `space`, `task` (the head, for a train), `members` (the merges a train's run gated, in line order), `head` (the commit
+  `kind` (`gate`, or `preflight` for a pre-flight run, below), `space`, `task` (the head, for a train), `members` (the merges a train's run gated, in line order), `head` (the commit
   it ran on), `base` (the base it ran on), `seconds`, `code` (its exit code; null when it ended with none), `end` (`passed`,
   `refused`, `moved` for a pass whose base had moved meanwhile, `stopped` for a restart, a kill or a task that went away,
   `not-started`), `log` (the file's name) and `last` (the gate's last non-empty line, at most 200 characters, without
@@ -255,6 +255,42 @@
   will land is checked before it lands. The first merge of a tree therefore pays one full run, and a merge retried on the
   same tree pays nothing. A merge train runs its gate on the top of its stack, a tree no single run recorded, so a train
   always pays one full run.
+- A space with a merge gate may also set a **merge pre-flight** (Settings → How tasks work → Merge pre-flight,
+  `merge.preflight`, off by default; a task's own `--set merge.preflight=…` wins): a cheap command (seconds to a minute)
+  that says whether a change can possibly pass the gate, such as a lint or a static check, for a gate that is a full
+  check of minutes. It never replaces the gate: only a gate run lets anything land, and a pre-flight without a gate does
+  nothing. It gets the environment a gate gets (`SHEPHERDR_TASK`, `SHEPHERDR_BASE`) plus `SHEPHERDR_PREFLIGHT=1`, runs
+  detached like the gate (its words and exit code in files of their own, its whole process group killed at the limit),
+  has a limit of its own (5 minutes: a timeout is a failure that says so), and is never under the line's one-at-a-time
+  rule. It runs at two moments:
+  **When a merge is asked for**, whether by `shepherdr merge` or by the agent's own merge when it reports ready, once per
+  request: in the task's worktree on its branch as it is (nothing is committed or rebased for it), before the merge takes
+  its place in line. A failure refuses the merge at once, in the shape of a gate refusal: the task is told with the
+  command, its exit code (or that it didn't finish in time), the last lines of its output and where the full log is, that
+  nothing was merged and that it keeps no place in line, its row reads `Refused by the pre-flight: <last line>` and the
+  task is Ready again; a pass lets the merge queue as it always did, so a faulty change learns in seconds instead of
+  after its turn (it holds nobody up while it runs: a merge asked for later and through its pre-flight first takes its
+  place first). Asked again while it runs, the same request is waited for, never a second run; asking again after a
+  refusal runs it again. A merge resumed after a restart does not run it again (it took its place only after a pass); one
+  a restart cut short in its pre-flight left no place, so its agent is told, as for any cut-short merge, to run
+  `shepherdr merge` again, which looks again, and the head's worktree, if a train's probe left it detached, is back on
+  its branch.
+  **When a merge train forms** (a fresh one: its head carries no mark of a refused train; a group being searched by halves
+  is that search's): the stack is run once at its top, in the head's worktree detached there like the gate and the
+  branch restored after. If it passes, the gate runs on it as it always did. If it fails, the first car whose prefix of
+  the stack fails is found by binary search over the prefixes (each probe is one pre-flight at that prefix's commit; a
+  prefix already run is not run again), taken out of the train and marked to go alone (its own gate, at its turn, tells it),
+  the cars after it are stacked again without it and the top is tried again, until it passes or fewer than two cars are
+  left; then the head goes alone, as it does when it is itself the car that fails. A failure only the whole stack has is
+  the last car's: its prefix is the first to fail, so it goes alone and the rest go on. The runs of one train turn are
+  bounded at 12 (the stack's own and the probes): when they are spent the head goes alone and the turn's gate decides, and
+  the next turn has its own twelve. Marks are put on cars only once the search that found them has ended, so a restart
+  leaves nobody marked; every decision is one `shepherdr: ` line of the server's log naming the pre-flight's log.
+  Every pre-flight run keeps its log in `gates/` (named `<space>.<task>-<start>-<random>.pre.log`, newest 200 kept per
+  space, apart from the gate logs' 200, so a cheap check never pushes a gate's log out) and writes one line in
+  `gates/ledger.jsonl` with `kind` `preflight` (the gate's lines say `gate`, and are otherwise as they were): `members`
+  names the cars of the stack a train's run looked at, and the line's `end` is `passed`, `refused` (a timeout too, code
+  124), or `stopped` (its task went away while it ran).
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 8, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,

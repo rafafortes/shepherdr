@@ -51,9 +51,10 @@ export const REFUSE_OVER = (n: number) => `[ "$(git diff --name-only main HEAD |
  * A repo's merge line: a blocker (its gate waits for go-<its id>), then `members` tasks, each with a file of its own
  * (`<i>.txt`) committed and reported done, its agent at rest. The space's gate logs each run (`ran()`: the head task of
  * each run, in order, and the commit it ran on), runs `gate` (a refusal), then waits for go-<the run's head> and is green;
- * `merge.train` is `k`. `bad` are the members (1-based) whose change carries a bad file.
+ * `merge.train` is `k`. `bad` are the members (1-based) whose change carries a bad file. With `pre`, the space's pre-flight
+ * (merge.preflight) logs each run (`pre()`: its task, the ref it ran on, the commit) and then runs `pre`.
  */
-export async function trainWorld(name: string, members: number, k: string, bad: number[] = [], gate = REFUSE_BAD) {
+export async function trainWorld(name: string, members: number, k: string, bad: number[] = [], gate = REFUSE_BAD, pre?: string) {
   const w = world()
   const dir = repo()
   const gates = tmp(`${name}-go`)
@@ -63,6 +64,8 @@ export async function trainWorld(name: string, members: number, k: string, bad: 
   const waiting = waitFor(`${gates}/go-$SHEPHERDR_TASK`, gates, 'echo "Gate: green on $(git rev-parse --short HEAD^{tree})"')
   expect(w.settings.set('merge.gate', `echo "$SHEPHERDR_TASK $(git rev-parse --short=7 HEAD)" >> ${runs}; ${gate}${waiting}`, { space }).ok).toBe(true)
   expect(w.settings.set('merge.train', k, { space }).ok).toBe(true)
+  const pres = join(gates, 'pre-runs')
+  if (pre) expect(w.settings.set('merge.preflight', `echo "$SHEPHERDR_TASK $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short=7 HEAD)" >> ${pres}; ${pre}`, { space }).ok).toBe(true)
   const ts = [a.t]
   for (let i = 1; i <= members; i++) ts.push(w.engine.add({ project: space, title: `Task ${i}`, desc: `Add ${i}.txt.`, by: 'test' }))
   await until(() => ts.every((t) => !!t.worktree))
@@ -102,6 +105,14 @@ export async function trainWorld(name: string, members: number, k: string, bad: 
     space,
     gates,
     go,
+    /** each pre-flight run so far: the task it ran for, the ref its worktree was on (HEAD when detached at a stack) and the commit */
+    pre: () =>
+      existsSync(pres)
+        ? readFileSync(pres, 'utf8')
+            .trim()
+            .split('\n')
+            .map((x) => x.split(' '))
+        : [],
     /** the head task of each gate run so far, the blocker's included */
     ran: () => logged().map(([task]) => task),
     /** the commit each gate run was on (short) */

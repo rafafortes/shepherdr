@@ -437,6 +437,16 @@ queued pull request on top of the ones before it and drops the one that fails), 
 (ideas from running a merge-queue repo) is about GitHub's queue (a red base, a queue jump, `--after`, auto-start order),
 not about a gate we run here. The search by halves, the kept gate logs and the gate ledger are ours.
 
+Checked again on 2026-11-26 (SHE merge pre-flight task) against `upstream/main` and `upstream/v2.0` (fetched that day), for a
+cheap check run before a merge takes its place in line and when a train forms (`merge.preflight`): `git grep -i` for
+preflight, pre-flight, pre-merge, precheck, merge gate and merge.check on both lines (the only hits are an unrelated
+cross-site "preflight" request test in `service/auth.test.ts` and an autopilot test's input "preflight"), `git log -i --grep`
+for the same words, and the public issues and pull requests (`gh issue list` and `gh pr list` for "merge preflight", "pre-merge
+check", "merge queue hold", "pause merges"). **Nothing for this**: upstream has no merge gate to look ahead of, and GitHub's
+merge queue builds each queued pull request on top of the ones before it with no cheap first pass; issue #1195's queue jump and
+queue-position ideas are about GitHub's queue as well. The pre-flight, its probes by halves over a train's stack and its own
+ledger lines are ours.
+
 ## Not from upstream: a limits page over every space, provider and model, built here
 
 Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for a limits or capacity
