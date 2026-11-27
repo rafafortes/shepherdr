@@ -3809,9 +3809,13 @@ export class Engine extends Emitter<Events> {
     return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.reviewChain(t)), t.id)
   }
 
-  /** whether a task is still at the step its review belongs to: not ended, reported, stopped or archived */
+  /** whether a task is still at the step its review belongs to: not ended, reported, stopped or archived. A merge
+   *  stopped on a conflict parks a 'rebase' landing and sends the task back to its agent by hand: a review of the
+   *  rebased commit belongs to that turn, even though it reported done before the merge, so its round may wait for a
+   *  reviewer and be counted when one frees instead of being dropped (SHE-205). */
   private atReviewStep(t: TaskRec) {
-    return !ended(t) && !t.reported && !t.stopped && !t.archived
+    if (ended(t) || t.stopped || t.archived) return false
+    return !t.reported || t.landing?.step === 'rebase'
   }
 
   /** `shepherdr review <id> --done`: the round's review has finished, so its reviewer is free again (no round is counted),
@@ -4303,7 +4307,10 @@ export class Engine extends Emitter<Events> {
     if (from?.includes('/')) throw new Error(`Only ${t.id}'s coordinator adds a review round, never its own agent: ask your coordinator`)
     // a coordinator of another space (another machine's included) is not this task's
     if (from && from !== t.project) throw new Error(`Only ${this.spaceName(t)}'s coordinator adds ${t.id} a review round, not ${this.places.nameOf(from) ?? from}'s: ask it`)
-    if (t.landing)
+    // only a merge that is really in flight holds the line: a runner landing or a detached gate run, the same rule
+    // youWrote uses. A merge stopped on a conflict parks a 'rebase' landing with nothing running (merge.ts land()),
+    // so it must not refuse the round the rebased commit needs, or the task is stuck with no way to get one (SHE-205).
+    if (t.landing && t.landing.step !== 'rebase' && (this.runner.landings.has(t.id) || !!t.gateRun))
       throw new Error(
         `${t.id} is on its way into main (${landingLine(t.landing, t.base ?? 'main')}): a review round cannot be added while the merge is in flight. Retry after the merge finishes if it did not go in.`,
       )
@@ -4315,6 +4322,10 @@ export class Engine extends Emitter<Events> {
       throw new Error(
         `${t.id} has used ${this.normalReviews(t)} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used${t.reviews === undefined ? ` (its agent counts each round: shepherdr review ${t.id})` : ''}`,
       )
+    // the parked landing of a merge that stopped on a conflict is not a merge in flight: clear it so the task is back
+    // at its agent's step, its row no longer says it is rebasing, and its next review, ready and merge go through.
+    // sendBack's youWrote does the same, but the grant itself must leave no parked landing behind (SHE-205).
+    if (t.landing?.step === 'rebase') t.landing = undefined
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
     // the card asking for this round is settled by the grant: nothing of the human's is left to answer, so it must not

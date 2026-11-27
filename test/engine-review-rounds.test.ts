@@ -2,7 +2,9 @@
 // counts each round it starts, so one that has used them all is refused and asks its coordinator, which gives exactly
 // one more — only once they are used, and never from the task's own agent.
 import { describe, expect, test } from 'bun:test'
-import { repo, until, world } from './engine-world.ts'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { repo, sh, until, world } from './engine-world.ts'
 
 /** a started task whose brief said at most two review rounds */
 async function twoRounds(w: ReturnType<typeof world>, name: string) {
@@ -91,11 +93,70 @@ describe('review rounds a coordinator may add', () => {
     await w.engine.reviewRound(t.id)
     t.reported = true
     t.landing = { step: 'merge', at: Date.now() }
+    // a merge really in flight: the runner holds its landing, or a detached gate run is on the task record
+    const run = new Promise<{ ok: boolean }>(() => undefined)
+    const landings = (w.engine as unknown as { runner: { landings: Map<string, unknown> } }).runner.landings
+    landings.set(t.id, run)
     expect(t.landing?.step).toBe('merge')
     const failed = await w.engine.reviewMore(t.id, t.project).catch((e: Error) => e.message)
     expect(failed).toContain('on its way into main')
     expect(failed).toContain('Merging')
     expect(failed).toContain('Retry after the merge finishes')
     expect(t.reviewsAdded).toBeUndefined()
+    expect(t.landing?.step).toBe('merge')
+
+    t.landing = { step: 'gate', at: Date.now() }
+    landings.delete(t.id)
+    t.gateRun = { at: Date.now(), pid: 1, exit: 'gate.exit', log: 'gate.log' } as never
+    const gated = await w.engine.reviewMore(t.id, t.project).catch((e: Error) => e.message)
+    expect(gated).toContain('Running the merge gate')
+    expect(gated).toContain('Retry after the merge finishes')
+    expect(t.reviewsAdded).toBeUndefined()
+  })
+
+  test('a merge stopped on a conflict, rebased by hand with its rounds used, gets the added round and merges', async () => {
+    const w = world()
+    const dir = repo()
+    const p = await w.places.add(dir, 'rebase-round')
+    const t = w.engine.add({ project: p.name, title: 'Reviewed change', by: 'test', set: { 'review.rounds': '1' } })
+    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
+    const wt = t.worktree
+    if (!wt) throw new Error('the task has no worktree')
+    writeFileSync(join(wt, 'README.md'), 'mine\n')
+    sh('git add -A && git commit -qm "change the readme"', wt)
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 1, rounds: 1 })
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(w.engine.reviewsLeft(t)).toBe(0)
+
+    // main moves to a clashing readme: the merge stops on the conflict and parks its landing on the agent
+    writeFileSync(join(dir, 'README.md'), 'theirs\n')
+    sh('git add -A && git commit -qm "main changes the readme"', dir)
+    expect(await w.engine.done(t.id, 'Changed the readme.')).toMatchObject({ state: 'ready' })
+    const stopped = await w.engine.merge(t.id, { self: true })
+    expect(stopped.error).toContain('Conflict with main')
+    expect(t.landing?.step).toBe('rebase')
+    expect(w.engine.subOf(t)).toBe('Merge stopped on a conflict with main: rebasing by hand')
+    expect(w.engine.statusOf(t)).not.toBe('merging')
+
+    // nothing is in flight: the round the rebased head needs is no longer refused, and the parked landing is gone
+    expect(await w.engine.reviewMore(t.id, t.project)).toEqual({ rounds: 2 })
+    expect(t.reviewsAdded).toBe(1)
+    expect(t.landing).toBeUndefined()
+    expect(t.reported).toBe(false)
+
+    // the agent rebases by hand, resolves into new work of its own, and records the round it was just given
+    expect(sh('git rebase main || true', wt)).toContain('CONFLICT')
+    writeFileSync(join(wt, 'README.md'), 'mine and theirs\n')
+    sh('git add -A && GIT_EDITOR=true git rebase --continue', wt)
+    const unreviewed = await w.engine.reviewGate(t)
+    expect(unreviewed).toContain('your final commit')
+    expect(unreviewed).toContain(`shepherdr review ${t.id}`)
+    expect(unreviewed).toContain('1 of 2 rounds left') // the coordinator's added round is there to be used
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 2, rounds: 2 })
+    expect(w.engine.reviewDone(t.id)).toBe(true)
+    expect(await w.engine.reviewGate(t)).toBeUndefined()
+    expect(await w.engine.done(t.id, 'Rebased and resolved the conflict.')).toMatchObject({ state: 'ready' })
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+    expect(w.engine.statusOf(t)).toBe('done')
   })
 })

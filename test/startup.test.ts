@@ -1,5 +1,5 @@
 // Captured CLI screens: startup trust, MCP consent and approvals must work before a session log exists.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { menuId, menuKeys, parseMenu } from '../server/live/chats.ts'
@@ -97,5 +97,20 @@ describe('trust only the task folder, preserving settings', () => {
     expect(config.preference).toBe(true)
     expect(config.projects[dir]).toEqual({ allowedTools: ['Read'], hasTrustDialogAccepted: true })
     expect(config.projects['/other'].hasTrustDialogAccepted).toBe(false)
+  })
+  test('a folder it cannot resolve leaves the config alone and says why', () => {
+    const dir = tmp('startup-trust-missing')
+    const file = join(dir, '.claude.json')
+    const before = '{"preference":true}\n'
+    writeFileSync(file, before)
+    const warned: string[] = []
+    const warn = spyOn(console, 'warn').mockImplementation((...words: unknown[]) => void warned.push(words.map(String).join(' ')))
+    try {
+      trustWorktree(join(dir, 'gone'), 'claude', { CLAUDE_CONFIG_DIR: dir })
+    } finally {
+      warn.mockRestore()
+    }
+    expect(readFileSync(file, 'utf8')).toBe(before)
+    expect(warned.join('\n')).toContain('could not trust task worktree')
   })
 })
