@@ -401,7 +401,7 @@ export const CATALOG: Section[] = [
         key: 'merge.train',
         value: 'off',
         options: ['off', '2', '3', '4', '5', '6', '7', '8'],
-        hint: "With a merge gate, for merges made here (not through a pull request): when several merges wait in line, the first ones, up to this many, go in together on one gate run, each as its own commit with the gate's line. One that conflicts with those before it waits for its own turn. A refusal makes each merge of the train go alone once. Off: one at a time.",
+        hint: "With a merge gate, for merges made here (not through a pull request): when several merges wait in line, the first ones, up to this many, go in together on one gate run, each as its own commit with the gate's line. One that conflicts with those before it waits for its own turn. A refusal is searched by halves: the first half goes on its own gate run, the rest follow, so the merges that are fine still go in together and only the one whose change fails is told. Off: one at a time.",
       },
       // only words in the brief's Reviewer line: the task's agent has its change reviewed however it sees fit
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),

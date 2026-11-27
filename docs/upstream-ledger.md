@@ -428,6 +428,15 @@ tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on 
 a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
+Checked again on 2026-11-26 (SHE train-bisect task) against `upstream/main` and `upstream/v2.0` (fetched that day), for
+searching a refused train by halves, for keeping a merge gate's log and for a ledger of gate runs: `git grep` for merge
+train, bisect, batch merge, gate log and ledger on both lines, `git log -i --grep` for the same words, and the public
+issues and pull requests (`gh issue list` and `gh pr list` for "merge train", "bisect", "batch merges", "merge gate log").
+**Nothing for this**: upstream's `main` has no merge gate at all (only GitHub's own merge queue, which tests each
+queued pull request on top of the ones before it and drops the one that fails), `v2.0` has no train, and issue #1195
+(ideas from running a merge-queue repo) is about GitHub's queue (a red base, a queue jump, `--after`, auto-start order),
+not about a gate we run here. The search by halves, the kept gate logs and the gate ledger are ours.
+
 ## Not from upstream: a limits page over every space, provider and model, built here
 
 Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for a limits or capacity

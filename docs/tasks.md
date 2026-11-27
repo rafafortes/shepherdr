@@ -251,10 +251,26 @@
   keeps its place and goes in on its own turn, as usual. Only merges made here take part: a space whose merges go
   through a pull request takes no train, and the server's log says so (`… merges through a pull request, and a merge
   train is for merges made here`).
-  If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
-  a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
-  runs, the head goes alone and the riders wait in line as before. The server's log names each train decision and why a
-  waiting merge was left out, one `shepherdr: ` line each (`server.log` in the server's run folder: the herdr plugin's state
+  If the gate refuses the train, nothing of it lands, and the fault is searched by halves rather than by sending every
+  member to a gate of its own. The members that rode are marked as one group, suspect, and in the same turn the first
+  half of them (the smaller half, at least the head) goes on a gate run of its own, as a smaller train; the rest wait in
+  line, unproven. A half that passes lands, as a train does, and the half beside it is known to hold the fault (or an
+  interaction): it is split before its next gate, never gated whole again. A half that is refused is halved the same way,
+  down to the head alone, which goes on to its own gate and is the one told of the refusal, with the gate's lines; the
+  members that were left out unproven go in together on one gate run of their own, and are searched the same way if that
+  is refused. So the members that are fine still go in together, a single fault is found in about log2(n) refused runs,
+  and a train of two or three costs what sending each to its own gate did (for one fault, never more gate runs than
+  before, and clearly fewer from five members up: eight members with one fault cost five or six runs, not nine). Two
+  faults, or a fault that only shows in combination, cost more than one fault, as they must; a fault that only a long
+  stack has, with every half passing on its own, ends with everything landed and nobody refused. Only the task whose
+  change fails alone is told: the riders of a refused train hear nothing of it. A member rides only with its own group,
+  in its own state (suspect or unproven), until its own gate passed or refused it alone, so a faulty change cannot spoil
+  train after train; other tasks in line keep their place and ride with each other as usual. The marks are kept in
+  `tasks.json` before the next gate run starts, so a restart finds the same halves, re-attaches to a half's gate run
+  that was still going, and no member goes in without a gate run that passed on exactly the stack that lands; a task
+  marked by an older version as going alone still goes alone once. If main moves while a train's gate runs, the head goes
+  alone and the riders wait in line as before, with the marks they had. The server's log names each train decision and
+  why a waiting merge was left out, one `shepherdr: ` line each (`server.log` in the server's run folder: the herdr plugin's state
   folder, or `run/` in Shepherdr's home, `~/.shepherdr` by default); a turn with nobody else in line says nothing.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a

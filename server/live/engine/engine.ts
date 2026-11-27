@@ -84,6 +84,7 @@ import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '.
 import type { UsageLedger } from '../usage-ledger.ts'
 import * as G from './git.ts'
 import { MergeRunner, ghNow, trainLog, type MergeHost } from './merge.ts'
+import { groupId, halves, rideBlock, type Bisect } from './train-bisect.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 import { resolveTakenPr, takenPrRecord, type TakenPr, type TakenPrRecord } from './taken-pr.ts'
 
@@ -234,10 +235,14 @@ export interface TaskRec {
   gateRun?: GateRun
   /** merged with this task's merge train, on its gate run (train) */
   train?: string
-  /** a member of a merge train its gate refused: its next merge goes alone, on its own gate, before it rides or heads a
-   *  train again (alone); cleared once that lone gate ran to its end (passed, refused or timed out). A turn a restart or
-   *  a kill cut short never gated, so it keeps the mark and goes alone on its next merge */
+  /** a member of a merge train its gate refused that is left over by itself: its next merge goes alone, on its own gate,
+   *  before it rides or heads a train again (alone); cleared once that lone gate ran to its end (passed, refused or timed
+   *  out). A turn a restart or a kill cut short never gated, so it keeps the mark and goes alone on its next merge */
   alone?: true
+  /** a member of a merge train its gate refused, while the fault is searched by halves: the group the refusal made and
+   *  whether its half is known to hold the fault (bisect); it rides only with its group, in its own state, until its
+   *  gate passed or refused it alone. Cleared when it merges or when its lone gate ran to its end, as `alone` is */
+  bisect?: Bisect
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
@@ -4691,20 +4696,25 @@ export class Engine extends Emitter<Events> {
    * The merges in line behind `t` in its repo (queued for a merge into its base, reported, with a branch), in line order:
    * those a train with `t` may take (riders), and every one of them with `why` set when it may not (another merge gate, marked
    * alone, its agent at work, a message it hasn't read). Its own turn decides what an agent still at work, or a message it
-   * hasn't read, changes.
+   * hasn't read, changes. A head left over from a refused train (bisect) sees only the rest of its group: the others in
+   * line are not its to explain.
    */
   private trainLine(t: TaskRec, p: Space, cmd: string) {
     const inLine = this.tasks
       .filter((x) => x !== t && x.landing?.step === 'queue' && this.runner.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch)
+      .filter((x) => !t.bisect || x.bisect?.id === t.bisect.id)
       .sort((a, b) => a.landing!.at - b.landing!.at)
-      .map((x) => ({ t: x, why: this.trainBlock(x, p, cmd) }))
+      .map((x) => ({ t: x, why: this.trainBlock(x, p, cmd, t) }))
     return { riders: inLine.filter((e) => !e.why).map((e) => e.t), inLine }
   }
 
-  /** why a merge in line can't ride a train of gate `cmd` (its gate, its mark, its agent, a message it hasn't read), or nothing */
-  private trainBlock(x: TaskRec, p: Space, cmd: string): string | undefined {
+  /** why a merge in line can't ride a train of gate `cmd` headed by `head` (its gate, its mark, its agent, a message it hasn't read), or nothing */
+  private trainBlock(x: TaskRec, p: Space, cmd: string, head: TaskRec): string | undefined {
     if (this.gateOf(x, p.name) !== cmd) return `${x.id} has a different merge gate`
     if (x.alone) return `${x.id} is marked alone (its turn after a refused train)`
+    const held = rideBlock(head.bisect, x.bisect)
+    if (held === 'group') return `${x.id} is held with the rest of a refused train (it goes in with them, or alone)`
+    if (held === 'half') return `${x.id} is in the other half of the refused train`
     if (this.agents.status(this.key(x)) === 'working') return `${x.id}'s agent is working`
     if (this.chats.unseen(this.key(x)).length) return `${x.id} has a message it hasn't read`
     return undefined
@@ -4721,14 +4731,22 @@ export class Engine extends Emitter<Events> {
    * order, go in with it on one gate run. Their changes are stacked on main as the squash commits they would each be
    * (built by git, no checkout touched), the gate runs once in t's worktree at the top of the stack, its branch as it was
    * after, and on exit 0 each goes in as its own commit carrying the gate's line. One that doesn't stack cleanly on those
-   * before it, or adds nothing to them, stays in line for its own turn. A refusal, or main moving meanwhile, leaves them
-   * all in line and t goes on alone (nothing returned): one at a time, as without a train.
+   * before it, or adds nothing to them, stays in line for its own turn. Main moving meanwhile leaves them all in line and
+   * t goes on alone (nothing returned): one at a time, as without a train.
+   *
+   * A refusal does not send everyone to a gate of their own: the fault is searched by halves (train-bisect.ts). The
+   * refused members are marked as one group, suspect; the first half of them goes on a gate run of its own, in this very
+   * turn, and the rest wait in line, unknown. A half that passes lands, and the half beside it is known to hold the
+   * fault (or an interaction): it is split before its gate, never gated whole again. A half that is refused is halved
+   * the same way, down to `t` alone, which goes on to its own gate (nothing returned): the task whose change fails is
+   * the one told, with the gate's lines. Whoever is left unknown goes in together on a run of its own, so members that
+   * are fine still travel together. Every landing is of a stack that a gate run passed whole.
    */
   private async train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined> {
     const cmd = this.gateOf(t, p.name)
     const k = this.trainSize(p.name)
     if (k < 2 || !cmd || BOX) return undefined
-    // a task a refused train took in goes alone first (alone): it rides none until then, and heads none
+    // a task a refused train left over by itself goes alone first (alone): it rides none until then, and heads none
     if (t.alone) {
       trainLog(`${t.id}'s merge goes alone (its turn alone after a refused train)`)
       return undefined
@@ -4742,15 +4760,16 @@ export class Engine extends Emitter<Events> {
     if (!riders.length) {
       // nothing else in line: a quiet turn, nothing to explain; someone in line who can't ride is said here
       if (inLine.length) trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
+      else if (t.bisect) trainLog(`${t.id}'s merge goes alone (its turn alone after a refused train: nobody else of its group waits in line)`)
       return undefined
     }
     const at = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
     // made the same way each time (main's tip's date): after a restart, the same stack finds its gate's run again
     const date = (await G.git(p.path, 'log', '-1', '--format=%cI', at)).out
-    const cars: { t: TaskRec; tree: string }[] = []
+    const stacked: { t: TaskRec; tree: string; commit: string }[] = []
     let top = at
     for (const [i, x] of [t, ...riders].entries()) {
-      if (cars.length === k) {
+      if (stacked.length === k) {
         for (const r of riders.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
         break
       }
@@ -4777,67 +4796,106 @@ export class Engine extends Emitter<Events> {
         continue
       }
       const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
-      cars.push({ t: x, tree })
+      stacked.push({ t: x, tree, commit: c.out })
       top = c.out
     }
-    if (cars.length < 2 || cars[0].t !== t) {
+    if (stacked.length < 2 || stacked[0].t !== t) {
       trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
       return undefined
     }
-    const names = cars.map((c) => c.t.id)
-    const riding = cars.slice(1).map((c) => c.t)
-    trainLog(`${t.id}'s merge train: ${names.join(', ')} (one gate run on ${top.slice(0, 7)}, main at ${at.slice(0, 7)})${leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`)
-    for (const x of riding) x.landing = { ...x.landing!, train: t.id }
-    this.saveNow()
-    riding.forEach((x) => this.settle(x))
-    // the gate, once, in t's worktree at the top of the stack; its branch is back as it was after
-    let ran: { code: number; out: string } | undefined
-    if ((await G.git(wt, 'checkout', '--quiet', '--detach', top)).ok) {
-      this.land(t, 'gate', undefined, { cars: cars.length })
-      try {
-        ran = await this.runGate(t, cmd, wt, top, at)
-      } finally {
-        await G.git(wt, 'checkout', '--quiet', t.branch!)
-      }
-    }
-    // on main as the gate saw it: each its own commit, with the gate's line and who went in together
-    const last = ran?.out
-      .split('\n')
-      .filter((l) => l.trim())
-      .at(-1)
-      ?.trim()
-    const together = `Merge train: ${names.join(', ')} (one merge gate run)`
-    const shas =
-      ran?.code === 0
-        ? await G.landStack(
-            p.path,
-            t.base!,
-            at,
-            cars.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, last, together) })),
-          )
-        : undefined
-    if (!shas) {
-      // what ends it: then each merge in it goes its own way (the head alone, the riders in line as before)
-      if (!ran) trainLog(`${t.id}'s merge train: its gate could not start (checkout of ${top.slice(0, 7)} failed): ${t.id} goes alone`)
-      else if (ran.code === GATE_GONE) trainLog(`${t.id}'s merge train stopped before its gate ended (a restart, or a kill): nothing went in`)
-      else if (ran.code !== 0) trainLog(`${t.id}'s merge train refused (exit ${ran.code}): each goes alone once`)
-      else trainLog(`${t.id}'s merge train: main moved while its gate ran: ${t.id} goes alone`)
-      // a refusal by the gate marks every member, the head included: each goes alone once. A base that moved, or a gate
-      // that never ran, marks none: the change did not fail
-      if (ran && ran.code !== 0 && ran.code !== GATE_GONE) for (const c of cars) c.t.alone = true
-      for (const x of riding) if (x.landing?.train === t.id) x.landing = { ...x.landing, train: undefined }
+    const ids = (xs: { t: TaskRec }[]) => xs.map((c) => c.t.id)
+    // the cars this round is about: all that stacked, then the half that was refused, and so on down
+    let cur = stacked
+    // a group refused together is never gated whole again: its first half goes
+    let suspect = !!t.bisect?.suspect
+    let group = t.bisect?.id
+    for (let round = 0; ; round++) {
+      const { go, rest } = halves(cur, suspect)
+      const names = ids(go)
+      // the cars of this run ride with it, those it leaves out wait in line as plain
+      for (const c of cur.slice(1)) c.t.landing = { ...c.t.landing!, train: go.includes(c) ? t.id : undefined }
       this.saveNow()
-      riding.forEach((x) => this.settle(x))
+      cur.slice(1).forEach((c) => this.settle(c.t))
+      if (go.length < 2) {
+        // t is all that is left of the half: its own gate runs next (mergeNow); the one beside it goes alone after it
+        for (const c of rest) {
+          c.t.bisect = undefined
+          c.t.alone = true
+        }
+        this.saveNow()
+        trainLog(`${t.id}'s merge goes alone: the first half of ${ids(cur).join(', ')} is ${t.id}${rest.length ? `; ${ids(rest).join(', ')} ${rest.length > 1 ? 'go' : 'goes'} alone after it` : ''}`)
+        return undefined
+      }
+      const tip = go[go.length - 1].commit
+      const ride = suspect ? `: the first half of ${ids(cur).join(', ')}, which a gate run refused together` : t.bisect && !round ? ` (the rest of a refused train, tried together)` : ''
+      trainLog(
+        `${t.id}'s merge train: ${names.join(', ')} (one gate run on ${tip.slice(0, 7)}, main at ${at.slice(0, 7)})${ride}${!round && leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`,
+      )
+      // the gate, once, in t's worktree at the top of the stack; its branch is back as it was after
+      let ran: { code: number; out: string } | undefined
+      if ((await G.git(wt, 'checkout', '--quiet', '--detach', tip)).ok) {
+        this.land(t, 'gate', undefined, { cars: go.length })
+        try {
+          ran = await this.runGate(t, cmd, wt, tip, at)
+        } finally {
+          await G.git(wt, 'checkout', '--quiet', t.branch!)
+        }
+      }
+      // on main as the gate saw it: each its own commit, with the gate's line and who went in together
+      const last = ran?.out
+        .split('\n')
+        .filter((l) => l.trim())
+        .at(-1)
+        ?.trim()
+      const together = `Merge train: ${names.join(', ')} (one merge gate run)`
+      const shas =
+        ran?.code === 0
+          ? await G.landStack(
+              p.path,
+              t.base!,
+              at,
+              go.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, last, together) })),
+            )
+          : undefined
+      if (shas) {
+        go.forEach((c, i) => {
+          c.t.squash = shas[i]
+          c.t.bisect = undefined
+        })
+        trainLog(
+          `${t.id}'s merge train went in: ${go.map((c, i) => `${c.t.id} ${shas[i].slice(0, 7)}`).join(', ')}${suspect && rest.length ? `. ${ids(rest).join(', ')} hold the fault the first half did not (or an interaction): they are split before their gate` : ''}`,
+        )
+        const note = await this.pushBase(p, t.base!, `it went in with ${names.slice(1).join(', ')} on one merge gate run`)
+        for (const c of go.slice(1)) {
+          c.t.train = t.id
+          await this.markMerged(c.t, `it went in with ${t.id}'s merge train`)
+        }
+        return this.markMerged(t, note)
+      }
+      if (ran && ran.code !== 0 && ran.code !== GATE_GONE) {
+        // refused: what this run took is the fault's half, and what it left out is unproven. Marked before the next gate
+        // starts, so a restart finds the same halves again
+        group ??= groupId(t.id, tip)
+        for (const c of go) c.t.bisect = { id: group, suspect: true }
+        for (const c of rest) c.t.bisect = { id: group }
+        this.saveNow()
+        const next = halves(go, true)
+        trainLog(
+          `${t.id}'s merge train refused (exit ${ran.code}): ${names.join(', ')} are searched by halves, ${ids(next.go).join(', ')} first and ${ids(next.rest).join(', ')} after${rest.length ? `; ${ids(rest).join(', ')} wait unproven` : ''}`,
+        )
+        cur = go
+        suspect = true
+        continue
+      }
+      // what ends it otherwise: then each merge in it goes its own way (the head alone, the riders in line as before)
+      if (!ran) trainLog(`${t.id}'s merge train: its gate could not start (checkout of ${tip.slice(0, 7)} failed): ${t.id} goes alone`)
+      else if (ran.code === GATE_GONE) trainLog(`${t.id}'s merge train stopped before its gate ended (a restart, or a kill): nothing went in`)
+      else trainLog(`${t.id}'s merge train: main moved while its gate ran: ${t.id} goes alone`)
+      for (const c of go.slice(1)) if (c.t.landing?.train === t.id) c.t.landing = { ...c.t.landing, train: undefined }
+      this.saveNow()
+      go.slice(1).forEach((c) => this.settle(c.t))
       return undefined
     }
-    cars.forEach((c, i) => (c.t.squash = shas[i]))
-    trainLog(`${t.id}'s merge train went in: ${cars.map((c, i) => `${c.t.id} ${shas[i].slice(0, 7)}`).join(', ')}`)
-    const note = await this.pushBase(p, t.base!, `it went in with ${names.slice(1).join(', ')} on one merge gate run`)
-    for (const x of riding) {
-      x.train = t.id
-      await this.markMerged(x, `it went in with ${t.id}'s merge train`)
-    }
-    return this.markMerged(t, note)
   }
 
   /** what its agent must fix, written to it: it is at work again */
