@@ -65,7 +65,8 @@ describe('shepherdr merge', () => {
       afterEach(() => {
         console.error = stderr
       })
-      const decisions = () => log.filter((l) => /merge (train|goes alone)/.test(l) && mine.some((id) => l.startsWith(`shepherdr: ${id}'s `)))
+      // a refused train names the log of its run, which has a random name: `log <file>` stands for it
+      const decisions = () => log.filter((l) => /merge (train|goes alone)/.test(l) && mine.some((id) => l.startsWith(`shepherdr: ${id}'s `))).map((l) => l.replace(/; log \S+\.log\)/, '; log <file>)'))
       /** a commit's short id (7 characters), as the train's lines name it */
       const short = (dir: string, ref: string | undefined) => sh(`git rev-parse --short=7 ${ref}`, dir)
 
@@ -175,7 +176,7 @@ describe('shepherdr merge', () => {
         // b's conflict is named, with the file; the train of a and c is refused, and c's own turn alone comes last
         expect(decisions()).toEqual([
           `shepherdr: ${a.id}'s merge train: ${a.id}, ${c.id} (one gate run on ${heads()[1]}, main at ${short(dir, x.squash)}). Left out: ${b.id} conflicts with those before it (2.txt)`,
-          `shepherdr: ${a.id}'s merge train refused (exit 1): ${a.id}, ${c.id} are searched by halves, ${a.id} first and ${c.id} after`,
+          `shepherdr: ${a.id}'s merge train refused (exit 1; log <file>): ${a.id}, ${c.id} are searched by halves, ${a.id} first and ${c.id} after`,
           `shepherdr: ${a.id}'s merge goes alone: the first half of ${a.id}, ${c.id} is ${a.id}; ${c.id} goes alone after it`,
           `shepherdr: ${c.id}'s merge goes alone (its turn alone after a refused train)`,
         ])
@@ -239,7 +240,7 @@ describe('shepherdr merge', () => {
         expect(sh(`git log -1 --format=%b ${c.squash}`, dir)).toContain(`Merge train: ${d.id}, ${c.id} (one merge gate run)`)
         expect(decisions()).toEqual([
           `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id}, ${c.id} (one gate run on ${heads()[1]}, main at ${short(dir, x.squash)})`,
-          `shepherdr: ${a.id}'s merge train refused (exit 1): ${a.id}, ${b.id}, ${c.id} are searched by halves, ${a.id} first and ${b.id}, ${c.id} after`,
+          `shepherdr: ${a.id}'s merge train refused (exit 1; log <file>): ${a.id}, ${b.id}, ${c.id} are searched by halves, ${a.id} first and ${b.id}, ${c.id} after`,
           `shepherdr: ${a.id}'s merge goes alone: the first half of ${a.id}, ${b.id}, ${c.id} is ${a.id}; ${b.id}, ${c.id} go alone after it`,
           `shepherdr: ${b.id}'s merge goes alone (its turn alone after a refused train)`,
           `shepherdr: ${c.id}'s merge goes alone (its turn alone after a refused train)`,
@@ -261,7 +262,12 @@ describe('shepherdr merge', () => {
         // to go alone
         await until(() => ran().length === 3 && !!b.alone && !!c.alone)
         const second = world()
-        expect([a, b, c].map((t) => [second.engine.task(t.id)!.alone, second.engine.task(t.id)!.bisect])).toEqual([
+        expect(
+          [a, b, c].map((t) => {
+            const kept = second.engine.task(t.id)
+            return [kept?.alone, kept?.bisect]
+          }),
+        ).toEqual([
           [undefined, { id: `${a.id}@${heads()[1]}`, suspect: true }],
           [true, undefined],
           [true, undefined],

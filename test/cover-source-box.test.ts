@@ -180,6 +180,14 @@ describe('a worker for another machine', () => {
     expect(r.error).toContain("FA-1's merge gate (tools/far-gate.sh) failed (exit 255): nothing was merged")
     expect((t as { mergeStop?: string }).mergeStop).toBe('Refused by the gate: ssh: Could not resolve hostname (test)')
     expect(readFileSync(sshLog, 'utf8')).toContain('tools/far-gate.sh')
+    // its words are kept here like any run's, and the ledger has its line
+    const [line] = readFileSync(join(home, 'gates', 'ledger.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+    expect(line).toMatchObject({ space: 'far', task: 'FA-1', end: 'refused', code: 255, last: 'ssh: Could not resolve hostname (test)' })
+    expect(readFileSync(join(home, 'gates', line.log), 'utf8')).toContain('Could not resolve hostname (test)')
+    expect(r.error).toContain(`Its full log is kept at ${join(home, 'gates', line.log)}`)
   })
 
   test("a file a chat names outside that machine's inbox is none of its own, even with no older inbox there", async () => {

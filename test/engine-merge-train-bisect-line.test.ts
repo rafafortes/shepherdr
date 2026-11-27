@@ -1,24 +1,14 @@
 // A refused merge train searched by halves, in the line it leaves: who may ride with whom while it lasts, what main moving
 // under a half does, and what a restart between the halves finds (engine.train, train-bisect.ts).
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { join } from 'node:path'
-import { trainWorld, wtOf } from './train-world.ts'
+import { trainLog, trainWorld, wtOf } from './train-world.ts'
 import { sh, until, world } from './engine-world.ts'
 import { killGroup } from '../server/procs.ts'
 
 setDefaultTimeout(120_000)
 
-// the server's log while these run: its lines about a train's decisions are what the tests read
-let log: string[] = []
-const stderr = console.error
-beforeEach(() => {
-  log = []
-  console.error = (m: unknown) => void log.push(String(m))
-})
-afterEach(() => {
-  console.error = stderr
-})
-const decisions = (ids: string[]) => log.filter((l) => /merge (train|goes alone)/.test(l) && ids.some((id) => l.startsWith(`shepherdr: ${id}'s `)))
+const { decisions } = trainLog()
 
 /** every gate this file starts by hand, so a failing or interrupted test cannot leave one behind */
 const gatesStarted: number[] = []

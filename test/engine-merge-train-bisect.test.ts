@@ -1,22 +1,14 @@
 // A refused merge train is searched by halves, not dissolved (engine.train, train-bisect.ts): the sequences that matter,
 // with the gate runs counted. Before, a refusal sent every member to a gate of its own (a train of n cost n + 1 runs).
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { bisectRows, trainWorld, REFUSE_OVER } from './train-world.ts'
+import { describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { bisectRows, trainLog, trainWorld, REFUSE_OVER } from './train-world.ts'
 import { sh } from './engine-world.ts'
 
 setDefaultTimeout(120_000)
 
-// the server's log while these run: its lines about a train's decisions are what the tests read
-let log: string[] = []
-const stderr = console.error
-beforeEach(() => {
-  log = []
-  console.error = (m: unknown) => void log.push(String(m))
-})
-afterEach(() => {
-  console.error = stderr
-})
-const decisions = (ids: string[]) => log.filter((l) => /merge (train|goes alone)/.test(l) && ids.some((id) => l.startsWith(`shepherdr: ${id}'s `)))
+const { decisions, lines } = trainLog()
 
 describe('a refused merge train is searched by halves', () => {
   // one fault: never more gate runs than the old way, and clearly fewer as the train grows (the larger trains: the -large file)
@@ -50,7 +42,75 @@ describe('a refused merge train is searched by halves', () => {
     expect(said[2].error).toContain('failed (exit 2)')
     expect(riders[1].mergeStop).toBe('Refused by the gate: exit 2')
     expect(ran().length - 1).toBe(5)
+    // what a refusal with no words leaves is its log (empty) and its line: the code, no last line, no time to speak of
+    const refused = ledger().filter((l) => l.end === 'refused')
+    expect(refused.map((l) => [l.code, l.last, l.seconds < 5])).toEqual([
+      [2, '', true],
+      [2, '', true],
+      [2, '', true],
+    ])
+    for (const l of refused) expect(readFileSync(join(gatesDir(), l.log), 'utf8')).toBe('')
+    expect(said[2].error).toContain(`Its full log is kept at ${join(gatesDir(), refused[2].log)}`)
+    // the train's own line names the log of the run it was refused on
+    expect(lines().find((l) => l.includes('merge train refused'))).toContain(`log ${refused[0].log})`)
     expect(w.engine.statusOf(riders[0])).toBe('done')
+  })
+
+  /** the ledger of this test's home: one line a gate run, in the order they ended */
+  const ledger = (): { task: string; members?: string[]; end: string; code: number | null; log: string; last: string; seconds: number; head: string; base: string }[] =>
+    readFileSync(join(process.env.SHEPHERDR_HOME ?? '', 'gates', 'ledger.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+  const gatesDir = () => join(process.env.SHEPHERDR_HOME ?? '', 'gates')
+
+  test('every gate run of a search keeps its log and has its line: the train, its halves, the lone gates, with who each was for and how it ended', async () => {
+    const { w, ts, riders, ran, heads, merged } = await trainWorld('bisect-ledger', 4, '4', [4])
+    const [a, b, c, d] = riders
+    const said = await merged()
+    // the blocker, the train of four (refused), its first half (passed, went in), then c alone (passed) and d alone (refused)
+    const lines = ledger()
+    expect(lines.map((l) => [l.task, l.members, l.end, l.code])).toEqual([
+      [ts[0].id, undefined, 'passed', 0],
+      [a.id, [a.id, b.id, c.id, d.id], 'refused', 1],
+      [a.id, [a.id, b.id], 'passed', 0],
+      [c.id, undefined, 'passed', 0],
+      [d.id, undefined, 'refused', 1],
+    ])
+    expect(lines.map((l) => l.head.slice(0, 7))).toEqual(heads())
+    expect(lines.map((l) => l.last.replace(/[0-9a-f]{7,}$/, '<tree>'))).toEqual([
+      'Gate: green on <tree>',
+      'bad-4.txt is not wanted',
+      'Gate: green on <tree>',
+      'Gate: green on <tree>',
+      'bad-4.txt is not wanted',
+    ])
+    // each run's log is there, and says what the gate said
+    for (const l of lines) expect(existsSync(join(gatesDir(), l.log))).toBe(true)
+    expect(readFileSync(join(gatesDir(), lines[1].log), 'utf8')).toContain('bad-4.txt is not wanted')
+    expect(ran()).toHaveLength(5)
+    // d, whose change fails alone, is told where its log is; the others heard nothing
+    expect(said[4].error).toContain(`Its full log is kept at ${join(gatesDir(), lines[4].log)}`)
+    expect(w.sent.filter((m) => /train|refus|log/i.test(m.text))).toEqual([])
+  })
+
+  test('only the newest logs of a space are kept, the ledger names every run', async () => {
+    const { w, riders, merged } = await trainWorld('bisect-keep', 4, '4', [4])
+    w.engine.gateLedger.keep = 2
+    await merged()
+    const runs = ledger()
+    expect(runs).toHaveLength(5)
+    expect(
+      readdirSync(gatesDir())
+        .filter((f) => f.endsWith('.log'))
+        .sort(),
+    ).toEqual(
+      runs
+        .slice(-2)
+        .map((l) => l.log)
+        .sort(),
+    )
+    expect(riders).toHaveLength(4)
   })
 
   test('the lines say what each decision was: the train, its refusal, its halves, who waits unproven and what went in', async () => {
@@ -62,7 +122,7 @@ describe('a refused merge train is searched by halves', () => {
     expect(ran().length - 1).toBe(4)
     expect(decisions(ts.map((t) => t.id))).toEqual([
       `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id}, ${c.id}, ${d.id} (one gate run on ${heads()[1]}, main at ${at})`,
-      `shepherdr: ${a.id}'s merge train refused (exit 1): ${a.id}, ${b.id}, ${c.id}, ${d.id} are searched by halves, ${a.id}, ${b.id} first and ${c.id}, ${d.id} after`,
+      `shepherdr: ${a.id}'s merge train refused (exit 1; log <file>): ${a.id}, ${b.id}, ${c.id}, ${d.id} are searched by halves, ${a.id}, ${b.id} first and ${c.id}, ${d.id} after`,
       `shepherdr: ${a.id}'s merge train: ${a.id}, ${b.id} (one gate run on ${heads()[2]}, main at ${at}): the first half of ${a.id}, ${b.id}, ${c.id}, ${d.id}, which a gate run refused together`,
       `shepherdr: ${a.id}'s merge train went in: ${a.id} ${short(a.squash)}, ${b.id} ${short(b.squash)}. ${c.id}, ${d.id} hold the fault the first half did not (or an interaction): they are split before their gate`,
       `shepherdr: ${c.id}'s merge goes alone: the first half of ${c.id}, ${d.id} is ${c.id}; ${d.id} goes alone after it`,

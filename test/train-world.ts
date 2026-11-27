@@ -1,7 +1,7 @@
 // A line of merges for the merge train's tests that search a refused train by halves (engine-merge-train-bisect*.test.ts):
 // real git, real gate commands, the engine's own world (engine-world.ts). The first task of a line only holds it (its gate
 // waits for its go); the members behind it are the train, and the gate refuses every stack that holds a member's bad file.
-import { expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { sh, repo, world, until, started } from './engine-world.ts'
@@ -9,8 +9,31 @@ import { tmp } from './tmp.ts'
 
 /** a waiting gate command that ends by itself: when its folder goes, when the test process that started it goes (even
  *  one killed without cleanup), or after 1200 turns (about a minute), rather than forking sleep for days (LEAD-01) */
-export const waitFor = (go: string, dir: string, after = 'echo ok') =>
+const waitFor = (go: string, dir: string, after = 'echo ok') =>
   `i=0; while [ ! -f ${go} ] && [ -d ${dir} ] && kill -0 ${process.pid} 2>/dev/null && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; ${after}`
+
+/**
+ * The server's log (console.error) while each test of the file runs, kept out of the test output: the lines about a train's
+ * decisions are what the tests read, those of the tasks named (`decisions`), in the order they were logged.
+ */
+export function trainLog() {
+  let log: string[] = []
+  const stderr = console.error
+  beforeEach(() => {
+    log = []
+    console.error = (m: unknown) => void log.push(String(m))
+  })
+  afterEach(() => {
+    console.error = stderr
+  })
+  // a refused train names the log of its run, which has a random name: `log <file>` stands for it
+  return {
+    /** every line the server logged, as it was */
+    lines: () => log,
+    decisions: (ids: string[]) =>
+      log.filter((l) => /merge (train|goes alone)/.test(l) && ids.some((id) => l.startsWith(`shepherdr: ${id}'s `))).map((l) => l.replace(/; log \S+\.log\)/, '; log <file>)')),
+  }
+}
 
 /** a task's worktree, which every task of these lines has once its folder is made */
 export const wtOf = (t: { id: string; worktree?: string }) => {
@@ -19,7 +42,7 @@ export const wtOf = (t: { id: string; worktree?: string }) => {
 }
 
 /** the gate refuses (exit 1, saying which file) while a member's bad file is in the tree it checks */
-export const REFUSE_BAD = 'for f in bad-*.txt; do [ -e "$f" ] && { echo "$f is not wanted"; exit 1; }; done; '
+const REFUSE_BAD = 'for f in bad-*.txt; do [ -e "$f" ] && { echo "$f is not wanted"; exit 1; }; done; '
 
 /** the gate refuses while the stack adds more than `n` files to main: a fault that only a long stack has */
 export const REFUSE_OVER = (n: number) => `[ "$(git diff --name-only main HEAD | wc -l)" -gt ${n} ] && { echo "too many files for one run"; exit 1; }; `
@@ -96,7 +119,7 @@ export async function trainWorld(name: string, members: number, k: string, bad: 
 }
 
 /** [members, faulty positions (1-based), gate runs for the members, gate runs the old way: one for the train, one for each] */
-export type Row = [number, number[], number, number]
+type Row = [number, number[], number, number]
 
 /**
  * One test per row: a train of `n` (merge.train n) with the faulty members' changes carrying a bad file. The ones that

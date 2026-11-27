@@ -223,7 +223,21 @@
   still wants it survives and is found again. A merge that only waited in line takes its place in line again by itself,
   in the order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that
   was stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart:
-  run shepherdr merge again` and its agent told so. A gate set on a space whose merges go through a pull request runs on
+  run shepherdr merge again` and its agent told so. **Every gate run keeps its log** (`gates/` in Shepherdr's home,
+  `~/.shepherdr/gates/` by default): the run's words are in `<space>.<task>-<start>-<random>.log` and stay there however
+  the run ends (passed, refused, stopped, a train's half or a lone gate), so a refusal can be read in full later, not only
+  its last 20 lines. The refusal a task is told ends its output with `Its full log is kept at <path>`, and the server's
+  log line for a refused train names the file too (`refused (exit 1; log <file>)`). Each run also adds one JSON line to
+  `gates/ledger.jsonl` beside the logs, written once when its outcome is known: `started` and `ended` (ISO, UTC),
+  `space`, `task` (the head, for a train), `members` (the merges a train's run gated, in line order), `head` (the commit
+  it ran on), `base` (the base it ran on), `seconds`, `code` (its exit code; null when it ended with none), `end` (`passed`,
+  `refused`, `moved` for a pass whose base had moved meanwhile, `stopped` for a restart, a kill or a task that went away,
+  `not-started`), `log` (the file's name) and `last` (the gate's last non-empty line, at most 200 characters, without
+  control characters). It holds ids, commits, numbers and that one line, never anything of Shepherdr's own secrets. Both
+  are bounded: each space keeps its newest 200 logs (older ones are removed when a run is written; only files named as a
+  gate log, with that space's name, are ever removed, never the ledger, a run that is still going, or anything else in the
+  folder), and the ledger is rotated to `ledger.jsonl.1` (the older rotation going) when it passes about a megabyte. A
+  gate that runs on another machine's link keeps its words here too. A gate set on a space whose merges go through a pull request runs on
   the pull request's path too: the branch is first brought onto GitHub's base (`origin/<base>`, rebased whenever it moved,
   not only on a conflict, so that what the gate checks is what will land), the gate runs on that very commit before
   anything is pushed, and the pull request merges only while its head is still that commit and GitHub's base is still the
