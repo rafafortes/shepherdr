@@ -153,3 +153,15 @@ as [AGENTS.md](../AGENTS.md), "Tests", says: alone, on the base, and nothing mer
   reservation through `ctx.signal` with a log line. A new long-waiting command that keeps state in the server for its caller
   reads `ctx.signal` the same way: `/api/cli` otherwise lets a command go on after its caller left, on purpose
   (`doctor` repairs the machines after the client is gone).
+- **A pre-flight reported "stopped before it ended" a fraction of a second after it started, and nothing said why.**
+  `engine-merge-preflight.test.ts` ("one that runs too long is stopped…") failed that way in a full check, as its author
+  had seen once before. `waitGate()` judges a run gone when its process is dead and no exit file is there 50 ms later,
+  which is all it can see; nothing said whether the shell was killed or had failed. Rule: a run judged gone says how its
+  shell ended. `startGate()` keeps the shell's `exit` event beside the run, and `waitGate()` logs `gate run <file>: its
+  shell … with no exit code, N ms after it started` and ends the run's words with that line (the ledger's `last`); the
+  short wait there is only for that label to arrive and never changes the verdict. The shell's stderr is not put in the
+  run's log for this: it holds dash's `Killed` when the shell's own `timeout` fires first, which changed the last line of
+  a pre-flight that ran out of time. Tests: a gate shell killed from outside, a pre-flight shell killed from outside, and
+  one whose folder cannot be written (`engine-merge-gate.test.ts`, `engine-merge-preflight.test.ts`). The cause of the
+  flake was not found; the one way in this code that a healthy pre-flight is ended is a second Engine on the same home
+  (its start-up sweep kills what it does not own), which only the restart tests create.
