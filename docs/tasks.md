@@ -340,7 +340,9 @@
   "<text>"`: it waits until the merge or gate of that repo that is in flight, if any, has ended (and meanwhile already keeps
   the next turn from starting: the request itself reserves it, so nothing slips in ahead of it; `--wait <minutes>`, by
   default and at most the gate's limit (45 minutes: the command itself gives up after 47, and a longer `--wait` is refused
-  with that said), bounds that wait and then ends the command with a clear message and no hold left behind), then
+  with that said), bounds that wait and then ends the command with a clear message and no hold left behind; the command
+  really waits those 47 minutes however silent the connection is: Bun's own five-minute idle timer is off for the call,
+  and a call that is ever cut sooner says how long it lasted, never the wait it was given), then
   holds the line and prints the base branch's tip at that moment. While it holds, no merge of that repo starts its turn (no
   gate, no train, no landing): merges asked for meanwhile queue and keep their order, and their rows read `Merge line held by
   <who> until <time>: <why>` (`about to be held by …` while the hold still waits for the merge in flight). `--for` is the

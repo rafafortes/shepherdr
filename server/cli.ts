@@ -33,7 +33,11 @@ const stdin = (secret === 'set' || secret === 'elevenlabs' || (args[0] === 'hear
 // push and open a pull request with gh calls of 120 s, review up to 90 s for a reviewer slot, merge up to 90 s
 // (110 s here), line hold up to the gate's 45 minutes for the merge in flight (shared/line-wait.ts: 47 minutes here, the helper's
 // shepherdr keeps the same number); the rest get the default.
-// Every call gets a bound, and says so instead of waiting on and on.
+// Every call gets a bound, and says so instead of waiting on and on. The bound is the call's whole deadline, however silent
+// the connection is: a line hold that waits for a merge in flight sends and receives nothing for up to 45 minutes, so Bun's
+// own idle timer (five minutes by default, reset by every byte) is off for the request below. Left on, it ended the call
+// after about five minutes with the same TimeoutError as the deadline, and the words below claimed 47 minutes (2026-11-27).
+// The helper's shepherdr has no such timer: its socket is plain and its alarm is the deadline.
 const envWait = (name: string, fallback: number) => {
   const n = Number(process.env[name] ?? fallback)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -90,17 +94,26 @@ async function answer(r: Response): Promise<Answer> {
 }
 
 let j: Answer
+const started = Date.now()
+const deadline = AbortSignal.timeout(wait)
 try {
   const r = await fetch(`${url}/api/cli`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/x-ndjson', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
     body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, pane: process.env.HERDR_PANE_ID, cwd: process.cwd(), stdin }),
-    signal: AbortSignal.timeout(wait),
+    signal: deadline,
+    // no idle timer: `timeout` is Bun's socket idle limit (BUN_CONFIG_HTTP_IDLE_TIMEOUT, 5 minutes unless said, reset by each
+    // byte either way; false disables it) and it is not a deadline, so the signal above stays the only limit
+    timeout: false,
   })
   j = await answer(r)
 } catch (e) {
   if ((e as Error).name === 'TimeoutError') {
-    process.stderr.write(merge ? noAnswer(wait, args[0] === 'merge' ? args[1] : args[2]) : noAnswerOther(wait, verb))
+    // the deadline passed: `wait` is the time that went by. Anything else that ends a request with this error cut it sooner,
+    // and the words say how long it really lasted and what its limit was, never a time that did not pass
+    const limit = deadline.aborted ? undefined : wait
+    const ms = limit === undefined ? wait : Date.now() - started
+    process.stderr.write(merge ? noAnswer(ms, args[0] === 'merge' ? args[1] : args[2], limit) : noAnswerOther(ms, verb, limit))
     process.exit(1)
   }
   process.stderr.write(`Cannot reach the shepherdr command at ${url}. Check the target URL or use this session's installed helper. Do not start another server to repair routing.\n`)
@@ -115,14 +128,21 @@ else {
   process.stdout.write(f.out)
 }
 
-/** what to do when shepherdr merge heard nothing back (the helper's shepherdr says the same) */
-function noAnswer(ms: number, id = '<id>') {
-  return `shepherdr merge ${id} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted). Don't leave it running: see where it is with shepherdr task show ${id}, and unless it says Merged, run shepherdr merge ${id} again; it finishes the merge, or says it is merged.\n`
+/** what to do when shepherdr merge heard nothing back (the helper's shepherdr says the same). `ms` is how long the call
+ *  lasted; `limit` is given only when the connection was cut before it, and the words say so */
+function noAnswer(ms: number, id = '<id>', limit?: number) {
+  return `shepherdr merge ${id} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (${cutWords(limit)}it may have restarted). Don't leave it running: see where it is with shepherdr task show ${id}, and unless it says Merged, run shepherdr merge ${id} again; it finishes the merge, or says it is merged.\n`
 }
 
 /** any other verb that heard nothing back: the same one line of words, so the calling agent's turn ends */
-function noAnswerOther(ms: number, verb: string) {
-  return `shepherdr ${verb} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted or stalled). Check whether it went through first; if not, try again. If it keeps happening, run shepherdr doctor on the main machine.\n`
+function noAnswerOther(ms: number, verb: string, limit?: number) {
+  return `shepherdr ${verb} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (${cutWords(limit)}it may have restarted or stalled). Check whether it went through first; if not, try again. If it keeps happening, run shepherdr doctor on the main machine.\n`
+}
+
+/** a call cut before its limit says so, so no one reads its short time as the wait it was given (a function, not a
+ *  constant: the words are written from the catch above, before the rest of this file has run) */
+function cutWords(limit?: number) {
+  return limit === undefined ? '' : `the connection was cut before its limit of ${Math.round(limit / 1000)} s; `
 }
 
 /** shepherdr secret run: the command, with the values in its environment; what it prints comes through with each value
