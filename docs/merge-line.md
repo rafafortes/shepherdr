@@ -23,6 +23,7 @@ All of it is under `server/live/engine/` unless said.
 - `server/live/cli-commands.ts` (`lineCommand()`) and `server/live/args.ts` (the help, the verb list): `shepherdr line`.
   `shared/line-wait.ts`: how long a line hold may wait (`LINE_HOLD_WAIT_MAX`) and how long the command waits for it
   (`LINE_HOLD_COMMAND_WAIT`), used by the server and `server/cli.ts`; `helper/shepherdr` is Perl and holds the same number.
+  The command's request runs with Bun's idle timer off (`timeout: false` in `server/cli.ts`), so that wait is real.
   `server/app.ts` gives a command `ctx.signal`, which aborts when its caller goes away.
   `server/live/settings.ts`: the rows `merge.gate`, `merge.preflight`, `merge.train`; the train's cap `TRAIN_MAX` (8) is
   in `engine.ts` and its options also in `src/LimitsPage.tsx` and `test/models-matrix.test.ts`.
@@ -60,7 +61,8 @@ The files are in `test/`.
   wait for the merge in flight runs out or the command that waits for it goes away, with no hold left behind: a
   reservation never outlives its command. `engine-line-hold.test.ts`, `engine-line-hold-restart.test.ts`,
   `engine-line-hold-pr.test.ts`, `line-hold.test.ts` (the class alone), `line-hold-cli.test.ts` (the command, its `--wait`
-  cap), `app-cli-gone.test.ts` (the route's signal) and `cli.test.ts` (both commands close their end when they give up).
+  cap), `app-cli-gone.test.ts` (the route's signal), `cli.test.ts` (both commands close their end when they give up) and
+  `cli-silent.test.ts` (both commands wait out a silence longer than the runtime's idle timer).
 - **Every decision is one log line, and every run is one ledger line with its log kept.**
   `engine-merge-train-bisect.test.ts` ("the lines say what each decision was", "every gate run of a search keeps its log
   and has its line"), the hold tests (they read the log) and `gate-log.test.ts` (names, ledger, rotation, pruning).
@@ -80,7 +82,7 @@ time on a machine at a load average of 4 to 11:
 | `engine-merge-train-bisect-line`, `-bisect-mid`, `-bisect-large`, `engine-merge-gate` | 17 to 21 s |
 | `engine-merge-train-bisect` (25 s), `engine-merge-train-resume` (27 s), `engine-merge-train` (34 s) | the longest |
 
-All of them one after another take about 3.5 minutes. `cli` (37 s, the commands' own timeouts) is one more for a change to a command's wait or to the helper. The engine files run real git and real gate commands: a gate in a
+All of them one after another take about 3.5 minutes. `cli` (37 s, the commands' own timeouts) and `cli-silent` (13 s, one silent window shared by its runs) are two more for a change to a command's wait or to the helper. The engine files run real git and real gate commands: a gate in a
 test is a shell loop that waits for a `go-<task>` file and ends by itself, so a test that hangs is a gate waiting for a
 file the test never wrote. Build a new test on `test/train-world.ts` (`trainWorld()`: a blocker holds the line while the
 members queue; `bisectRows()`; `trainLog()` reads the server's log) and `test/train-preflight-world.ts` (`ledger()`,
@@ -153,6 +155,18 @@ as [AGENTS.md](../AGENTS.md), "Tests", says: alone, on the base, and nothing mer
   reservation through `ctx.signal` with a log line. A new long-waiting command that keeps state in the server for its caller
   reads `ctx.signal` the same way: `/api/cli` otherwise lets a command go on after its caller left, on purpose
   (`doctor` repairs the machines after the client is gone).
+- **A line hold's command gave up after five minutes, not 47, and said 47.** The command's `fetch` had no `timeout`
+  option, and Bun's fetch cuts a request whose socket exchanges no bytes for five minutes (`BUN_CONFIG_HTTP_IDLE_TIMEOUT`;
+  the `timeout` option of the fetch init, in `bun-types/globals.d.ts`, "is not a whole-request deadline"): a hold that
+  waits for a merge in flight is silent for as long as the merge takes, so a gate of more than five minutes ended the
+  command with the same `TimeoutError` the call's own deadline gives, and the words printed the configured 2820 s
+  (2026-11-27, about five minutes into a gate on a busy host); the server then cancelled the reservation, as designed.
+  Rule: a command that waits quietly turns the idle timer off (`timeout: false`) and leaves `AbortSignal.timeout(wait)` the
+  one limit, and the words give the time that really passed. Test: `cli-silent.test.ts` (it shortens the idle timer with
+  `BUN_CONFIG_HTTP_IDLE_TIMEOUT=1`, which Bun rounds to a cut at 8 s, and keeps a server silent for 13 s, past the 12 s
+  Bun's documentation allows; it also holds that a plain fetch is cut then, so the test cannot pass for a runtime that
+  stopped cutting). `helper/shepherdr` is not affected: a plain Perl socket with an `alarm`, no idle timer, and the same
+  test runs it through the same silence.
 - **A pre-flight reported "stopped before it ended" a fraction of a second after it started, and nothing said why.**
   `engine-merge-preflight.test.ts` ("one that runs too long is stopped…") failed that way in a full check, as its author
   had seen once before. `waitGate()` judges a run gone when its process is dead and no exit file is there 50 ms later,
